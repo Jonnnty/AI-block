@@ -277,7 +277,7 @@
           <label>路径位置 <span class="val" id="pathPinTVal">0%</span>
             <input type="range" id="pathPinT" min="0" max="100" step="0.1" value="0" />
           </label>
-          <p class="hint">暂停后：点击轨迹移动机位，或拖路径位置条；Shift+点击轨迹添加弯折点</p>
+          <p class="hint">暂停后拖路径位置条移动机位；点击轨迹添加弯折点</p>
         </div>
         <h2 style="margin-top:8px">默认参数</h2>
         <label>每段帧数 <span class="val" id="pathFramesVal">16</span>
@@ -1048,21 +1048,30 @@
       pathSlidePlaying = false;
       syncPathPinFromCamera();
       updatePathTransportUI();
-      updatePathSlideStatus('路径预览：已暂停 · 点击轨迹或拖位置条移动机位', true);
+      updatePathSlideStatus('路径预览：已暂停 · 拖路径位置条移动机位', true);
     }
 
     function playPathSlide() {
       if (cameraMarkers.length < 2 || !rigOpen) return;
-      if (isPathSlideBlocked()) return;
-      pathSlidePlaying = true;
-      pathSlidePhase = Math.asin(Math.max(-1, Math.min(1, 2 * pathPinT - 1)));
       markerGizmoMode = null;
       rigGizmoMode = null;
+      selectedCpSegIdx = -1;
+      selectedCpPointIdx = -1;
+      updateKeypointEditUI();
       el('gizmoMoveRig').classList.remove('active');
       el('gizmoRotateRig').classList.remove('active');
       transformControls?.detach();
+      if (transformControls?.dragging) {
+        status('请先松开 Gizmo 再播放');
+        return;
+      }
+      pathSlidePlaying = true;
+      pathSlidePhase = Math.asin(Math.max(-1, Math.min(1, 2 * pathPinT - 1)));
       updatePathTransportUI();
-      startPathSlidePreview();
+      if (!startPathSlidePreview()) {
+        pathSlidePlaying = false;
+        updatePathTransportUI();
+      }
     }
 
     function stopPathSlidePreview() {
@@ -1076,24 +1085,21 @@
     }
 
     function resumePathSlideIfPlaying() {
-      if (pathSlidePlaying && cameraMarkers.length >= 2 && !isPathSlideBlocked()) {
+      if (pathSlidePlaying && cameraMarkers.length >= 2) {
         startPathSlidePreview();
       }
     }
 
     function startPathSlidePreview() {
       stopPathSlidePreview();
-      if (!rigOpen || cameraMarkers.length < 2 || !renderCamRig) return;
-      if (!pathSlidePlaying) return;
+      if (!rigOpen || cameraMarkers.length < 2 || !renderCamRig || !pathSlidePlaying) return false;
 
       const span = pathEndpointDistance();
       if (span < 0.02) {
         updatePathSlideStatus(`路径预览：两机位太近（${(span * 1000).toFixed(0)}mm）`, true);
         status('两机位几乎重合，请先移动再添加');
-        return;
+        return false;
       }
-
-      if (isPathSlideBlocked()) return;
 
       pathSlideActive = true;
       pathSlideLastTs = 0;
@@ -1111,6 +1117,7 @@
         tickPathSlide(ts);
       };
       pathSlideRaf = requestAnimationFrame(loop);
+      return true;
     }
 
     function tickPathSlide(ts) {
@@ -1181,13 +1188,7 @@
       const segIdx = hit.object.userData.pathSegIdx;
       const t = approximateTOnSegment(segIdx, hit.point);
 
-      if (!pathSlidePlaying && !e.shiftKey) {
-        applyPathPinAtGlobalT(globalTFromSegmentHit(segIdx, t));
-        status(`机位 ${(pathPinT * 100).toFixed(0)}% · 可预览/保存单帧`);
-        return true;
-      }
-
-      pausePathSlide();
+      if (pathSlidePlaying) pausePathSlide();
       selectedMarkerIdx = -1;
       selected = -1;
       markerGizmoMode = null;
