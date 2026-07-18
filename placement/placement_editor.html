@@ -474,7 +474,7 @@
 
     function pathTubeRadius() { return frustumLineRefSize() * 3; }
     function pathSphereRadius() { return frustumLineRefSize() * 5; }
-    function pathCpRadius() { return frustumLineRefSize() * 7; }
+    function pathCpRadius() { return pathSphereRadius() * 0.75; }
 
     function rigEulerFromRig() {
       const e = new THREE.Euler().setFromQuaternion(renderCamRig.quaternion, RIG_EULER_ORDER);
@@ -1349,23 +1349,21 @@
           group.userData.cpSegIdx = si;
           group.userData.cpPointIdx = pi;
           const halo = new THREE.Mesh(
-            new THREE.SphereGeometry(r * 1.45, 12, 12),
+            new THREE.SphereGeometry(r * 1.18, 10, 10),
             new THREE.MeshBasicMaterial({
               color: 0x111111,
               depthTest: false,
               depthWrite: false,
             }),
           );
-          halo.renderOrder = 1002;
           const core = new THREE.Mesh(
-            new THREE.SphereGeometry(r, 12, 12),
+            new THREE.SphereGeometry(r, 10, 10),
             new THREE.MeshBasicMaterial({
               color: selected ? 0xffea00 : 0xff0066,
               depthTest: false,
               depthWrite: false,
             }),
           );
-          core.renderOrder = 1003;
           group.add(halo);
           group.add(core);
           pathRoot.add(group);
