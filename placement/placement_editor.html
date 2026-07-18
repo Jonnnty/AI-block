@@ -124,7 +124,7 @@
     }
     .curve-edit-bar .curve-dot {
       width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
-      background: #fff59d; box-shadow: 0 0 0 2px rgba(255, 235, 120, 0.35);
+      background: #ff0066; box-shadow: 0 0 0 2px #111, 0 0 6px rgba(255, 0, 102, 0.6);
     }
     .curve-edit-bar .curve-edit-label { font-size: 11px; color: #e8d878; font-weight: 600; }
     .curve-edit-bar button { padding: 5px 10px; font-size: 11px; }
@@ -474,7 +474,7 @@
 
     function pathTubeRadius() { return frustumLineRefSize() * 3; }
     function pathSphereRadius() { return frustumLineRefSize() * 5; }
-    function pathCpRadius() { return frustumLineRefSize() * 4; }
+    function pathCpRadius() { return frustumLineRefSize() * 7; }
 
     function rigEulerFromRig() {
       const e = new THREE.Euler().setFromQuaternion(renderCamRig.quaternion, RIG_EULER_ORDER);
@@ -1315,26 +1315,42 @@
       if (!pathRoot) return;
       for (const m of cpMeshes) {
         pathRoot.remove(m);
-        m.geometry?.dispose();
-        m.material?.dispose();
+        m.traverse((o) => {
+          if (o.geometry) o.geometry.dispose();
+          if (o.material) o.material?.dispose();
+        });
       }
       cpMeshes = [];
       cameraPathSegments.forEach((seg, si) => {
         (seg.points || []).forEach((pt, pi) => {
           const selected = si === selectedCpSegIdx && pi === selectedCpPointIdx;
-          const mesh = new THREE.Mesh(
-            new THREE.SphereGeometry(pathCpRadius(), 10, 10),
+          const r = pathCpRadius();
+          const group = new THREE.Group();
+          group.position.set(pt.x, pt.y, pt.z);
+          group.userData.cpSegIdx = si;
+          group.userData.cpPointIdx = pi;
+          const halo = new THREE.Mesh(
+            new THREE.SphereGeometry(r * 1.45, 12, 12),
             new THREE.MeshBasicMaterial({
-              color: selected ? 0xffeb3b : 0xfff59d,
+              color: 0x111111,
               depthTest: false,
               depthWrite: false,
             }),
           );
-          mesh.position.set(pt.x, pt.y, pt.z);
-          mesh.userData.cpSegIdx = si;
-          mesh.userData.cpPointIdx = pi;
-          pathRoot.add(mesh);
-          cpMeshes.push(mesh);
+          halo.renderOrder = 1002;
+          const core = new THREE.Mesh(
+            new THREE.SphereGeometry(r, 12, 12),
+            new THREE.MeshBasicMaterial({
+              color: selected ? 0xffea00 : 0xff0066,
+              depthTest: false,
+              depthWrite: false,
+            }),
+          );
+          core.renderOrder = 1003;
+          group.add(halo);
+          group.add(core);
+          pathRoot.add(group);
+          cpMeshes.push(group);
         });
       });
     }
@@ -2621,10 +2637,11 @@
         _pickRay.setFromCamera(_pickMouse, viewer.camera);
         pathRoot?.updateMatrixWorld(true);
 
-        const objHits = _pickRay.intersectObjects([...cpMeshes, ...markerMeshes], false);
+        const objHits = _pickRay.intersectObjects([...cpMeshes, ...markerMeshes], true);
         if (objHits.length) {
-          const obj = objHits[0].object;
-          if (obj.userData.cpPointIdx != null) {
+          let obj = objHits[0].object;
+          while (obj && obj.userData.cpPointIdx == null && obj.parent) obj = obj.parent;
+          if (obj?.userData?.cpPointIdx != null) {
             const si = obj.userData.cpSegIdx;
             const pi = obj.userData.cpPointIdx;
             if (si === selectedCpSegIdx && pi === selectedCpPointIdx) {
