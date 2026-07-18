@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.Python
+.env
+outputs/
+outputs_50pct/
+scene.ply
+*.log

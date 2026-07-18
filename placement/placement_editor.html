@@ -1,0 +1,2978 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>摆放器</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #111; color: #eee; height: 100vh; display: flex; overflow: hidden; }
+    #view { flex: 1; position: relative; min-width: 0; background: #f5f0eb; }
+    #view.view-bg-black { background: #111; }
+    #viewMain { position: absolute; inset: 0; }
+    #viewMain > canvas { width: 100% !important; height: 100% !important; display: block; }
+    #view.drag-over::after {
+      content: '松开以放置模型';
+      position: absolute; inset: 0; pointer-events: none; z-index: 5;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(45, 108, 223, 0.25); border: 2px dashed #6cf;
+      font-size: 20px; color: #fff;
+    }
+    #viewHelper { position: absolute; right: 12px; top: 12px; width: 128px; height: 128px; pointer-events: auto; z-index: 3; }
+    #panel {
+      width: 300px; background: #1a1a1a; border-left: 1px solid #333;
+      padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+    }
+    .panel-head {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+    }
+    .panel-head-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .panel-head-actions { display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
+    .panel-action-btn { width: auto; min-width: 56px; padding: 6px 10px; font-size: 11px; }
+    h1 { font-size: 16px; font-weight: 600; }
+    h2 { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+    label { font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+    input[type=range] { width: 100%; }
+    select { background: #252525; border: 1px solid #444; color: #eee; padding: 6px 8px; border-radius: 4px; font-size: 13px; }
+    button {
+      background: #2d6cdf; border: none; color: #fff; padding: 8px 12px;
+      border-radius: 6px; cursor: pointer; font-size: 13px; width: 100%;
+    }
+    button.secondary { background: #333; }
+    button.secondary.active { background: #2d6cdf; }
+    button.danger { background: #8b2e2e; }
+    button:hover { filter: brightness(1.1); }
+    .row { display: flex; gap: 8px; }
+    .row.gizmo-row { margin-bottom: 4px; }
+    .row button { flex: 1; }
+    .hint { font-size: 12px; color: #888; line-height: 1.5; }
+    .status { font-size: 12px; color: #6cf; min-height: 18px; word-break: break-all; }
+    .val { color: #aaa; font-size: 11px; }
+    #loadProgressWrap[hidden] { display: none !important; }
+    #loadProgressBar { height: 5px; background: #2a2a2a; border-radius: 3px; overflow: hidden; }
+    #loadProgressFill { height: 100%; width: 0%; background: linear-gradient(90deg, #2d6cdf, #6cf); transition: width .12s; }
+    #loadProgressText { font-size: 11px; color: #888; margin-top: 4px; }
+    .scene-list { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; }
+    .scene-row {
+      display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px;
+      background: #222; border: 1px solid #333; font-size: 12px; cursor: pointer;
+    }
+    .scene-row:hover { background: #2a2a2a; }
+    .scene-row.active { background: #1e2a40; border-color: #2d6cdf; }
+    .scene-row.base { opacity: .7; cursor: default; }
+    .scene-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .icon-btn {
+      width: 24px; height: 24px; padding: 0; border-radius: 4px; background: transparent;
+      border: 1px solid #444; color: #bbb; font-size: 12px; flex-shrink: 0;
+    }
+    .icon-btn:hover { background: #333; color: #fff; }
+    #pickFile { display: none; }
+    input[type=number] {
+      background: #252525; border: 1px solid #444; color: #eee;
+      padding: 5px 8px; border-radius: 4px; font-size: 12px; width: 100%;
+    }
+    .cam-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+    .cam-grid label { font-size: 11px; }
+    #rigPreviewFloat {
+      position: absolute; left: 12px; bottom: 12px; width: 336px; z-index: 4;
+      background: rgba(18, 18, 18, 0.94); border: 1px solid #444; border-radius: 8px;
+      overflow: hidden; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); pointer-events: none;
+    }
+    #rigPreviewFloat[hidden] { display: none !important; }
+    #rigPreviewFloat header {
+      padding: 6px 10px; font-size: 12px; color: #ccc; border-bottom: 1px solid #333;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    #rigPreviewCanvas, #rigPreviewVideo {
+      width: 100%; display: block; aspect-ratio: 16 / 9;
+      background: repeating-conic-gradient(#2a2a2a 0% 25%, #222 0% 50%) 50% / 16px 16px;
+    }
+    #rigPreviewVideo[hidden] { display: none !important; }
+    #rigPreviewCanvas[hidden] { display: none !important; }
+    .marker-list { display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
+    .marker-row {
+      display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 6px;
+      background: #222; border: 1px solid #333; font-size: 11px; cursor: pointer;
+    }
+    .marker-row:hover { background: #2a2a2a; }
+    .marker-row.active { border-color: #2d6cdf; background: #1e2a40; }
+    .marker-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .marker-dot.start { background: #6a6; }
+    .marker-dot.mid { background: #888; }
+    .marker-dot.end { background: #a66; }
+    .marker-dot.node { background: #7aa; }
+    .pose-seq-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px;
+    }
+    .pose-seq-header h2 { margin: 0; }
+    .pose-add-btn { flex-shrink: 0; padding: 6px 10px; font-size: 11px; white-space: nowrap; }
+    .curve-edit-bar {
+      display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px;
+      border-radius: 8px; background: rgba(255, 235, 120, 0.14); border: 1px solid rgba(255, 214, 80, 0.45);
+    }
+    .curve-edit-bar .curve-dot {
+      width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+      background: #fff59d; box-shadow: 0 0 0 2px rgba(255, 235, 120, 0.35);
+    }
+    .curve-edit-bar .curve-edit-label { font-size: 11px; color: #e8d878; font-weight: 600; }
+    .curve-edit-bar button { padding: 5px 10px; font-size: 11px; }
+    .curve-edit-bar .curve-edit-actions { display: flex; gap: 6px; margin-left: auto; }
+    .rig-pose-controls { display: flex; flex-direction: column; gap: 8px; transition: opacity 0.15s; }
+    .rig-pose-controls.dimmed { opacity: 0.38; pointer-events: none; }
+    .drag-handle { cursor: grab; color: #666; font-size: 14px; line-height: 1; user-select: none; flex-shrink: 0; }
+    .marker-row.drag-over { border-color: #6cf; }
+    .marker-row.dragging { opacity: 0.55; }
+    .panel-tabs { display: flex; gap: 6px; margin-bottom: 4px; }
+    .panel-tab {
+      flex: 1; background: #252525; border: 1px solid #444; color: #bbb;
+      padding: 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    }
+    .panel-tab.active { background: #2d6cdf; border-color: #2d6cdf; color: #fff; }
+    #modelsPanel, #cameraPanel { display: flex; flex-direction: column; gap: 14px; }
+    #cameraPanel[hidden], #modelsPanel[hidden] { display: none !important; }
+    .path-group-row { cursor: pointer; }
+    .path-group-row.active { border-color: #2d6cdf; background: #1e2a40; }
+    .path-name { cursor: text; border-bottom: 1px dashed transparent; }
+    .path-name:hover { border-bottom-color: #666; }
+    .path-rename-input {
+      flex: 1; min-width: 0; background: #111; border: 1px solid #2d6cdf; color: #eee;
+      padding: 2px 6px; border-radius: 4px; font-size: 11px;
+    }
+    .panel-config-note { font-size: 11px; color: #666; line-height: 1.4; margin-top: -6px; }
+    button.secondary.active { background: #2d6cdf; }
+    button.secondary:not(.active) { background: #333; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+      "@mkkellogg/gaussian-splats-3d": "https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.6/build/gaussian-splats-3d.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="view">
+    <div id="viewMain"></div>
+    <div id="viewHelper"></div>
+    <div id="rigPreviewFloat" hidden>
+      <header><span id="rigPreviewTitle">高斯渲染预览</span><span class="val" id="rigPreviewStatus">未渲染</span></header>
+      <canvas id="rigPreviewCanvas"></canvas>
+      <video id="rigPreviewVideo" hidden playsinline loop muted></video>
+    </div>
+  </div>
+  <div id="panel">
+    <div class="panel-head">
+      <div class="panel-head-left">
+        <div class="status" id="status">加载底板…</div>
+      </div>
+      <div class="panel-head-actions">
+        <button type="button" id="saveBtn" class="panel-action-btn" title="保存配置">保存</button>
+        <button type="button" id="importJsonBtn" class="panel-action-btn secondary" title="从 JSON 文件恢复">导入</button>
+        <button type="button" id="exportJsonBtn" class="panel-action-btn secondary" title="下载完整 JSON 配置">导出</button>
+      </div>
+    </div>
+    <div id="loadProgressWrap" hidden>
+      <div id="loadProgressBar"><div id="loadProgressFill"></div></div>
+      <div id="loadProgressText"></div>
+    </div>
+
+    <div class="panel-tabs">
+      <button type="button" id="tabModelsBtn" class="panel-tab active">模型</button>
+      <button type="button" id="tabCameraBtn" class="panel-tab">相机</button>
+    </div>
+
+    <div id="modelsPanel">
+      <section>
+        <h2>底板</h2>
+        <p class="hint">map1.ply（固定）</p>
+      </section>
+      <section>
+        <h2>导入模型</h2>
+        <input type="file" id="pickFile" accept=".ply" multiple />
+        <button type="button" id="importBtn" class="secondary">选择 PLY 文件</button>
+        <p class="hint">从 outputs_50pct 拖入或选择，可一次多个</p>
+      </section>
+      <section>
+        <h2>已放置</h2>
+        <div id="sceneList" class="scene-list"></div>
+      </section>
+      <section>
+        <h2>默认参数</h2>
+        <label>比例 <span class="val" id="scaleVal">0.12</span>
+          <input type="range" id="defaultScale" min="0.01" max="0.5" step="0.005" value="0.12" />
+        </label>
+        <label>落地高度 Z <span class="val" id="zVal">0.0006</span>
+          <input type="range" id="defaultZ" min="-0.002" max="0.003" step="0.0001" value="0.0006" />
+        </label>
+        <p class="hint">建筑底部对齐底盘上层平台</p>
+      </section>
+      <section>
+        <h2>选中项</h2>
+        <p class="hint" id="selHint">从列表选中模型</p>
+        <div class="row gizmo-row">
+          <button type="button" id="gizmoMove" class="secondary">移动 Q</button>
+          <button type="button" id="gizmoRotate" class="secondary">旋转 W</button>
+        </div>
+        <label>位置 X <span class="val" id="selXVal">—</span><input type="range" id="selX" min="-1" max="1" step="0.005" disabled /></label>
+        <label>位置 Y <span class="val" id="selYVal">—</span><input type="range" id="selY" min="-0.45" max="0.45" step="0.005" disabled /></label>
+        <label>高度 Z <span class="val" id="selZVal">—</span><input type="range" id="selZ" min="-0.002" max="0.003" step="0.0001" disabled /></label>
+        <label>比例 <span class="val" id="selScaleVal">—</span><input type="range" id="selScale" min="0.01" max="0.5" step="0.005" disabled /></label>
+        <label>旋转° <span class="val" id="selYawVal">—</span><input type="range" id="selYaw" min="-180" max="180" step="1" disabled /></label>
+        <p class="hint">默认无 Gizmo；点击按钮启用，再点一次关闭，防误触</p>
+      </section>
+      <section>
+        <h2>视图</h2>
+        <label>背景色
+          <select id="viewBgSelect">
+            <option value="cream" selected>米白色</option>
+            <option value="black">黑色</option>
+          </select>
+        </label>
+      </section>
+      <button type="button" id="mergeBtn" class="secondary">合并完整 scene.ply</button>
+      <p class="hint" id="mergeHint">合并时从 outputs/ 读取完整模型（需本地 python serve_editor.py）</p>
+    </div>
+
+    <div id="cameraPanel" hidden>
+      <section>
+        <h2>渲染摄像机</h2>
+        <button type="button" id="toggleRigBtn" class="secondary">打开渲染摄像机</button>
+      </section>
+      <section id="rigPanel" hidden>
+        <h2>轨迹组</h2>
+        <div id="pathGroupList" class="marker-list"></div>
+        <div class="row">
+          <button type="button" id="addPathGroupBtn" class="secondary">新建轨迹</button>
+          <button type="button" id="deletePathGroupBtn" class="secondary danger">删除轨迹</button>
+        </div>
+        <div class="pose-seq-header">
+          <h2>机位序列</h2>
+          <button type="button" id="addMarkerBtn" class="secondary pose-add-btn">＋ 当前机位</button>
+        </div>
+        <div id="markerList" class="marker-list"></div>
+        <div id="keypointEditRow" class="curve-edit-bar" hidden>
+          <span class="curve-dot"></span>
+          <span class="curve-edit-label">轨迹弯折</span>
+          <div class="curve-edit-actions">
+            <button type="button" id="confirmKeypointBtn">完成</button>
+            <button type="button" id="deleteKeypointBtn" class="secondary danger">删除</button>
+          </div>
+        </div>
+        <p id="pathSlideStatus" class="hint" style="color:#2a8f6a;font-weight:600" hidden>路径预览：待机</p>
+        <h2 style="margin-top:8px">默认参数</h2>
+        <label>每段帧数 <span class="val" id="pathFramesVal">16</span>
+          <input type="range" id="pathFrames" min="8" max="48" step="1" value="16" />
+        </label>
+        <label>播放 FPS <span class="val" id="pathFpsVal">12</span>
+          <input type="range" id="pathFps" min="6" max="30" step="1" value="12" />
+        </label>
+        <p class="hint" id="rigCameraHint">打开后显示四棱锥；可创建多组轨迹，顺序即播放顺序</p>
+        <h2 style="margin-top:4px">机位</h2>
+        <div id="rigPoseControls" class="rig-pose-controls">
+        <div class="row gizmo-row">
+          <button type="button" id="gizmoMoveRig" class="secondary">移动 Q</button>
+          <button type="button" id="gizmoRotateRig" class="secondary">旋转 W</button>
+        </div>
+        <label>机位 X <span class="val" id="rigXVal">—</span><input type="range" id="rigX" min="-1" max="1" step="0.005" disabled /></label>
+        <label>机位 Y <span class="val" id="rigYVal">—</span><input type="range" id="rigY" min="-0.45" max="0.45" step="0.005" disabled /></label>
+        <label>机位 Z <span class="val" id="rigZVal">—</span><input type="range" id="rigZ" min="-0.05" max="0.5" step="0.005" disabled /></label>
+        <label>偏航° <span class="hint">(绕Z)</span> <span class="val" id="rigYawVal">0</span>
+          <input type="range" id="rigYaw" min="-180" max="180" step="1" value="0" disabled />
+        </label>
+        <label>俯仰° <span class="hint">(绕X)</span> <span class="val" id="rigPitchVal">0</span>
+          <input type="range" id="rigPitch" min="-89" max="89" step="1" value="0" disabled />
+        </label>
+        <label>翻滚° <span class="hint">(绕Y)</span> <span class="val" id="rigRollVal">0</span>
+          <input type="range" id="rigRoll" min="-180" max="180" step="1" value="0" disabled />
+        </label>
+        </div>
+        <label>视野 FOV° <span class="val" id="rigFovVal">50</span>
+          <input type="range" id="rigFov" min="20" max="90" step="1" value="50" />
+        </label>
+        <label>近平面 <span class="val" id="rigNearVal">0.01</span>
+          <input type="range" id="rigNear" min="0.001" max="0.5" step="0.001" value="0.01" />
+        </label>
+        <label>远平面 <span class="val" id="rigFarVal">8</span>
+          <input type="range" id="rigFar" min="0.5" max="50" step="0.1" value="8" />
+        </label>
+        <div class="cam-grid">
+          <label>渲染宽 <input type="number" id="renderWidth" min="320" max="4096" step="1" value="1920" /></label>
+          <label>渲染高 <input type="number" id="renderHeight" min="240" max="4096" step="1" value="1080" /></label>
+        </div>
+        <label><input type="checkbox" id="showFrustum" checked /> 显示四棱锥</label>
+        <button type="button" id="renderPreviewBtn">渲染预览</button>
+        <button type="button" id="renderExportBtn" class="secondary">导出 PNG</button>
+      </section>
+    </div>
+    <input type="file" id="importConfigFile" accept=".json,application/json" hidden />
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { TransformControls } from 'three/addons/controls/TransformControls.js';
+    import { ViewHelper } from 'three/addons/helpers/ViewHelper.js';
+    import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
+
+    const BASE_NAME = 'map1.ply';
+    const CONFIG_STORAGE_KEY = 'placement_editor_v2_config';
+
+    function resolveAppBase() {
+      const path = location.pathname;
+      if (path.endsWith('/')) return path;
+      const slash = path.lastIndexOf('/');
+      return slash > 0 ? path.slice(0, slash + 1) : '/';
+    }
+
+    const APP_BASE = resolveAppBase();
+    const BASE = `${APP_BASE}${BASE_NAME}`;
+    const apiUrl = (p) => `${APP_BASE}${p.replace(/^\//, '')}`;
+
+    /** @type {'server' | 'static'} */
+    let hostMode = 'static';
+    const PLY_ALPHA = 1;
+    const VIEW_OFFSET = { x: 0.14, y: 0, z: 0 };
+    const BASE_SURFACE_Z_FALLBACK = 0.0006;
+    const VISUAL_DECIMATION = 0.3;
+    const VISUAL_DECIMATION_MEDIUM = 0.2;
+    const VISUAL_DECIMATION_LARGE = 0.15;
+    const MEDIUM_PLY_BYTES = 50 * 1024 * 1024;
+    const LARGE_PLY_BYTES = 65 * 1024 * 1024;
+    const VIEW_BACKGROUNDS = {
+      cream: { css: '#f5f0eb', hex: 0xf5f0eb },
+      black: { css: '#111111', hex: 0x111111 },
+    };
+
+    const viewerOpts = {
+      cameraUp: [0, 0, 1],
+      initialCameraPosition: [0, -1.6, 1.1],
+      initialCameraLookAt: [VIEW_OFFSET.x, VIEW_OFFSET.y, VIEW_OFFSET.z],
+      useBuiltInControls: true,
+      sharedMemoryForWorkers: false,
+      gpuAcceleratedSort: false,
+      dynamicScene: true,
+      enableOptionalEffects: false,
+      optimizeSplatData: false,
+      sceneRevealMode: GaussianSplats3D.SceneRevealMode?.Instant ?? 2,
+      renderMode: GaussianSplats3D.RenderMode?.Always ?? 0,
+    };
+
+    const el = (id) => document.getElementById(id);
+    const status = (msg) => { el('status').textContent = msg; };
+
+    /** @type {Array<{name:string,x:number,y:number,z:number,scale:number,yaw_deg:number,sceneIdx:number|null,center:number[]}>} */
+    const placements = [];
+    /** @type {Map<string, ArrayBuffer>} */
+    const fileCache = new Map();
+
+    let viewer = null;
+    let sharedRenderer = null;
+    let viewHelper = null;
+    let overlayRenderer = null;
+    let overlayRaf = 0;
+    let transformControls = null;
+    let pivot = null;
+    /** @type {null | 'translate' | 'rotate'} */
+    let placementGizmoMode = null;
+    /** @type {null | 'translate' | 'rotate'} */
+    let rigGizmoMode = null;
+    let selected = -1;
+    let rigOpen = false;
+    let baseReady = false;
+    let syncingFromGizmo = false;
+    let defaultScale = 0.12;
+    let defaultZ = BASE_SURFACE_Z_FALLBACK;
+    let baseSurfaceZ = BASE_SURFACE_Z_FALLBACK;
+    let viewBgMode = localStorage.getItem('viewBackground') || 'cream';
+
+    let renderCamRig = null;
+    let renderCamera = null;
+    let cameraHelper = null;
+    let pathSlideBeacon = null;
+    let rigOverlayScene = null;
+    let rigPreviewRt = null;
+    const RIG_PREVIEW_W = 336;
+    const RIG_PREVIEW_H = 189;
+    const _rigPreviewBuf = new Uint8Array(RIG_PREVIEW_W * RIG_PREVIEW_H * 4);
+    const _rigPreviewImg = new ImageData(RIG_PREVIEW_W, RIG_PREVIEW_H);
+
+    /** @type {Array<{x:number,y:number,z:number,yaw:number,pitch:number,roll:number}>} */
+    let cameraMarkers = [];
+    /** @type {Array<{points:Array<{x:number,y:number,z:number,t:number}>}>} */
+    let cameraPathSegments = [];
+    /** @type {Array<{id:string,name:string,markers:typeof cameraMarkers,segments:typeof cameraPathSegments,framesPerSeg:number,fps:number}>} */
+    let cameraPaths = [];
+    let activePathId = null;
+    let nextPathId = 1;
+    let markerDragFromIdx = -1;
+    let selectedMarkerIdx = -1;
+    let selectedCpSegIdx = -1;
+    let selectedCpPointIdx = -1;
+    /** @type {null | 'translate'} */
+    let markerGizmoMode = null;
+    let pathRoot = null;
+    /** @type {THREE.Mesh[]} */
+    let markerMeshes = [];
+    /** @type {THREE.Mesh[]} */
+    let cpMeshes = [];
+    let pathLine = null;
+    let pathTubeGroup = null;
+    let pathPickMeshes = [];
+    let pathSlideActive = false;
+    let pathSlideRaf = 0;
+    let pathSlidePhase = 0;
+    let pathSlideLastTs = 0;
+    let pathSlideStatusTick = 0;
+    const PATH_SLIDE_SPEED = 0.85;
+    let previewFrames = [];
+    let previewPlaybackRaf = 0;
+    let pathFramesPerSeg = 16;
+    let pathFps = 12;
+
+    const _tmpEuler = new THREE.Euler();
+    const _tmpQuatA = new THREE.Quaternion();
+    const _tmpQuatB = new THREE.Quaternion();
+    const _tmpQuatOut = new THREE.Quaternion();
+    const _tmpVecA = new THREE.Vector3();
+    const _tmpVecB = new THREE.Vector3();
+    const _tmpVecCp = new THREE.Vector3();
+    const _tmpVecPos = new THREE.Vector3();
+    const _tmpVec = new THREE.Vector3();
+    const _tmpQuat = new THREE.Quaternion();
+
+    const RIG_EULER_ORDER = 'ZXY';
+
+    /** 四棱锥线宽参考（世界坐标），轨迹=3倍，球=5倍 */
+    function frustumLineRefSize() {
+      if (!renderCamera?.isPerspectiveCamera) return 0.003;
+      const vFov = THREE.MathUtils.degToRad(renderCamera.fov);
+      const halfH = renderCamera.near * Math.tan(vFov * 0.5);
+      return Math.max(0.0015, halfH * 0.64);
+    }
+
+    function pathTubeRadius() { return frustumLineRefSize() * 3; }
+    function pathSphereRadius() { return frustumLineRefSize() * 5; }
+    function pathCpRadius() { return frustumLineRefSize() * 4; }
+
+    function rigEulerFromRig() {
+      const e = new THREE.Euler().setFromQuaternion(renderCamRig.quaternion, RIG_EULER_ORDER);
+      return {
+        yaw: THREE.MathUtils.radToDeg(e.z),
+        pitch: THREE.MathUtils.radToDeg(e.x),
+        roll: THREE.MathUtils.radToDeg(e.y),
+      };
+    }
+
+    function applyRigEuler(yawDeg, pitchDeg, rollDeg) {
+      const e = new THREE.Euler(
+        pitchDeg * Math.PI / 180,
+        rollDeg * Math.PI / 180,
+        yawDeg * Math.PI / 180,
+        RIG_EULER_ORDER,
+      );
+      renderCamRig.quaternion.setFromEuler(e);
+    }
+
+    function markerQuatInto(m, outQuat) {
+      _tmpEuler.set(m.pitch * Math.PI / 180, m.roll * Math.PI / 180, m.yaw * Math.PI / 180, RIG_EULER_ORDER);
+      return outQuat.setFromEuler(_tmpEuler);
+    }
+
+    function markerFromRig() {
+      const rot = rigEulerFromRig();
+      return {
+        x: renderCamRig.position.x,
+        y: renderCamRig.position.y,
+        z: renderCamRig.position.z,
+        yaw: rot.yaw,
+        pitch: rot.pitch,
+        roll: rot.roll,
+      };
+    }
+
+    function applyMarkerToRig(m) {
+      renderCamRig.position.set(m.x, m.y, m.z);
+      applyRigEuler(m.yaw, m.pitch, m.roll);
+      syncCameraHelper();
+      updateRigSliders();
+    }
+
+    function createEmptyCameraPath(name) {
+      const path = {
+        id: `path-${nextPathId++}`,
+        name: name || `轨迹 ${cameraPaths.length + 1}`,
+        markers: [],
+        segments: [],
+        framesPerSeg: 16,
+        fps: 12,
+      };
+      return path;
+    }
+
+    function clearPathVisuals() {
+      if (pathRoot) {
+        pathRoot.parent?.remove(pathRoot);
+        pathRoot.traverse((o) => {
+          if (o.geometry) o.geometry.dispose();
+          if (o.material) o.material.dispose?.();
+        });
+        pathRoot = null;
+      }
+      markerMeshes = [];
+      cpMeshes = [];
+      pathTubeGroup = null;
+      pathLine = null;
+      pathPickMeshes = [];
+      stopPathSlidePreview();
+    }
+
+    function ensureActiveCameraPathForEdit() {
+      if (cameraPaths.length && activePathId) return true;
+      const path = createEmptyCameraPath();
+      cameraPaths.push(path);
+      activePathId = path.id;
+      loadActivePathToState();
+      renderPathGroupList();
+      return true;
+    }
+
+    function getActiveCameraPath() {
+      return cameraPaths.find((p) => p.id === activePathId) || null;
+    }
+
+    function syncActivePathFromState() {
+      const path = getActiveCameraPath();
+      if (!path) return;
+      path.markers = cameraMarkers.map((m) => ({ ...m }));
+      path.segments = cameraPathSegments.map((s) => ({
+        points: (s.points || []).map((pt) => ({ x: pt.x, y: pt.y, z: pt.z, t: pt.t })),
+      }));
+      path.framesPerSeg = pathFramesPerSeg;
+      path.fps = pathFps;
+    }
+
+    function loadActivePathToState() {
+      const path = getActiveCameraPath();
+      if (!path) {
+        cameraMarkers = [];
+        cameraPathSegments = [];
+        pathFramesPerSeg = 16;
+        pathFps = 12;
+      } else {
+        cameraMarkers = path.markers.map((m) => ({ ...m }));
+        cameraPathSegments = path.segments.map((s) => ({
+          points: (s.points || []).map((pt) => ({ x: pt.x, y: pt.y, z: pt.z, t: pt.t })),
+        }));
+        pathFramesPerSeg = path.framesPerSeg ?? 16;
+        pathFps = path.fps ?? 12;
+      }
+      el('pathFrames').value = pathFramesPerSeg;
+      el('pathFramesVal').textContent = pathFramesPerSeg;
+      el('pathFps').value = pathFps;
+      el('pathFpsVal').textContent = pathFps;
+      selectedMarkerIdx = -1;
+      selectedCpSegIdx = -1;
+      selectedCpPointIdx = -1;
+    }
+
+    function selectCameraPath(id) {
+      if (id === activePathId) return;
+      syncActivePathFromState();
+      activePathId = id;
+      loadActivePathToState();
+      setupPathVisuals();
+      renderMarkerList();
+      renderPathGroupList();
+      attachGizmo();
+      updateKeypointEditUI();
+      if (rigOpen && cameraMarkers.length >= 2) startPathSlidePreview();
+      else stopPathSlidePreview();
+      el('rigPreviewStatus').textContent = '需重新渲染';
+      viewer?.forceRenderNextFrame();
+    }
+
+    function renderPathGroupList() {
+      const list = el('pathGroupList');
+      if (!list) return;
+      list.innerHTML = '';
+      if (!cameraPaths.length) return;
+      cameraPaths.forEach((path) => {
+        const row = document.createElement('div');
+        row.className = 'marker-row path-group-row' + (path.id === activePathId ? ' active' : '');
+        const nodeCount = path.markers?.length ?? 0;
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'scene-name path-name';
+        nameSpan.textContent = path.name;
+        nameSpan.onclick = (e) => {
+          e.stopPropagation();
+          startPathRename(path.id, nameSpan);
+        };
+        const countSpan = document.createElement('span');
+        countSpan.className = 'hint';
+        countSpan.style.marginLeft = 'auto';
+        countSpan.textContent = `${nodeCount} 机位`;
+        row.appendChild(nameSpan);
+        row.appendChild(countSpan);
+        row.onclick = () => selectCameraPath(path.id);
+        list.appendChild(row);
+      });
+      const delBtn = el('deletePathGroupBtn');
+      if (delBtn) delBtn.disabled = !cameraPaths.length;
+    }
+
+    function startPathRename(pathId, anchorEl) {
+      const path = cameraPaths.find((p) => p.id === pathId);
+      if (!path || !anchorEl?.replaceWith) return;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'path-rename-input';
+      input.value = path.name;
+      input.onclick = (e) => e.stopPropagation();
+      const commit = () => {
+        const v = input.value.trim();
+        if (v) path.name = v;
+        renderPathGroupList();
+      };
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') renderPathGroupList();
+      };
+      input.onblur = commit;
+      anchorEl.replaceWith(input);
+      input.focus();
+      input.select();
+    }
+
+    function addCameraPathGroup() {
+      syncActivePathFromState();
+      const path = createEmptyCameraPath();
+      cameraPaths.push(path);
+      activePathId = path.id;
+      loadActivePathToState();
+      setupPathVisuals();
+      renderMarkerList();
+      renderPathGroupList();
+      stopPathSlidePreview();
+      el('rigPreviewStatus').textContent = '需重新渲染';
+      status(`已创建 ${path.name}`);
+    }
+
+    function deleteCameraPathGroup() {
+      syncActivePathFromState();
+      const idx = cameraPaths.findIndex((p) => p.id === activePathId);
+      if (idx < 0) return;
+      cameraPaths.splice(idx, 1);
+      if (cameraPaths.length) {
+        activePathId = cameraPaths[Math.max(0, idx - 1)].id;
+        loadActivePathToState();
+        setupPathVisuals();
+      } else {
+        activePathId = null;
+        cameraMarkers = [];
+        cameraPathSegments = [];
+        selectedMarkerIdx = -1;
+        selectedCpSegIdx = -1;
+        selectedCpPointIdx = -1;
+        clearPathVisuals();
+      }
+      renderMarkerList();
+      renderPathGroupList();
+      attachGizmo();
+      updateKeypointEditUI();
+      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      else stopPathSlidePreview();
+      el('rigPreviewStatus').textContent = '需重新渲染';
+      status(cameraPaths.length ? '已删除轨迹' : '已清空全部轨迹');
+    }
+
+    function switchPanelTab(tab) {
+      const showModels = tab === 'models';
+      el('modelsPanel').hidden = !showModels;
+      el('cameraPanel').hidden = showModels;
+      el('tabModelsBtn').classList.toggle('active', showModels);
+      el('tabCameraBtn').classList.toggle('active', !showModels);
+    }
+
+    function getRenderSettings() {
+      return {
+        fov: parseFloat(el('rigFov').value),
+        near: parseFloat(el('rigNear').value),
+        far: parseFloat(el('rigFar').value),
+        width: parseInt(el('renderWidth').value, 10),
+        height: parseInt(el('renderHeight').value, 10),
+        showFrustum: el('showFrustum').checked,
+      };
+    }
+
+    function applyRenderSettings(rs) {
+      if (!rs) return;
+      if (rs.fov != null) { el('rigFov').value = rs.fov; el('rigFovVal').textContent = rs.fov; }
+      if (rs.near != null) { el('rigNear').value = rs.near; el('rigNearVal').textContent = rs.near; }
+      if (rs.far != null) { el('rigFar').value = rs.far; el('rigFarVal').textContent = rs.far; }
+      if (rs.width != null) el('renderWidth').value = rs.width;
+      if (rs.height != null) el('renderHeight').value = rs.height;
+      if (rs.showFrustum != null) el('showFrustum').checked = rs.showFrustum;
+      syncRenderCameraParams();
+    }
+
+    async function detectHostMode() {
+      if (location.protocol === 'file:') return 'static';
+      try {
+        const res = await fetch(apiUrl('api/health'), { cache: 'no-store' });
+        if (res.ok) return 'server';
+      } catch (_) {}
+      return 'static';
+    }
+
+    function updateHostModeUI() {
+      const mergeBtn = el('mergeBtn');
+      const mergeHint = el('mergeHint');
+      const saveBtn = el('saveBtn');
+      if (hostMode === 'server') {
+        if (mergeBtn) mergeBtn.disabled = false;
+        if (mergeHint) mergeHint.textContent = '合并时从 outputs/ 读取完整模型（非 50% 轻量版）';
+        if (saveBtn) saveBtn.title = '保存到 placements.json（模型+相机）';
+      } else {
+        if (mergeBtn) mergeBtn.disabled = true;
+        if (mergeHint) mergeHint.textContent = '在线版不可用 · 本地运行 python serve_editor.py 后可合并';
+        if (saveBtn) saveBtn.title = '保存到浏览器（换机请用导出 JSON）';
+      }
+    }
+
+    async function loadSavedConfig() {
+      if (hostMode === 'server') {
+        const saved = await fetch(apiUrl('api/placements')).then((r) => r.json()).catch(() => []);
+        return parseSavedConfig(saved);
+      }
+      const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
+      if (!raw) return parseSavedConfig([]);
+      try {
+        return parseSavedConfig(JSON.parse(raw));
+      } catch (_) {
+        return parseSavedConfig([]);
+      }
+    }
+
+    async function importConfigFromFile(file) {
+      const text = await file.text();
+      const cfg = parseSavedConfig(JSON.parse(text));
+      applyConfigMeta(cfg);
+      for (let i = placements.length - 1; i >= 0; i--) removePlacement(i);
+      if (cfg.placements.length) await restorePlacements(cfg.placements);
+      restoreCameraPaths(cfg.cameraPaths, cfg.activePathId, cfg.renderSettings);
+      if (hostMode === 'static') {
+        localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(configToJson()));
+      }
+      status(`已导入 · ${placements.length} 模型 · ${cameraPaths.length} 轨迹（建筑 PLY 需同名文件在缓存中）`);
+    }
+
+    function parseSavedConfig(saved) {
+      if (Array.isArray(saved)) {
+        return {
+          version: 1,
+          placements: saved,
+          cameraPaths: null,
+          activePathId: null,
+          renderSettings: null,
+          base: null,
+          defaults: null,
+          view: null,
+        };
+      }
+      if (saved && typeof saved === 'object' && saved.version >= 2) {
+        return {
+          version: saved.version,
+          placements: saved.placements || [],
+          cameraPaths: saved.cameraPaths || [],
+          activePathId: saved.activePathId || null,
+          renderSettings: saved.renderSettings || null,
+          base: saved.base || null,
+          defaults: saved.defaults || null,
+          view: saved.view || null,
+        };
+      }
+      return {
+        version: 0,
+        placements: [],
+        cameraPaths: null,
+        activePathId: null,
+        renderSettings: null,
+        base: null,
+        defaults: null,
+        view: null,
+      };
+    }
+
+    function applyConfigMeta(cfg) {
+      if (!cfg) return;
+      if (cfg.defaults) {
+        if (cfg.defaults.scale != null) {
+          defaultScale = cfg.defaults.scale;
+          el('defaultScale').value = defaultScale;
+          el('scaleVal').textContent = defaultScale.toFixed(2);
+        }
+        if (cfg.defaults.z != null) {
+          defaultZ = cfg.defaults.z;
+          el('defaultZ').value = defaultZ;
+          el('zVal').textContent = defaultZ.toFixed(4);
+        }
+      }
+      if (cfg.view?.background) applyViewBackground(cfg.view.background);
+    }
+
+    function restoreCameraPaths(paths, activeId, renderSettings) {
+      if (paths?.length) {
+        cameraPaths = paths.map((p) => ({
+          id: p.id || `path-${nextPathId++}`,
+          name: p.name || '轨迹',
+          markers: (p.markers || []).map((m) => ({ ...m })),
+          segments: (p.segments || []).map((s) => ({
+            points: (s.points || []).map((pt) => ({ x: pt.x, y: pt.y, z: pt.z, t: pt.t })),
+          })),
+          framesPerSeg: p.framesPerSeg ?? 16,
+          fps: p.fps ?? 12,
+        }));
+        for (const p of cameraPaths) {
+          const m = /^path-(\d+)$/.exec(p.id);
+          if (m) nextPathId = Math.max(nextPathId, parseInt(m[1], 10) + 1);
+        }
+        activePathId = activeId && cameraPaths.some((p) => p.id === activeId)
+          ? activeId
+          : cameraPaths[0].id;
+      } else {
+        cameraPaths = [];
+        activePathId = null;
+      }
+      applyRenderSettings(renderSettings);
+      loadActivePathToState();
+      renderPathGroupList();
+      renderMarkerList();
+    }
+
+    function reorderMarkers(fromIdx, toIdx) {
+      if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) return;
+      const [m] = cameraMarkers.splice(fromIdx, 1);
+      cameraMarkers.splice(toIdx, 0, m);
+      cameraPathSegments = [];
+      rebuildPathSegments();
+      if (selectedMarkerIdx === fromIdx) selectedMarkerIdx = toIdx;
+      else if (fromIdx < selectedMarkerIdx && toIdx >= selectedMarkerIdx) selectedMarkerIdx--;
+      else if (fromIdx > selectedMarkerIdx && toIdx <= selectedMarkerIdx) selectedMarkerIdx++;
+      selectedCpSegIdx = -1;
+      selectedCpPointIdx = -1;
+      setupPathVisuals();
+      renderMarkerList();
+      syncActivePathFromState();
+      renderPathGroupList();
+      el('rigPreviewStatus').textContent = '需重新渲染';
+      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      else stopPathSlidePreview();
+      status('机位顺序已更新');
+    }
+
+    function pathEndpointDistance() {
+      if (cameraMarkers.length < 2) return 0;
+      const a = cameraMarkers[0];
+      const b = cameraMarkers[cameraMarkers.length - 1];
+      return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+    }
+
+    function applyAlwaysOnTop(root) {
+      if (!root) return;
+      root.traverse((o) => {
+        o.renderOrder = 1000;
+        if (!o.material) return;
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) {
+          m.depthTest = false;
+          m.depthWrite = false;
+          if (m.opacity !== undefined && m.opacity < 1) m.transparent = true;
+        }
+      });
+    }
+
+    function styleCameraHelperOnTop() {
+      if (!cameraHelper) return;
+      applyAlwaysOnTop(cameraHelper);
+      if (!Array.isArray(cameraHelper.material) && cameraHelper.material) {
+        cameraHelper.material.color.setHex(0xff6600);
+      }
+    }
+
+    function initRigOverlayScene() {
+      if (!viewer || rigOverlayScene) return;
+      rigOverlayScene = new THREE.Scene();
+      rigOverlayScene.name = 'RigOverlayScene';
+      if (viewer._rigOverlayPatched) return;
+      viewer._rigOverlayPatched = true;
+      const origRender = viewer.render.bind(viewer);
+      viewer.render = function () {
+        origRender();
+        renderRigOverlayPass();
+      };
+    }
+
+    function renderRigOverlayPass() {
+      if (!viewer?.initialized || !rigOverlayScene || !viewer.camera) return;
+      if (viewer.isDisposingOrDisposed?.()) return;
+      syncCameraHelper();
+      const renderer = viewer.renderer;
+      if (!renderer) return;
+      const savedAutoClear = renderer.autoClear;
+      renderer.autoClear = false;
+      renderer.render(rigOverlayScene, viewer.camera);
+      renderer.autoClear = savedAutoClear;
+    }
+
+    function setPathSlideBeaconVisible(on) {
+      if (pathSlideBeacon) pathSlideBeacon.visible = !!on;
+    }
+
+    function updatePathSlideStatus(text, show = true) {
+      const node = el('pathSlideStatus');
+      if (!node) return;
+      node.hidden = !show;
+      if (show) node.textContent = text;
+    }
+
+    function isPathSlideBlocked() {
+      if (transformControls?.dragging) return true;
+      if (markerGizmoMode) return true;
+      if (rigGizmoMode) return true;
+      return false;
+    }
+
+    function stopPathSlidePreview() {
+      pathSlideActive = false;
+      pathSlideLastTs = 0;
+      pathSlideStatusTick = 0;
+      if (pathSlideRaf) cancelAnimationFrame(pathSlideRaf);
+      pathSlideRaf = 0;
+      setPathSlideBeaconVisible(false);
+      updatePathSlideStatus('', false);
+    }
+
+    function startPathSlidePreview() {
+      stopPathSlidePreview();
+      if (!rigOpen || cameraMarkers.length < 2 || !renderCamRig) return;
+
+      const span = pathEndpointDistance();
+      if (span < 0.02) {
+        updatePathSlideStatus(`路径预览：两机位太近（${(span * 1000).toFixed(0)}mm）`, true);
+        status('两机位几乎重合，请先移动再添加');
+        return;
+      }
+
+      if (isPathSlideBlocked()) return;
+
+      pathSlideActive = true;
+      pathSlideLastTs = 0;
+      transformControls?.detach();
+      if (cameraHelper && el('showFrustum').checked) {
+        cameraHelper.visible = true;
+        styleCameraHelperOnTop();
+      }
+      setPathSlideBeaconVisible(true);
+      updatePathSlideStatus('路径预览：四棱锥沿路径滑动中…', true);
+
+      const loop = (ts) => {
+        if (!pathSlideActive) return;
+        pathSlideRaf = requestAnimationFrame(loop);
+        tickPathSlide(ts);
+      };
+      pathSlideRaf = requestAnimationFrame(loop);
+    }
+
+    function tickPathSlide(ts) {
+      if (!pathSlideActive || !rigOpen || cameraMarkers.length < 2 || !renderCamRig) return;
+      if (isPathSlideBlocked()) {
+        pathSlideLastTs = ts;
+        updatePathSlideStatus('路径预览：已暂停（关闭 Q/W 或 Gizmo 后恢复）', true);
+        return;
+      }
+      if (!pathSlideLastTs) pathSlideLastTs = ts;
+      const dt = Math.min(0.05, (ts - pathSlideLastTs) / 1000);
+      pathSlideLastTs = ts;
+      if (dt <= 0) return;
+      pathSlidePhase += dt * PATH_SLIDE_SPEED;
+      const t = (Math.sin(pathSlidePhase) + 1) * 0.5;
+      const sample = samplePathAt(t);
+      if (!sample) return;
+      renderCamRig.position.copy(sample.position);
+      renderCamRig.quaternion.copy(sample.quaternion);
+      syncCameraHelper();
+      updateRigSliders();
+      pathSlideStatusTick++;
+      if (pathSlideStatusTick % 12 === 0) {
+        const p = renderCamRig.position;
+        updatePathSlideStatus(
+          `路径预览：滑动中 t=${(t * 100).toFixed(0)}% · 机位 (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`,
+          true,
+        );
+      }
+      if (viewer?.initialized) viewer.forceRenderNextFrame();
+    }
+
+    function rebuildPathSegments() {
+      const newSegs = [];
+      for (let i = 0; i < cameraMarkers.length - 1; i++) {
+        const prev = cameraPathSegments[i];
+        newSegs.push({
+          points: prev?.points ? prev.points.map((p) => ({ x: p.x, y: p.y, z: p.z, t: p.t })) : [],
+        });
+      }
+      cameraPathSegments = newSegs;
+    }
+
+    function ensurePathSegments() {
+      if (cameraPathSegments.length === cameraMarkers.length - 1) return;
+      rebuildPathSegments();
+    }
+
+    function pickPathSegment(e) {
+      if (!rigOpen || cameraMarkers.length < 2) return false;
+      if (!pathTubeGroup && !pathPickMeshes.length) return false;
+      const rect = viewer.renderer.domElement.getBoundingClientRect();
+      _pickMouse.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      _pickRay.setFromCamera(_pickMouse, viewer.camera);
+      pathRoot?.updateMatrixWorld(true);
+      const targets = pathPickMeshes.length ? pathPickMeshes : pathTubeGroup.children.filter((c) => c.userData.pathSegIdx != null);
+      if (!targets.length) return false;
+      const pathHits = _pickRay.intersectObjects(targets, false);
+      const hit = pathHits.find((h) => h.object.userData.pathSegIdx != null);
+      if (!hit) return false;
+
+      stopPathSlidePreview();
+      selectedMarkerIdx = -1;
+      selected = -1;
+      markerGizmoMode = null;
+      rigGizmoMode = null;
+      el('gizmoMoveRig').classList.remove('active');
+      el('gizmoRotateRig').classList.remove('active');
+      updateRigGizmoUI();
+      ensurePathSegments();
+
+      const segIdx = hit.object.userData.pathSegIdx;
+      const t = approximateTOnSegment(segIdx, hit.point);
+      sampleSegmentLocal(segIdx, t, _tmpVec);
+      const pi = addPathControlPoint(segIdx, _tmpVec.x, _tmpVec.y, _tmpVec.z, t);
+      if (pi < 0) {
+        status('此处已有控制点');
+        return true;
+      }
+      selectPathCp(segIdx, pi);
+      status('轨迹弯折 · Q 拖动');
+      return true;
+    }
+
+    function projectTOnSegmentChord(segIdx, x, y, z) {
+      const a = cameraMarkers[segIdx];
+      const b = cameraMarkers[segIdx + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dz = b.z - a.z;
+      const len2 = dx * dx + dy * dy + dz * dz;
+      if (len2 < 1e-14) return 0.5;
+      const t = ((x - a.x) * dx + (y - a.y) * dy + (z - a.z) * dz) / len2;
+      return THREE.MathUtils.clamp(t, 0.03, 0.97);
+    }
+
+    function syncKeypointOrderAfterDrag(segIdx, pointIdx, dragObj = null) {
+      const seg = cameraPathSegments[segIdx];
+      const pt = seg?.points?.[pointIdx];
+      if (!pt) return pointIdx;
+      const sx = pt.x;
+      const sy = pt.y;
+      const sz = pt.z;
+      pt.t = projectTOnSegmentChord(segIdx, sx, sy, sz);
+      seg.points.sort((a, b) => a.t - b.t);
+      const newIdx = seg.points.findIndex(
+        (p) => Math.abs(p.x - sx) < 1e-6 && Math.abs(p.y - sy) < 1e-6 && Math.abs(p.z - sz) < 1e-6,
+      );
+      if (selectedCpSegIdx === segIdx && selectedCpPointIdx === pointIdx) {
+        selectedCpPointIdx = newIdx;
+      }
+      if (dragObj) dragObj.userData.cpPointIdx = newIdx;
+      return newIdx;
+    }
+
+    function getSegmentWaypoints(segIdx) {
+      const a = cameraMarkers[segIdx];
+      const b = cameraMarkers[segIdx + 1];
+      const inner = (cameraPathSegments[segIdx]?.points || []).slice().sort((p, q) => p.t - q.t);
+      return [
+        new THREE.Vector3(a.x, a.y, a.z),
+        ...inner.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
+        new THREE.Vector3(b.x, b.y, b.z),
+      ];
+    }
+
+    /** 相邻路点间三次 Hermite 衔接，过每个路点且不在弦中点强制对称 */
+    function buildWaypointCurvePath(waypoints) {
+      const path = new THREE.CurvePath();
+      const n = waypoints.length;
+      if (n < 2) return path;
+      if (n === 2) {
+        path.add(new THREE.LineCurve3(waypoints[0], waypoints[1]));
+        return path;
+      }
+      const tangents = new Array(n);
+      for (let i = 0; i < n; i++) {
+        if (i === 0) tangents[i] = waypoints[1].clone().sub(waypoints[0]);
+        else if (i === n - 1) tangents[i] = waypoints[n - 1].clone().sub(waypoints[n - 2]);
+        else tangents[i] = waypoints[i + 1].clone().sub(waypoints[i - 1]).multiplyScalar(0.5);
+      }
+      for (let i = 0; i < n - 1; i++) {
+        const p0 = waypoints[i];
+        const p3 = waypoints[i + 1];
+        const segLen = p0.distanceTo(p3);
+        if (segLen < 1e-8) continue;
+        const m0 = tangents[i].clone().normalize().multiplyScalar(segLen / 3);
+        const m1 = tangents[i + 1].clone().normalize().multiplyScalar(segLen / 3);
+        path.add(new THREE.CubicBezierCurve3(p0, p0.clone().add(m0), p3.clone().sub(m1), p3));
+      }
+      return path;
+    }
+
+    function buildSegmentCurveSpec(segIdx) {
+      const wps = getSegmentWaypoints(segIdx);
+      if (wps.length <= 2) {
+        return { straight: true, a: wps[0], b: wps[1] };
+      }
+      return { straight: false, curve: buildWaypointCurvePath(wps) };
+    }
+
+    function segmentCurveForTube(segIdx) {
+      const spec = buildSegmentCurveSpec(segIdx);
+      if (spec.straight) return new THREE.LineCurve3(spec.a, spec.b);
+      return spec.curve;
+    }
+
+    function approximateTOnSegment(segIdx, worldPt, samples = 80) {
+      let bestT = 0.5;
+      let bestD = Infinity;
+      for (let i = 0; i <= samples; i++) {
+        const t = i / samples;
+        sampleSegmentLocal(segIdx, t, _tmpVec);
+        const d = _tmpVec.distanceToSquared(worldPt);
+        if (d < bestD) {
+          bestD = d;
+          bestT = t;
+        }
+      }
+      return bestT;
+    }
+
+    function findCpMesh(segIdx, pointIdx) {
+      return cpMeshes.find((m) => m.userData.cpSegIdx === segIdx && m.userData.cpPointIdx === pointIdx);
+    }
+
+    function rebuildCpVisuals() {
+      if (!pathRoot) return;
+      for (const m of cpMeshes) {
+        pathRoot.remove(m);
+        m.geometry?.dispose();
+        m.material?.dispose();
+      }
+      cpMeshes = [];
+      cameraPathSegments.forEach((seg, si) => {
+        (seg.points || []).forEach((pt, pi) => {
+          const selected = si === selectedCpSegIdx && pi === selectedCpPointIdx;
+          const mesh = new THREE.Mesh(
+            new THREE.SphereGeometry(pathCpRadius(), 10, 10),
+            new THREE.MeshBasicMaterial({
+              color: selected ? 0xffeb3b : 0xfff59d,
+              depthTest: false,
+              depthWrite: false,
+            }),
+          );
+          mesh.position.set(pt.x, pt.y, pt.z);
+          mesh.userData.cpSegIdx = si;
+          mesh.userData.cpPointIdx = pi;
+          pathRoot.add(mesh);
+          cpMeshes.push(mesh);
+        });
+      });
+    }
+
+    function addPathControlPoint(segIdx, x, y, z, t) {
+      ensurePathSegments();
+      const seg = cameraPathSegments[segIdx];
+      if (!seg) return -1;
+      if (!seg.points) seg.points = [];
+      if (seg.points.some((p) => Math.abs(p.t - t) < 0.025)) return -1;
+      seg.points.push({ x, y, z, t });
+      seg.points.sort((a, b) => a.t - b.t);
+      rebuildCpVisuals();
+      updatePathLine();
+      el('rigPreviewStatus').textContent = '需重新渲染';
+      return seg.points.findIndex((p) => Math.abs(p.t - t) < 1e-5);
+    }
+
+    function removePathControlPoint(segIdx, pointIdx) {
+      const seg = cameraPathSegments[segIdx];
+      if (!seg?.points?.length || pointIdx < 0 || pointIdx >= seg.points.length) return;
+      seg.points.splice(pointIdx, 1);
+      selectedCpSegIdx = -1;
+      selectedCpPointIdx = -1;
+      markerGizmoMode = null;
+      el('gizmoMoveRig').classList.remove('active');
+      rebuildCpVisuals();
+      updatePathLine();
+      el('rigPreviewStatus').textContent = '需重新渲染';
+      attachGizmo();
+      updateKeypointEditUI();
+      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      viewer?.forceRenderNextFrame();
+    }
+
+    function setupPathVisuals() {
+      if (!rigOverlayScene) initRigOverlayScene();
+      if (pathRoot) {
+        pathRoot.parent?.remove(pathRoot);
+        pathRoot.traverse((o) => {
+          if (o.geometry) o.geometry.dispose();
+          if (o.material) o.material.dispose?.();
+        });
+      }
+      pathRoot = new THREE.Group();
+      pathRoot.name = 'CameraPathRoot';
+      markerMeshes = [];
+      cpMeshes = [];
+
+      const mkGeo = new THREE.SphereGeometry(pathSphereRadius(), 12, 12);
+      cameraMarkers.forEach((m, i) => {
+        const isStart = i === 0;
+        const isEnd = i === cameraMarkers.length - 1 && cameraMarkers.length > 1;
+        const color = isStart ? 0x66aa66 : (isEnd ? 0xaa6666 : 0x888888);
+        const mesh = new THREE.Mesh(mkGeo.clone(), new THREE.MeshBasicMaterial({
+          color,
+          depthTest: false,
+          depthWrite: false,
+        }));
+        mesh.position.set(m.x, m.y, m.z);
+        mesh.userData.markerIdx = i;
+        pathRoot.add(mesh);
+        markerMeshes.push(mesh);
+      });
+
+      rebuildCpVisuals();
+
+      updatePathTubes();
+      pathRoot.visible = rigOpen;
+      rigOverlayScene.add(pathRoot);
+      applyAlwaysOnTop(pathRoot);
+      startPathSlidePreview();
+    }
+
+    function updatePathTubes() {
+      if (!pathRoot) return;
+      pathPickMeshes = [];
+      if (pathTubeGroup) {
+        pathRoot.remove(pathTubeGroup);
+        pathTubeGroup.traverse((o) => {
+          if (o.geometry) o.geometry.dispose();
+          if (o.material) o.material.dispose?.();
+        });
+        pathTubeGroup = null;
+      }
+      if (pathLine) {
+        pathRoot.remove(pathLine);
+        pathLine.geometry.dispose();
+        pathLine.material.dispose();
+        pathLine = null;
+      }
+      if (cameraMarkers.length < 2) return;
+
+      pathTubeGroup = new THREE.Group();
+      pathTubeGroup.name = 'PathTubes';
+
+      for (let s = 0; s < cameraMarkers.length - 1; s++) {
+        const curve = segmentCurveForTube(s);
+        let tubeGeo;
+        const tubeR = pathTubeRadius();
+        const coreR = tubeR * 0.45;
+        try {
+          tubeGeo = new THREE.TubeGeometry(curve, 64, tubeR, 10, false);
+        } catch (_) {
+          continue;
+        }
+        const tube = new THREE.Mesh(
+          tubeGeo,
+          new THREE.MeshBasicMaterial({
+            color: s === 0 && cameraMarkers.length === 2 ? 0x44ccff : 0x2288dd,
+            transparent: true,
+            opacity: 0.95,
+            depthTest: false,
+            depthWrite: false,
+          }),
+        );
+        tube.userData.pathSegIdx = s;
+        tube.renderOrder = 10;
+        pathTubeGroup.add(tube);
+
+        const core = new THREE.Mesh(
+          new THREE.TubeGeometry(curve, 64, coreR, 8, false),
+          new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false }),
+        );
+        core.userData.pathSegIdx = s;
+        core.renderOrder = 11;
+        pathTubeGroup.add(core);
+
+        const pickR = Math.max(tubeR * 2.8, 0.012);
+        try {
+          const pickGeo = new THREE.TubeGeometry(curve, 32, pickR, 6, false);
+          const pick = new THREE.Mesh(
+            pickGeo,
+            new THREE.MeshBasicMaterial({
+              transparent: true,
+              opacity: 0,
+              depthTest: false,
+              depthWrite: false,
+            }),
+          );
+          pick.userData.pathSegIdx = s;
+          pick.userData.pathPick = true;
+          pick.renderOrder = 9;
+          pathTubeGroup.add(pick);
+          pathPickMeshes.push(pick);
+        } catch (_) {}
+      }
+
+      const points = [];
+      for (let s = 0; s < cameraMarkers.length - 1; s++) {
+        for (let j = 0; j <= 48; j++) {
+          if (s > 0 && j === 0) continue;
+          points.push(sampleSegmentLocal(s, j / 48, new THREE.Vector3()));
+        }
+      }
+      pathLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(points),
+        new THREE.LineBasicMaterial({ color: 0x88ddff, transparent: true, opacity: 1, depthTest: false }),
+      );
+      pathLine.renderOrder = 12;
+      pathTubeGroup.add(pathLine);
+      pathRoot.add(pathTubeGroup);
+    }
+
+    function updatePathLine() {
+      updatePathTubes();
+    }
+
+    function sampleSegmentLocal(segIdx, t, outVec) {
+      const spec = buildSegmentCurveSpec(segIdx);
+      if (spec.straight) {
+        outVec.lerpVectors(spec.a, spec.b, t);
+      } else {
+        spec.curve.getPoint(t, outVec);
+      }
+      return outVec;
+    }
+
+    function samplePathAt(globalT) {
+      const segs = cameraMarkers.length - 1;
+      if (segs <= 0) return null;
+      const f = globalT * segs;
+      const segIdx = Math.min(segs - 1, Math.floor(f));
+      const localT = f - segIdx;
+      sampleSegmentLocal(segIdx, localT, _tmpVecPos);
+      markerQuatInto(cameraMarkers[segIdx], _tmpQuatA);
+      markerQuatInto(cameraMarkers[segIdx + 1], _tmpQuatB);
+      _tmpQuatOut.copy(_tmpQuatA).slerp(_tmpQuatB, localT);
+      return { position: _tmpVecPos.clone(), quaternion: _tmpQuatOut.clone() };
+    }
+
+    function refreshPathVisuals() {
+      if (!pathRoot) return;
+      cameraMarkers.forEach((m, i) => {
+        if (markerMeshes[i]) markerMeshes[i].position.set(m.x, m.y, m.z);
+      });
+      cameraPathSegments.forEach((seg, si) => {
+        (seg.points || []).forEach((pt, pi) => {
+          const mesh = findCpMesh(si, pi);
+          if (mesh) mesh.position.set(pt.x, pt.y, pt.z);
+        });
+      });
+      updatePathLine();
+      viewer?.forceRenderNextFrame();
+    }
+
+    function renderMarkerList() {
+      const list = el('markerList');
+      list.innerHTML = '';
+      if (!cameraMarkers.length) return;
+      cameraMarkers.forEach((m, i) => {
+        const row = document.createElement('div');
+        row.className = 'marker-row' + (i === selectedMarkerIdx ? ' active' : '');
+        row.draggable = true;
+        row.dataset.idx = String(i);
+        const isStart = i === 0;
+        const isEnd = i === cameraMarkers.length - 1 && cameraMarkers.length > 1;
+        const dotClass = isStart ? 'start' : (isEnd ? 'end' : 'mid');
+        row.innerHTML = `<span class="drag-handle">⋮⋮</span><span class="marker-dot ${dotClass}"></span><span class="scene-name">#${i + 1}</span>`;
+        row.addEventListener('dragstart', (e) => {
+          markerDragFromIdx = i;
+          row.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        row.addEventListener('dragend', () => {
+          markerDragFromIdx = -1;
+          row.classList.remove('dragging');
+          list.querySelectorAll('.drag-over').forEach((r) => r.classList.remove('drag-over'));
+        });
+        row.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          row.classList.add('drag-over');
+        });
+        row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+        row.addEventListener('drop', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          row.classList.remove('drag-over');
+          const from = markerDragFromIdx;
+          if (from >= 0 && from !== i) reorderMarkers(from, i);
+        });
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'icon-btn'; del.textContent = '×';
+        del.onclick = (e) => { e.stopPropagation(); removeMarker(i); };
+        row.appendChild(del);
+        row.onclick = (e) => {
+          if (e.target.closest('.drag-handle') || e.target.closest('.icon-btn')) return;
+          if (i === selectedMarkerIdx) selectMarker(-1);
+          else selectMarker(i);
+        };
+        list.appendChild(row);
+      });
+    }
+
+    function selectMarker(idx) {
+      selectedMarkerIdx = idx;
+      selectedCpSegIdx = -1;
+      selectedCpPointIdx = -1;
+      selected = -1;
+      placementGizmoMode = null;
+      rigGizmoMode = null;
+      updatePlacementGizmoUI();
+      updateRigGizmoUI();
+      el('gizmoMoveRig').classList.remove('active');
+      el('gizmoRotateRig').classList.remove('active');
+      renderMarkerList();
+      renderList();
+      updateKeypointEditUI();
+      if (idx >= 0 && markerGizmoMode) applyMarkerToRig(cameraMarkers[idx]);
+      attachGizmo();
+      if (idx < 0 && cameraMarkers.length >= 2) startPathSlidePreview();
+      else stopPathSlidePreview();
+    }
+
+    function updateKeypointEditUI() {
+      const editing = rigOpen && selectedCpPointIdx >= 0;
+      const row = el('keypointEditRow');
+      if (row) row.hidden = !editing;
+      const poseCtrls = el('rigPoseControls');
+      if (poseCtrls) poseCtrls.classList.toggle('dimmed', editing);
+      if (editing) {
+        setRigControlsEnabled(false);
+        el('gizmoRotateRig').classList.remove('active');
+      } else if (rigOpen) {
+        setRigControlsEnabled(true);
+      }
+    }
+
+    function confirmPathKeypoint() {
+      if (selectedCpPointIdx < 0) return;
+      if (selectedCpSegIdx >= 0) {
+        syncKeypointOrderAfterDrag(selectedCpSegIdx, selectedCpPointIdx);
+      }
+      markerGizmoMode = null;
+      rigGizmoMode = null;
+      selectedCpSegIdx = -1;
+      selectedCpPointIdx = -1;
+      updateRigGizmoUI();
+      el('gizmoMoveRig').classList.remove('active');
+      el('gizmoRotateRig').classList.remove('active');
+      transformControls?.detach();
+      rebuildCpVisuals();
+      updateKeypointEditUI();
+      attachGizmo();
+      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      status('弯折已调整');
+      syncActivePathFromState();
+      viewer?.forceRenderNextFrame();
+    }
+
+    function deleteSelectedPathKeypoint() {
+      if (selectedCpPointIdx < 0) return;
+      const si = selectedCpSegIdx;
+      const pi = selectedCpPointIdx;
+      removePathControlPoint(si, pi);
+      updateKeypointEditUI();
+      status('已删除');
+    }
+
+    function selectPathCp(segIdx, pointIdx = -1) {
+      if (segIdx < 0) {
+        selectedCpSegIdx = -1;
+        selectedCpPointIdx = -1;
+        markerGizmoMode = null;
+        rigGizmoMode = null;
+        updateRigGizmoUI();
+        el('gizmoMoveRig').classList.remove('active');
+        el('gizmoRotateRig').classList.remove('active');
+        rebuildCpVisuals();
+        updateKeypointEditUI();
+        attachGizmo();
+        if (cameraMarkers.length >= 2) startPathSlidePreview();
+        return;
+      }
+      selectedCpSegIdx = segIdx;
+      selectedCpPointIdx = pointIdx;
+      selectedMarkerIdx = -1;
+      selected = -1;
+      rigGizmoMode = null;
+      markerGizmoMode = 'translate';
+      el('gizmoMoveRig').classList.add('active');
+      updateRigGizmoUI();
+      el('gizmoRotateRig').classList.remove('active');
+      rebuildCpVisuals();
+      updateKeypointEditUI();
+      renderMarkerList();
+      attachGizmo();
+      stopPathSlidePreview();
+      status('轨迹弯折 · Q 拖动');
+    }
+
+    function addCameraMarker() {
+      if (!rigOpen) { status('请先打开渲染摄像机'); return; }
+      ensureActiveCameraPathForEdit();
+      cameraMarkers.push(markerFromRig());
+      rebuildPathSegments();
+      setupPathVisuals();
+      if (cameraMarkers.length >= 2) {
+        selectedMarkerIdx = -1;
+        markerGizmoMode = null;
+        rigGizmoMode = null;
+        el('gizmoMoveRig').classList.remove('active');
+        el('gizmoRotateRig').classList.remove('active');
+        renderMarkerList();
+        attachGizmo();
+        startPathSlidePreview();
+        status(`${cameraMarkers.length} 机位 · 路径预览中`);
+      } else {
+        selectedMarkerIdx = -1;
+        selectedCpSegIdx = -1;
+        selectedCpPointIdx = -1;
+        markerGizmoMode = null;
+        rigGizmoMode = null;
+        updateRigGizmoUI();
+        el('gizmoMoveRig').classList.remove('active');
+        el('gizmoRotateRig').classList.remove('active');
+        renderMarkerList();
+        attachGizmo();
+        status('已添加 #1 · 移动后继续 ＋');
+      }
+      syncActivePathFromState();
+      renderPathGroupList();
+      el('rigPreviewStatus').textContent = '需重新渲染';
+    }
+
+    function removeMarker(idx) {
+      cameraMarkers.splice(idx, 1);
+      if (selectedMarkerIdx === idx) selectedMarkerIdx = -1;
+      else if (selectedMarkerIdx > idx) selectedMarkerIdx--;
+      selectedCpSegIdx = -1;
+      selectedCpPointIdx = -1;
+      rebuildPathSegments();
+      setupPathVisuals();
+      renderMarkerList();
+      stopPreviewPlayback();
+      el('rigPreviewStatus').textContent = '需重新渲染';
+      attachGizmo();
+      syncActivePathFromState();
+      renderPathGroupList();
+      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      else stopPathSlidePreview();
+    }
+
+    function stopPreviewPlayback() {
+      if (previewPlaybackRaf) cancelAnimationFrame(previewPlaybackRaf);
+      previewPlaybackRaf = 0;
+      const video = el('rigPreviewVideo');
+      video.pause();
+      video.removeAttribute('src');
+      video.hidden = true;
+      el('rigPreviewCanvas').hidden = false;
+    }
+
+    function showPreviewVideo(url) {
+      stopPreviewPlayback();
+      const video = el('rigPreviewVideo');
+      video.src = url;
+      video.hidden = false;
+      el('rigPreviewCanvas').hidden = true;
+      el('rigPreviewTitle').textContent = '路径渲染视频';
+      video.play().catch(() => {});
+    }
+
+    async function renderGaussToImageData() {
+      const renderer = viewer.renderer;
+      const orbitCam = viewer.camera;
+      const saved = {
+        position: orbitCam.position.clone(),
+        quaternion: orbitCam.quaternion.clone(),
+        fov: orbitCam.fov,
+        near: orbitCam.near,
+        far: orbitCam.far,
+        aspect: orbitCam.aspect,
+      };
+      const oldTarget = renderer.getRenderTarget();
+      const oldSize = renderer.getSize(new THREE.Vector2());
+      const oldPixelRatio = renderer.getPixelRatio();
+      const oldClear = renderer.getClearColor(new THREE.Color());
+      const oldAlpha = renderer.getClearAlpha();
+      const helperWasVisible = cameraHelper?.visible ?? false;
+      const tcHelper = transformControls?.getHelper?.();
+      const tcHelperWasVisible = tcHelper?.visible ?? true;
+      const pathWasVisible = pathRoot?.visible ?? false;
+
+      if (!rigPreviewRt) rigPreviewRt = new THREE.WebGLRenderTarget(RIG_PREVIEW_W, RIG_PREVIEW_H);
+
+      if (cameraHelper) cameraHelper.visible = false;
+      if (tcHelper) tcHelper.visible = false;
+      if (pathRoot) pathRoot.visible = false;
+
+      try {
+        applyRenderCameraToViewer(orbitCam, RIG_PREVIEW_W / RIG_PREVIEW_H);
+        renderer.setPixelRatio(1);
+        renderer.setRenderTarget(rigPreviewRt);
+        renderer.setSize(RIG_PREVIEW_W, RIG_PREVIEW_H, false);
+        renderer.setClearColor(0x000000, 0);
+        viewer.updateSplatMesh();
+        viewer.render();
+        await new Promise((r) => requestAnimationFrame(r));
+        renderer.readRenderTargetPixels(rigPreviewRt, 0, 0, RIG_PREVIEW_W, RIG_PREVIEW_H, _rigPreviewBuf);
+        const rowBytes = RIG_PREVIEW_W * 4;
+        for (let y = 0; y < RIG_PREVIEW_H; y++) {
+          const srcY = RIG_PREVIEW_H - 1 - y;
+          _rigPreviewImg.data.set(_rigPreviewBuf.subarray(srcY * rowBytes, srcY * rowBytes + rowBytes), y * rowBytes);
+        }
+        return new ImageData(new Uint8ClampedArray(_rigPreviewImg.data), RIG_PREVIEW_W, RIG_PREVIEW_H);
+      } finally {
+        orbitCam.position.copy(saved.position);
+        orbitCam.quaternion.copy(saved.quaternion);
+        if (orbitCam.isPerspectiveCamera) {
+          orbitCam.fov = saved.fov;
+          orbitCam.near = saved.near;
+          orbitCam.far = saved.far;
+          orbitCam.aspect = saved.aspect;
+          orbitCam.updateProjectionMatrix();
+        }
+        renderer.setRenderTarget(oldTarget);
+        renderer.setPixelRatio(oldPixelRatio);
+        renderer.setSize(oldSize.x, oldSize.y, false);
+        renderer.setClearColor(oldClear, oldAlpha);
+        if (cameraHelper) cameraHelper.visible = helperWasVisible;
+        if (tcHelper) tcHelper.visible = tcHelperWasVisible;
+        if (pathRoot) pathRoot.visible = pathWasVisible && rigOpen;
+        viewer.updateSplatMesh();
+        viewer.forceRenderNextFrame();
+      }
+    }
+
+    async function renderPathVideoPreview() {
+      if (cameraMarkers.length < 2) return renderRigPreviewFrame();
+      stopPathSlidePreview();
+      stopPreviewPlayback();
+      const segs = cameraMarkers.length - 1;
+      const totalFrames = segs * pathFramesPerSeg + 1;
+      status(`渲染路径视频 0/${totalFrames}…`);
+      el('rigPreviewStatus').textContent = '0%';
+
+      const canvas = el('rigPreviewCanvas');
+      canvas.width = RIG_PREVIEW_W;
+      canvas.height = RIG_PREVIEW_H;
+      const ctx = canvas.getContext('2d');
+      previewFrames = [];
+      const savedPos = renderCamRig.position.clone();
+      const savedQuat = renderCamRig.quaternion.clone();
+
+      try {
+        for (let f = 0; f < totalFrames; f++) {
+          const sample = samplePathAt(f / (totalFrames - 1));
+          renderCamRig.position.copy(sample.position);
+          renderCamRig.quaternion.copy(sample.quaternion);
+          syncCameraHelper();
+          previewFrames.push(await renderGaussToImageData());
+          if (f % 3 === 0 || f === totalFrames - 1) {
+            el('rigPreviewStatus').textContent = `${Math.round((f + 1) / totalFrames * 100)}%`;
+            status(`渲染路径 ${f + 1}/${totalFrames}…`);
+          }
+        }
+
+        const fps = pathFps;
+        const stream = canvas.captureStream(fps);
+        const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+        const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 4_000_000 });
+        const chunks = [];
+        recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+        const done = new Promise((r) => { recorder.onstop = r; });
+        recorder.start();
+        for (const frame of previewFrames) {
+          ctx.putImageData(frame, 0, 0);
+          await new Promise((res) => setTimeout(res, 1000 / fps));
+        }
+        recorder.stop();
+        await done;
+        showPreviewVideo(URL.createObjectURL(new Blob(chunks, { type: mime })));
+        el('rigPreviewStatus').textContent = '视频就绪';
+        status(`路径视频 ${previewFrames.length} 帧 @ ${fps} FPS`);
+      } finally {
+        renderCamRig.position.copy(savedPos);
+        renderCamRig.quaternion.copy(savedQuat);
+        syncCameraHelper();
+        updateRigSliders();
+        refreshPathVisuals();
+        startPathSlidePreview();
+      }
+    }
+
+    async function onRenderPreviewClick() {
+      if (cameraMarkers.length >= 2) await renderPathVideoPreview();
+      else await renderRigPreviewFrame();
+    }
+
+    function updateRigSliders() {
+      if (!renderCamRig) return;
+      el('rigX').value = renderCamRig.position.x;
+      el('rigY').value = renderCamRig.position.y;
+      el('rigZ').value = renderCamRig.position.z;
+      el('rigXVal').textContent = renderCamRig.position.x.toFixed(3);
+      el('rigYVal').textContent = renderCamRig.position.y.toFixed(3);
+      el('rigZVal').textContent = renderCamRig.position.z.toFixed(3);
+      const rot = rigEulerFromRig();
+      el('rigYaw').value = rot.yaw;
+      el('rigPitch').value = rot.pitch;
+      el('rigRoll').value = rot.roll;
+      el('rigYawVal').textContent = `${rot.yaw.toFixed(0)}°`;
+      el('rigPitchVal').textContent = `${rot.pitch.toFixed(0)}°`;
+      el('rigRollVal').textContent = `${rot.roll.toFixed(0)}°`;
+      if (renderCamera) {
+        el('rigFov').value = renderCamera.fov;
+        el('rigFovVal').textContent = renderCamera.fov.toFixed(0);
+        el('rigNear').value = renderCamera.near;
+        el('rigNearVal').textContent = renderCamera.near.toFixed(3);
+        el('rigFar').value = renderCamera.far;
+        el('rigFarVal').textContent = renderCamera.far.toFixed(0);
+      }
+    }
+
+    function setRigControlsEnabled(enabled) {
+      for (const id of ['rigX', 'rigY', 'rigZ', 'rigYaw', 'rigPitch', 'rigRoll']) el(id).disabled = !enabled;
+    }
+
+    function applyGizmoForSelection() {
+      if (!transformControls) return;
+      const isRig = rigOpen;
+      transformControls.setSpace(isRig ? 'local' : 'world');
+      transformControls.showX = true;
+      transformControls.showY = true;
+      transformControls.showZ = true;
+    }
+
+    async function renderRigPreviewFrame() {
+      if (!viewer?.renderer || !renderCamera || !rigOpen) return;
+      stopPreviewPlayback();
+      status('渲染机位预览…');
+      el('rigPreviewStatus').textContent = '渲染中…';
+      el('rigPreviewTitle').textContent = '单帧预览';
+      try {
+        const img = await renderGaussToImageData();
+        el('rigPreviewCanvas').getContext('2d').putImageData(img, 0, 0);
+        el('rigPreviewStatus').textContent = '已更新';
+        status('机位预览已更新');
+      } catch (e) {
+        el('rigPreviewStatus').textContent = '失败';
+        throw e;
+      }
+    }
+
+    function updatePlacementGizmoUI() {
+      el('gizmoMove').classList.toggle('active', placementGizmoMode === 'translate');
+      el('gizmoRotate').classList.toggle('active', placementGizmoMode === 'rotate');
+    }
+
+    function updateRigGizmoUI() {
+      el('gizmoMoveRig').classList.toggle('active', rigGizmoMode === 'translate');
+      el('gizmoRotateRig').classList.toggle('active', rigGizmoMode === 'rotate');
+    }
+
+    function togglePlacementGizmo(mode) {
+      if (selected < 0) return;
+      placementGizmoMode = placementGizmoMode === mode ? null : mode;
+      updatePlacementGizmoUI();
+      attachGizmo();
+      status(placementGizmoMode ? (placementGizmoMode === 'translate' ? '移动模式' : '旋转模式') : 'Gizmo 已关闭');
+    }
+
+    function toggleRigGizmo(mode) {
+      if (!rigOpen) return;
+      if (selectedCpSegIdx >= 0 && selectedCpPointIdx >= 0) {
+        if (mode !== 'translate') return;
+        if (markerGizmoMode) {
+          confirmPathKeypoint();
+          return;
+        }
+        markerGizmoMode = 'translate';
+        rigGizmoMode = null;
+        el('gizmoMoveRig').classList.add('active');
+        el('gizmoRotateRig').classList.remove('active');
+        attachGizmo();
+        stopPathSlidePreview();
+        status('轨迹弯折 · Q 拖动');
+        return;
+      }
+      if (selectedMarkerIdx >= 0 && mode === 'translate') {
+        markerGizmoMode = markerGizmoMode === 'translate' ? null : 'translate';
+        rigGizmoMode = null;
+        el('gizmoMoveRig').classList.toggle('active', markerGizmoMode === 'translate');
+        el('gizmoRotateRig').classList.remove('active');
+        if (markerGizmoMode && selectedMarkerIdx >= 0) {
+          applyMarkerToRig(cameraMarkers[selectedMarkerIdx]);
+        }
+        attachGizmo();
+        if (markerGizmoMode) stopPathSlidePreview();
+        else if (cameraMarkers.length >= 2) startPathSlidePreview();
+        status(markerGizmoMode ? '机位编辑（预览暂停）' : 'Gizmo 已关闭');
+        return;
+      }
+      rigGizmoMode = rigGizmoMode === mode ? null : mode;
+      if (rigGizmoMode) {
+        markerGizmoMode = null;
+        stopPathSlidePreview();
+      }
+      updateRigGizmoUI();
+      attachGizmo();
+      if (!rigGizmoMode && cameraMarkers.length >= 2) startPathSlidePreview();
+      status(rigGizmoMode ? (rigGizmoMode === 'translate' ? '机位移动（滑动已暂停）' : '机位旋转（滑动已暂停）') : 'Gizmo 已关闭 · 恢复滑动');
+    }
+
+    function openRigCamera() {
+      switchPanelTab('camera');
+      if (activePathId && cameraPaths.some((p) => p.id === activePathId)) {
+        loadActivePathToState();
+      } else {
+        activePathId = cameraPaths[0]?.id ?? null;
+        loadActivePathToState();
+      }
+      rigOpen = true;
+      rigGizmoMode = null;
+      markerGizmoMode = null;
+      updateRigGizmoUI();
+      el('rigPanel').hidden = false;
+      el('rigPreviewFloat').hidden = false;
+      el('toggleRigBtn').textContent = '关闭渲染摄像机';
+      el('toggleRigBtn').classList.add('active');
+      if (cameraHelper) cameraHelper.visible = el('showFrustum').checked;
+      styleCameraHelperOnTop();
+      if (cameraMarkers.length >= 2) {
+        if (!pathRoot || !pathTubeGroup) setupPathVisuals();
+        else pathRoot.visible = true;
+      } else if (cameraMarkers.length) {
+        if (!pathRoot) setupPathVisuals();
+        else pathRoot.visible = true;
+      } else {
+        clearPathVisuals();
+      }
+      renderMarkerList();
+      renderPathGroupList();
+      setRigControlsEnabled(true);
+      attachGizmo();
+      syncCameraHelper();
+      updateKeypointEditUI();
+      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      el('rigPreviewStatus').textContent = '未渲染';
+      status(cameraMarkers.length >= 2 ? '路径预览中' : (cameraPaths.length ? '＋ 当前机位 开始' : '新建轨迹 或 ＋ 当前机位'));
+    }
+
+    function closeRigCamera() {
+      rigOpen = false;
+      rigGizmoMode = null;
+      markerGizmoMode = null;
+      selectedMarkerIdx = -1;
+      selectedCpSegIdx = -1;
+      selectedCpPointIdx = -1;
+      updateRigGizmoUI();
+      el('rigPanel').hidden = true;
+      el('rigPreviewFloat').hidden = true;
+      el('toggleRigBtn').textContent = '打开渲染摄像机';
+      el('toggleRigBtn').classList.remove('active');
+      if (cameraHelper) cameraHelper.visible = false;
+      if (pathRoot) pathRoot.visible = false;
+      setRigControlsEnabled(false);
+      updateKeypointEditUI();
+      transformControls?.detach();
+      stopPreviewPlayback();
+      stopPathSlidePreview();
+      el('rigPreviewStatus').textContent = '未渲染';
+      viewer?.forceRenderNextFrame();
+      status('渲染摄像机已关闭');
+    }
+
+    function toggleRigCamera() {
+      if (rigOpen) closeRigCamera();
+      else openRigCamera();
+    }
+
+    function setupRenderCamera() {
+      if (!rigOverlayScene) initRigOverlayScene();
+      renderCamRig = new THREE.Object3D();
+      renderCamRig.name = 'RenderCameraRig';
+      renderCamRig.position.set(0, -0.5, 0.25);
+
+      renderCamera = new THREE.PerspectiveCamera(50, 16 / 9, 0.01, 8);
+      renderCamera.position.set(0, 0, 0);
+      renderCamRig.add(renderCamera);
+
+      cameraHelper = new THREE.CameraHelper(renderCamera);
+      cameraHelper.material.color.setHex(0xff6600);
+      cameraHelper.visible = false;
+      styleCameraHelperOnTop();
+
+      pathSlideBeacon = new THREE.Mesh(
+        new THREE.SphereGeometry(pathSphereRadius(), 16, 16),
+        new THREE.MeshBasicMaterial({
+          color: 0x22ff88,
+          transparent: true,
+          opacity: 0.92,
+          depthTest: false,
+          depthWrite: false,
+        }),
+      );
+      pathSlideBeacon.renderOrder = 1001;
+      pathSlideBeacon.visible = false;
+      renderCamRig.add(pathSlideBeacon);
+      applyAlwaysOnTop(renderCamRig);
+
+      rigOverlayScene.add(renderCamRig);
+      rigOverlayScene.add(cameraHelper);
+      cameraHelper.update();
+      updateRigSliders();
+    }
+
+    function syncCameraHelper() {
+      if (!cameraHelper || !renderCamera) return;
+      renderCamRig.updateMatrixWorld(true);
+      renderCamera.updateMatrixWorld(true);
+      cameraHelper.update();
+    }
+
+    function syncRenderCameraParams() {
+      if (!renderCamera) return;
+      renderCamera.fov = parseFloat(el('rigFov').value);
+      renderCamera.near = parseFloat(el('rigNear').value);
+      renderCamera.far = parseFloat(el('rigFar').value);
+      const w = parseInt(el('renderWidth').value, 10) || 1920;
+      const h = parseInt(el('renderHeight').value, 10) || 1080;
+      renderCamera.aspect = w / h;
+      renderCamera.updateProjectionMatrix();
+      syncCameraHelper();
+      el('rigFovVal').textContent = renderCamera.fov.toFixed(0);
+      el('rigNearVal').textContent = renderCamera.near.toFixed(3);
+      el('rigFarVal').textContent = renderCamera.far.toFixed(0);
+      if (rigOpen) el('rigPreviewStatus').textContent = '需重新渲染';
+      viewer?.forceRenderNextFrame();
+    }
+
+    function applyRenderCameraToViewer(targetCam = viewer?.camera, aspectOverride = null) {
+      if (!renderCamera || !targetCam) return;
+      renderCamRig.updateMatrixWorld(true);
+      renderCamera.updateMatrixWorld(true);
+      renderCamera.getWorldPosition(_tmpVec);
+      renderCamera.getWorldQuaternion(_tmpQuat);
+      targetCam.position.copy(_tmpVec);
+      targetCam.quaternion.copy(_tmpQuat);
+      targetCam.up.set(0, 0, 1);
+      if (targetCam.isPerspectiveCamera) {
+        targetCam.fov = renderCamera.fov;
+        targetCam.near = renderCamera.near;
+        targetCam.far = renderCamera.far;
+        if (aspectOverride != null) targetCam.aspect = aspectOverride;
+        else targetCam.aspect = renderCamera.aspect;
+        targetCam.updateProjectionMatrix();
+      }
+    }
+
+    async function gaussianRenderFromRig() {
+      if (!viewer?.renderer || !baseReady || !renderCamera) throw new Error('场景未就绪');
+
+      status('从高斯机位渲染…');
+      const renderer = viewer.renderer;
+      const renderW = Math.max(1, parseInt(el('renderWidth').value, 10) || 1920);
+      const renderH = Math.max(1, parseInt(el('renderHeight').value, 10) || 1080);
+
+      const orbitCam = viewer.camera;
+      const saved = {
+        position: orbitCam.position.clone(),
+        quaternion: orbitCam.quaternion.clone(),
+        fov: orbitCam.fov,
+        near: orbitCam.near,
+        far: orbitCam.far,
+        aspect: orbitCam.aspect,
+        target: viewer.controls?.target?.clone(),
+        controlsEnabled: viewer.controls?.enabled ?? true,
+      };
+      const oldSize = renderer.getSize(new THREE.Vector2());
+      const oldPixelRatio = renderer.getPixelRatio();
+      const oldClear = renderer.getClearColor(new THREE.Color());
+      const oldAlpha = renderer.getClearAlpha();
+      const oldViewBg = viewBgMode;
+      const helperWasVisible = cameraHelper?.visible ?? true;
+      const tcHelper = transformControls?.getHelper?.();
+      const tcHelperWasVisible = tcHelper?.visible ?? true;
+
+      const gizmoWasAttached = transformControls?.object != null;
+      transformControls?.detach();
+      if (cameraHelper) cameraHelper.visible = false;
+      if (tcHelper) tcHelper.visible = false;
+      el('viewHelper').style.visibility = 'hidden';
+
+      try {
+        applyRenderCameraToViewer(orbitCam, renderW / renderH);
+        if (viewer.controls) viewer.controls.enabled = false;
+
+        renderer.setPixelRatio(1);
+        renderer.setSize(renderW, renderH, false);
+        renderer.setClearColor(0x000000, 0);
+        el('view').style.background = 'transparent';
+
+        viewer.updateSplatMesh();
+        viewer.render();
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        viewer.updateSplatMesh();
+        viewer.render();
+        await new Promise((r) => requestAnimationFrame(r));
+
+        const out = document.createElement('canvas');
+        out.width = renderW;
+        out.height = renderH;
+        out.getContext('2d').drawImage(renderer.domElement, 0, 0, renderW, renderH);
+
+        const link = document.createElement('a');
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        link.download = `gaussian_render_${ts}.png`;
+        link.href = out.toDataURL('image/png');
+        link.click();
+        status(`高斯渲染完成 ${renderW}×${renderH}`);
+      } finally {
+        orbitCam.position.copy(saved.position);
+        orbitCam.quaternion.copy(saved.quaternion);
+        if (orbitCam.isPerspectiveCamera) {
+          orbitCam.fov = saved.fov;
+          orbitCam.near = saved.near;
+          orbitCam.far = saved.far;
+          orbitCam.aspect = saved.aspect;
+          orbitCam.updateProjectionMatrix();
+        }
+        if (viewer.controls) {
+          if (saved.target) viewer.controls.target.copy(saved.target);
+          viewer.controls.enabled = saved.controlsEnabled;
+          viewer.controls.update();
+        }
+        renderer.setPixelRatio(oldPixelRatio);
+        renderer.setSize(oldSize.x, oldSize.y, false);
+        renderer.setClearColor(oldClear, oldAlpha);
+        applyViewBackground(oldViewBg);
+        if (cameraHelper) cameraHelper.visible = helperWasVisible;
+        if (tcHelper) tcHelper.visible = tcHelperWasVisible;
+        el('viewHelper').style.visibility = '';
+        if (gizmoWasAttached) attachGizmo();
+        viewer.updateSplatMesh();
+        viewer.forceRenderNextFrame();
+      }
+    }
+
+    function onRigSliderChange() {
+      if (!renderCamRig || !rigOpen) return;
+      renderCamRig.position.set(
+        parseFloat(el('rigX').value),
+        parseFloat(el('rigY').value),
+        parseFloat(el('rigZ').value),
+      );
+      syncCameraHelper();
+      updateRigSliders();
+      if (markerGizmoMode && selectedMarkerIdx >= 0) {
+        Object.assign(cameraMarkers[selectedMarkerIdx], markerFromRig());
+        refreshPathVisuals();
+      }
+      el('rigPreviewStatus').textContent = '需重新渲染';
+      viewer.forceRenderNextFrame();
+    }
+
+    function onRigRotationChange() {
+      if (!renderCamRig || !rigOpen) return;
+      applyRigEuler(
+        parseFloat(el('rigYaw').value),
+        parseFloat(el('rigPitch').value),
+        parseFloat(el('rigRoll').value),
+      );
+      syncCameraHelper();
+      updateRigSliders();
+      if (markerGizmoMode && selectedMarkerIdx >= 0) {
+        Object.assign(cameraMarkers[selectedMarkerIdx], markerFromRig());
+        refreshPathVisuals();
+      }
+      el('rigPreviewStatus').textContent = '需重新渲染';
+      viewer.forceRenderNextFrame();
+    }
+
+    function getVisualDecimationRatio(byteLength) {
+      if (byteLength >= LARGE_PLY_BYTES) return VISUAL_DECIMATION_LARGE;
+      if (byteLength >= MEDIUM_PLY_BYTES) return VISUAL_DECIMATION_MEDIUM;
+      return VISUAL_DECIMATION;
+    }
+
+    function setLoadProgress(pct, label) {
+      el('loadProgressWrap').hidden = false;
+      el('loadProgressFill').style.width = `${Math.min(100, pct)}%`;
+      el('loadProgressText').textContent = label;
+    }
+    function hideLoadProgress() { el('loadProgressWrap').hidden = true; }
+
+    function parsePlyHeader(arrayBuffer) {
+      const bytes = new Uint8Array(arrayBuffer);
+      let headerEnd = 0;
+      const dec = new TextDecoder('ascii');
+      for (let i = 0; i < bytes.length - 12; i++) {
+        if (dec.decode(bytes.subarray(i, i + 11)) === 'end_header\n') { headerEnd = i + 11; break; }
+      }
+      const header = dec.decode(bytes.subarray(0, headerEnd));
+      let vertexCount = 0, propCount = 0;
+      for (const line of header.split('\n')) {
+        if (line.startsWith('element vertex')) vertexCount = parseInt(line.split(/\s+/)[2], 10);
+        if (line.startsWith('property float')) propCount++;
+      }
+      return { headerEnd, vertexCount, propCount };
+    }
+
+    function decimatePlyArrayBuffer(arrayBuffer, ratio) {
+      if (ratio >= 1) return arrayBuffer;
+      const meta = parsePlyHeader(arrayBuffer);
+      const { headerEnd, vertexCount, propCount } = meta;
+      if (!vertexCount || !propCount) return arrayBuffer;
+      const keepStep = Math.max(1, Math.round(1 / ratio));
+      const newCount = Math.ceil(vertexCount / keepStep);
+      if (newCount >= vertexCount) return arrayBuffer;
+      const stride = propCount * 4;
+      const headerStr = new TextDecoder('ascii').decode(new Uint8Array(arrayBuffer, 0, headerEnd));
+      const newHeader = new TextEncoder().encode(headerStr.replace(/element vertex \d+/, `element vertex ${newCount}`));
+      const out = new ArrayBuffer(newHeader.length + newCount * stride);
+      new Uint8Array(out).set(newHeader, 0);
+      const srcU8 = new Uint8Array(arrayBuffer, headerEnd);
+      const dstU8 = new Uint8Array(out, newHeader.length);
+      let outIdx = 0;
+      for (let i = 0; i < vertexCount && outIdx < newCount; i += keepStep) {
+        dstU8.set(srcU8.subarray(i * stride, i * stride + stride), outIdx * stride);
+        outIdx++;
+      }
+      return out;
+    }
+
+    function computePlyBounds(arrayBuffer) {
+      const meta = parsePlyHeader(arrayBuffer);
+      const { headerEnd, vertexCount, propCount } = meta;
+      const fallback = {
+        center: { x: 0, y: 0, z: 0 },
+        min: { x: 0, y: 0, z: 0 },
+        max: { x: 0, y: 0, z: 0 },
+        halfSize: { x: 0.05, y: 0.05, z: 0.05 },
+      };
+      if (!vertexCount || propCount < 3) return fallback;
+      const dv = new DataView(arrayBuffer, headerEnd);
+      const stride = propCount * 4;
+      const step = Math.max(1, Math.floor(vertexCount / 8192));
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      let sx = 0, sy = 0, sz = 0, n = 0;
+      for (let i = 0; i < vertexCount; i += step) {
+        const off = i * stride;
+        const x = dv.getFloat32(off, true), y = dv.getFloat32(off + 4, true), z = dv.getFloat32(off + 8, true);
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+        minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+        sx += x; sy += y; sz += z; n++;
+      }
+      return {
+        center: { x: sx / n, y: sy / n, z: sz / n },
+        min: { x: minX, y: minY, z: minZ },
+        max: { x: maxX, y: maxY, z: maxZ },
+        halfSize: { x: (maxX - minX) / 2, y: (maxY - minY) / 2, z: (maxZ - minZ) / 2 },
+      };
+    }
+
+    function placementAnchorFromBounds(bounds) {
+      return {
+        x: bounds.center.x,
+        y: bounds.center.y,
+        z: bounds.min.z,
+      };
+    }
+
+    function computeBaseSurfaceZ(arrayBuffer) {
+      const meta = parsePlyHeader(arrayBuffer);
+      if (!meta.vertexCount || meta.propCount < 3) return BASE_SURFACE_Z_FALLBACK;
+      const dv = new DataView(arrayBuffer, meta.headerEnd);
+      const stride = meta.propCount * 4;
+      const step = Math.max(1, Math.floor(meta.vertexCount / 16384));
+      const upperZs = [];
+      for (let i = 0; i < meta.vertexCount; i += step) {
+        const z = dv.getFloat32(i * stride + 8, true);
+        if (z > -0.002) upperZs.push(z);
+      }
+      if (!upperZs.length) return BASE_SURFACE_Z_FALLBACK;
+      upperZs.sort((a, b) => a - b);
+      return upperZs[Math.floor(upperZs.length * 0.85)];
+    }
+
+    function anchorPlyArrayBuffer(arrayBuffer, anchor) {
+      const meta = parsePlyHeader(arrayBuffer);
+      if (!meta.vertexCount) return arrayBuffer;
+      const out = arrayBuffer.slice(0);
+      const dv = new DataView(out, meta.headerEnd);
+      const stride = meta.propCount * 4;
+      for (let i = 0; i < meta.vertexCount; i++) {
+        const off = i * stride;
+        dv.setFloat32(off, dv.getFloat32(off, true) - anchor.x, true);
+        dv.setFloat32(off + 4, dv.getFloat32(off + 4, true) - anchor.y, true);
+        dv.setFloat32(off + 8, dv.getFloat32(off + 8, true) - anchor.z, true);
+      }
+      return out;
+    }
+
+    async function bufferFromPly(ab, byteLength) {
+      const decRatio = getVisualDecimationRatio(byteLength);
+      const visualAb = decimatePlyArrayBuffer(ab, decRatio);
+      return GaussianSplats3D.PlyLoader.loadFromFileData(
+        visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
+      );
+    }
+
+    function placementOpts(p) {
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+      return {
+        position: [p.x, p.y, p.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        scale: [p.scale, p.scale, p.scale],
+        splatAlphaRemovalThreshold: PLY_ALPHA,
+      };
+    }
+
+    function syncPlacementTransform(p) {
+      if (!viewer?.splatMesh || p.sceneIdx == null) return;
+      const scene = viewer.splatMesh.getScene(p.sceneIdx);
+      scene.position.set(p.x, p.y, p.z);
+      scene.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+      scene.scale.set(p.scale, p.scale, p.scale);
+      viewer.splatMesh.updateTransforms();
+      viewer.forceRenderNextFrame();
+    }
+
+    function checkWebGL() {
+      const c = document.createElement('canvas');
+      return !!(c.getContext('webgl2') || c.getContext('webgl'));
+    }
+
+    function tryCreateRenderer(root, w, h) {
+      for (const precision of ['highp', 'mediump', 'lowp']) {
+        try {
+          const r = new THREE.WebGLRenderer({
+            antialias: false,
+            alpha: true,
+            precision,
+            failIfMajorPerformanceCaveat: false,
+            preserveDrawingBuffer: true,
+          });
+          r.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+          r.setSize(w, h);
+          r.domElement.style.cssText = 'width:100%;height:100%;display:block';
+          root.appendChild(r.domElement);
+          return r;
+        } catch (_) {}
+      }
+      return null;
+    }
+
+    function applyViewBackground(mode = viewBgMode) {
+      viewBgMode = VIEW_BACKGROUNDS[mode] ? mode : 'cream';
+      const t = VIEW_BACKGROUNDS[viewBgMode];
+      el('view').style.background = t.css;
+      el('view').classList.toggle('view-bg-black', viewBgMode === 'black');
+      el('viewBgSelect').value = viewBgMode;
+      if (viewer?.renderer) {
+        viewer.renderer.setClearColor(t.hex, viewBgMode === 'black' ? 1 : 0);
+        viewer.forceRenderNextFrame();
+      }
+      localStorage.setItem('viewBackground', viewBgMode);
+    }
+
+    function tuneCamera() {
+      if (!viewer) return;
+      for (const cam of [viewer.perspectiveCamera, viewer.orthographicCamera, viewer.camera]) {
+        if (cam?.isCamera) { cam.near = 0.001; cam.far = 2000; cam.updateProjectionMatrix(); }
+      }
+      if (viewer.controls) {
+        viewer.controls.target.set(VIEW_OFFSET.x, VIEW_OFFSET.y, VIEW_OFFSET.z);
+        viewer.controls.minDistance = 0.01;
+        viewer.controls.maxDistance = 50;
+        viewer.controls.enableZoom = viewer.controls.enableRotate = viewer.controls.enablePan = true;
+      }
+    }
+
+    function setupViewHelper() {
+      const host = el('viewHelper');
+      host.innerHTML = '';
+      if (!viewer) return;
+      viewHelper = new ViewHelper(viewer.camera, host);
+      host.onpointerdown = (e) => e.stopPropagation();
+      host.onpointerup = (e) => {
+        viewHelper.handleClick(e);
+        viewer.forceRenderNextFrame();
+        if (overlayRenderer && viewHelper) viewHelper.render(overlayRenderer);
+      };
+    }
+
+    function startOverlayLoop() {
+      const loop = () => {
+        overlayRaf = requestAnimationFrame(loop);
+        if (overlayRenderer && viewHelper && viewer?.initialized) viewHelper.render(overlayRenderer);
+      };
+      if (overlayRaf) cancelAnimationFrame(overlayRaf);
+      overlayRaf = requestAnimationFrame(loop);
+    }
+
+    async function ensureViewer() {
+      if (viewer) return;
+      if (!checkWebGL()) throw new Error('WebGL 不可用');
+      const root = el('viewMain');
+      for (let i = 0; i < 120 && (root.clientWidth < 1 || root.clientHeight < 1); i++) {
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      sharedRenderer = tryCreateRenderer(root, root.clientWidth, root.clientHeight);
+      if (!sharedRenderer) throw new Error('无法创建 WebGL 渲染器');
+      applyViewBackground();
+      viewer = new GaussianSplats3D.Viewer({ rootElement: root, renderer: sharedRenderer, ...viewerOpts });
+      viewer.start();
+      tuneCamera();
+      initRigOverlayScene();
+      setupViewHelper();
+      overlayRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
+      overlayRenderer.setSize(128, 128);
+      setupGizmo();
+      setupRenderCamera();
+      setupPathPick();
+      startOverlayLoop();
+    }
+
+    const _pickRay = new THREE.Raycaster();
+    const _pickMouse = new THREE.Vector2();
+
+    function setupPathPick() {
+      viewer.renderer.domElement.addEventListener('pointerdown', (e) => {
+        if (!rigOpen || e.button !== 0) return;
+        const rect = viewer.renderer.domElement.getBoundingClientRect();
+        _pickMouse.set(
+          ((e.clientX - rect.left) / rect.width) * 2 - 1,
+          -((e.clientY - rect.top) / rect.height) * 2 + 1,
+        );
+        _pickRay.setFromCamera(_pickMouse, viewer.camera);
+        pathRoot?.updateMatrixWorld(true);
+
+        const objHits = _pickRay.intersectObjects([...cpMeshes, ...markerMeshes], false);
+        if (objHits.length) {
+          const obj = objHits[0].object;
+          if (obj.userData.cpPointIdx != null) {
+            const si = obj.userData.cpSegIdx;
+            const pi = obj.userData.cpPointIdx;
+            if (si === selectedCpSegIdx && pi === selectedCpPointIdx) {
+              confirmPathKeypoint();
+            } else {
+              selectPathCp(si, pi);
+            }
+            return;
+          }
+          if (rigGizmoMode || placementGizmoMode || markerGizmoMode) return;
+          if (obj.userData.markerIdx != null) {
+            selectMarker(obj.userData.markerIdx);
+            return;
+          }
+        }
+
+        if (pickPathSegment(e)) return;
+
+        if (rigGizmoMode || placementGizmoMode || markerGizmoMode) return;
+      });
+    }
+
+    function setupGizmo() {
+      if (!rigOverlayScene) initRigOverlayScene();
+      if (transformControls) {
+        try { transformControls.dispose(); } catch (_) {}
+      }
+      pivot = new THREE.Object3D();
+      viewer.threeScene.add(pivot);
+      transformControls = new TransformControls(viewer.camera, viewer.renderer.domElement);
+      rigOverlayScene.add(transformControls.getHelper());
+      applyAlwaysOnTop(transformControls.getHelper());
+      applyGizmoForSelection();
+      transformControls.addEventListener('dragging-changed', (e) => {
+        if (viewer.controls) viewer.controls.enabled = !e.value;
+        if (!e.value) {
+          syncActivePathFromState();
+          renderPathGroupList();
+          if (pathSlideActive && cameraMarkers.length >= 2 && !isPathSlideBlocked()) {
+            startPathSlidePreview();
+          }
+        }
+      });
+      transformControls.addEventListener('change', () => {
+        if (syncingFromGizmo) return;
+        const obj = transformControls.object;
+        if (obj?.userData?.cpPointIdx != null) {
+          const i = obj.userData.cpSegIdx;
+          const j = obj.userData.cpPointIdx;
+          const p = obj.position;
+          cameraPathSegments[i].points[j].x = p.x;
+          cameraPathSegments[i].points[j].y = p.y;
+          cameraPathSegments[i].points[j].z = p.z;
+          syncKeypointOrderAfterDrag(i, j, obj);
+          updatePathLine();
+          el('rigPreviewStatus').textContent = '需重新渲染';
+          viewer.forceRenderNextFrame();
+          return;
+        }
+        if (obj?.userData?.markerIdx != null) {
+          const i = obj.userData.markerIdx;
+          const p = obj.position;
+          cameraMarkers[i].x = p.x;
+          cameraMarkers[i].y = p.y;
+          cameraMarkers[i].z = p.z;
+          applyMarkerToRig(cameraMarkers[i]);
+          refreshPathVisuals();
+          el('rigPreviewStatus').textContent = '需重新渲染';
+          return;
+        }
+        if (rigOpen && rigGizmoMode && transformControls.object === renderCamRig) {
+          syncCameraHelper();
+          updateRigSliders();
+          el('rigPreviewStatus').textContent = '需重新渲染';
+          viewer.forceRenderNextFrame();
+          return;
+        }
+        if (selected < 0) return;
+        const p = placements[selected];
+        if (!p) return;
+        p.x = pivot.position.x;
+        p.y = pivot.position.y;
+        p.z = pivot.position.z;
+        const euler = new THREE.Euler().setFromQuaternion(pivot.quaternion, 'XYZ');
+        p.yaw_deg = THREE.MathUtils.radToDeg(euler.z);
+        syncPlacementTransform(p);
+        updateSelSliders();
+      });
+    }
+
+    function attachGizmo() {
+      if (!transformControls || !pivot) {
+        transformControls?.detach();
+        return;
+      }
+      applyGizmoForSelection();
+      if (selectedCpSegIdx >= 0 && selectedCpPointIdx >= 0 && markerGizmoMode) {
+        const cpMesh = findCpMesh(selectedCpSegIdx, selectedCpPointIdx);
+        if (cpMesh) {
+          transformControls.setMode('translate');
+          transformControls.attach(cpMesh);
+          return;
+        }
+      }
+      if (selectedMarkerIdx >= 0 && markerGizmoMode && markerMeshes[selectedMarkerIdx]) {
+        transformControls.setMode('translate');
+        transformControls.attach(markerMeshes[selectedMarkerIdx]);
+        return;
+      }
+      if (rigOpen && rigGizmoMode && renderCamRig) {
+        transformControls.setMode(rigGizmoMode);
+        transformControls.attach(renderCamRig);
+        return;
+      }
+      if (selected < 0 || !placementGizmoMode) {
+        transformControls.detach();
+        return;
+      }
+      const p = placements[selected];
+      if (!p) {
+        transformControls.detach();
+        return;
+      }
+      transformControls.setMode(placementGizmoMode);
+      syncingFromGizmo = true;
+      pivot.position.set(p.x, p.y, p.z);
+      pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+      pivot.scale.set(p.scale, p.scale, p.scale);
+      transformControls.attach(pivot);
+      syncingFromGizmo = false;
+    }
+
+    async function loadBase() {
+      setLoadProgress(10, '加载底板 map1.ply…');
+      const res = await fetch(BASE);
+      if (!res.ok) throw new Error('找不到 map1.ply');
+      const ab = await res.arrayBuffer();
+      baseSurfaceZ = computeBaseSurfaceZ(ab);
+      defaultZ = baseSurfaceZ;
+      el('defaultZ').value = defaultZ;
+      el('zVal').textContent = defaultZ.toFixed(4);
+      const buffer = await bufferFromPly(ab, ab.byteLength);
+      setLoadProgress(70, '渲染底板…');
+      await viewer.addSplatBuffers([buffer], [{ splatAlphaRemovalThreshold: PLY_ALPHA }], true, false, false, false, true);
+      baseReady = true;
+      hideLoadProgress();
+      status('底板就绪 · 拖入模型开始摆放');
+      renderList();
+    }
+
+    async function addPlacementFromFile(file) {
+      if (!baseReady) throw new Error('底板尚未就绪');
+      status(`加载 ${file.name}…`);
+      setLoadProgress(20, `解析 ${file.name}…`);
+      let ab = fileCache.get(file.name);
+      if (!ab) {
+        ab = await file.arrayBuffer();
+        fileCache.set(file.name, ab);
+      }
+      const bounds = computePlyBounds(ab);
+      const anchor = placementAnchorFromBounds(bounds);
+      const decRatio = getVisualDecimationRatio(file.size);
+      let visualAb = decimatePlyArrayBuffer(ab, decRatio);
+      visualAb = anchorPlyArrayBuffer(visualAb, anchor);
+      const splatBuffer = await GaussianSplats3D.PlyLoader.loadFromFileData(
+        visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
+      );
+      const p = {
+        name: file.name,
+        x: 0, y: 0, z: defaultZ,
+        scale: defaultScale,
+        yaw_deg: 0,
+        sceneIdx: null,
+        center: [anchor.x, anchor.y, anchor.z],
+      };
+      const sceneIdx = viewer.splatMesh?.scenes?.length ?? 1;
+      await viewer.addSplatBuffers([splatBuffer], [placementOpts(p)], true, false, false, false, true);
+      p.sceneIdx = sceneIdx;
+      placements.push(p);
+      selectPlacement(placements.length - 1);
+      hideLoadProgress();
+      status(`已放置 ${file.name}（共 ${placements.length} 个）`);
+      renderList();
+    }
+
+    function selectPlacement(idx) {
+      selected = idx;
+      if (idx >= 0) {
+        selectedMarkerIdx = -1;
+        selectedCpSegIdx = -1;
+        selectedCpPointIdx = -1;
+        markerGizmoMode = null;
+        rigGizmoMode = null;
+        updateRigGizmoUI();
+        el('gizmoMoveRig').classList.remove('active');
+        el('gizmoRotateRig').classList.remove('active');
+        if (rigOpen && cameraMarkers.length >= 2) startPathSlidePreview();
+      }
+      if (idx < 0) placementGizmoMode = null;
+      updatePlacementGizmoUI();
+      renderList();
+      const enabled = idx >= 0;
+      for (const id of ['selX', 'selY', 'selZ', 'selScale', 'selYaw']) el(id).disabled = !enabled;
+      if (enabled) {
+        updateSelSliders();
+        el('selHint').textContent = placements[idx].name;
+      } else {
+        el('selHint').textContent = '从列表选中模型';
+      }
+      attachGizmo();
+    }
+
+    function updateSelSliders() {
+      if (selected < 0) return;
+      const p = placements[selected];
+      el('selX').value = p.x; el('selXVal').textContent = p.x.toFixed(3);
+      el('selY').value = p.y; el('selYVal').textContent = p.y.toFixed(3);
+      el('selZ').value = p.z; el('selZVal').textContent = p.z.toFixed(4);
+      el('selScale').value = p.scale; el('selScaleVal').textContent = p.scale.toFixed(3);
+      el('selYaw').value = p.yaw_deg; el('selYawVal').textContent = `${p.yaw_deg.toFixed(0)}°`;
+    }
+
+    function onSelSliderChange() {
+      if (selected < 0) return;
+      const p = placements[selected];
+      p.x = parseFloat(el('selX').value);
+      p.y = parseFloat(el('selY').value);
+      p.z = parseFloat(el('selZ').value);
+      p.scale = parseFloat(el('selScale').value);
+      p.yaw_deg = parseFloat(el('selYaw').value);
+      syncPlacementTransform(p);
+      updateSelSliders();
+      syncingFromGizmo = true;
+      pivot.position.set(p.x, p.y, p.z);
+      pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+      syncingFromGizmo = false;
+    }
+
+    function removePlacement(idx) {
+      const p = placements[idx];
+      if (!p || p.sceneIdx == null || !viewer) return;
+      viewer.removeSplatScene(p.sceneIdx, false);
+      for (const other of placements) {
+        if (other.sceneIdx != null && other.sceneIdx > p.sceneIdx) other.sceneIdx--;
+      }
+      placements.splice(idx, 1);
+      if (selected === idx) selectPlacement(-1);
+      else if (selected > idx) selected--;
+      viewer.forceRenderNextFrame();
+      renderList();
+      status(`已删除，剩余 ${placements.length} 个`);
+    }
+
+    function renderList() {
+      const list = el('sceneList');
+      list.innerHTML = '';
+      const baseRow = document.createElement('div');
+      baseRow.className = 'scene-row base';
+      baseRow.innerHTML = `<span class="scene-name">${BASE_NAME}</span><span class="val">底板</span>`;
+      list.appendChild(baseRow);
+      placements.forEach((p, i) => {
+        const row = document.createElement('div');
+        row.className = 'scene-row' + (i === selected ? ' active' : '');
+        row.innerHTML = `<span class="scene-name">${p.name}</span>`;
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'icon-btn'; del.textContent = '×';
+        del.onclick = (e) => { e.stopPropagation(); removePlacement(i); };
+        row.appendChild(del);
+        row.onclick = () => selectPlacement(i);
+        list.appendChild(row);
+      });
+    }
+
+    function placementsToJson() {
+      return placements.map((p) => ({
+        asset: p.name,
+        x: p.x, y: p.y, z: p.z,
+        scale: p.scale,
+        yaw_deg: p.yaw_deg,
+        center: p.center,
+        pitch_deg: 0,
+        roll_deg: 0,
+        visible: true,
+      }));
+    }
+
+    function configToJson() {
+      syncActivePathFromState();
+      return {
+        version: 2,
+        base: {
+          asset: BASE_NAME,
+          surfaceZ: baseSurfaceZ ?? defaultZ,
+        },
+        defaults: {
+          scale: defaultScale,
+          z: defaultZ,
+        },
+        view: {
+          background: viewBgMode,
+        },
+        placements: placementsToJson(),
+        cameraPaths: cameraPaths.map((p) => ({
+          id: p.id,
+          name: p.name,
+          markers: p.markers,
+          segments: p.segments,
+          framesPerSeg: p.framesPerSeg,
+          fps: p.fps,
+        })),
+        activePathId: activePathId || null,
+        renderSettings: getRenderSettings(),
+      };
+    }
+
+    function exportConfigJson() {
+      const data = configToJson();
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const blob = new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.download = `scene_config_${ts}.json`;
+      link.href = URL.createObjectURL(blob);
+      link.click();
+      URL.revokeObjectURL(link.href);
+      status(`已导出 JSON · ${data.placements.length} 模型 · ${data.cameraPaths.length} 轨迹`);
+    }
+
+    async function mergeScene() {
+      if (hostMode !== 'server') {
+        throw new Error('合并完整模型需本地运行 python serve_editor.py');
+      }
+      status('合并完整模型中…');
+      const res = await fetch(apiUrl('api/merge'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ out: 'scene.ply' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '合并失败');
+      status('已生成 scene.ply（完整模型）');
+    }
+
+    async function savePlacements() {
+      let data;
+      try {
+        data = configToJson();
+      } catch (e) {
+        throw new Error(`配置生成失败: ${e.message}`);
+      }
+      let bodyText = '';
+      try {
+        bodyText = JSON.stringify(data);
+      } catch (e) {
+        throw new Error(`配置无法序列化为 JSON: ${e.message}`);
+      }
+      let res;
+      try {
+        if (hostMode === 'static') {
+          localStorage.setItem(CONFIG_STORAGE_KEY, bodyText);
+          const camNote = data.cameraPaths.length ? `${data.cameraPaths.length} 条轨迹` : '无相机轨迹';
+          status(`已保存到浏览器 · ${data.placements.length} 模型 · ${camNote}`);
+          return;
+        }
+        res = await fetch(apiUrl('api/placements'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: bodyText,
+        });
+      } catch (_) {
+        throw new Error('无法连接保存接口 · 请用 python serve_editor.py 启动，并访问 http://127.0.0.1:8080/placement_editor.html');
+      }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = body.error || `HTTP ${res.status}`;
+        if (/JSON list/i.test(msg)) {
+          throw new Error('保存失败：服务器版本过旧 · 请关闭旧终端里的 serve_editor.py，重新运行后再保存');
+        }
+        throw new Error(`保存失败：${msg}`);
+      }
+      const camNote = data.cameraPaths.length ? `${data.cameraPaths.length} 条轨迹` : '无相机轨迹';
+      status(`已保存 · ${data.placements.length} 模型 · ${camNote}`);
+    }
+
+    async function checkSaveApiHealth() {
+      if (hostMode === 'static') return null;
+      try {
+        const res = await fetch(apiUrl('api/health'));
+        if (!res.ok) return false;
+        const data = await res.json().catch(() => ({}));
+        return data.configVersion >= 2;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    async function restorePlacements(saved) {
+      if (!Array.isArray(saved) || !saved.length) return;
+      for (const item of saved) {
+        const name = item.asset;
+        if (!name || name === BASE_NAME) continue;
+        let ab = fileCache.get(name);
+        if (!ab) continue;
+        const file = new File([ab], name);
+        const p = {
+          name,
+          x: item.x ?? 0, y: item.y ?? 0, z: item.z ?? defaultZ,
+          scale: item.scale ?? defaultScale,
+          yaw_deg: item.yaw_deg ?? 0,
+          sceneIdx: null,
+          center: item.center ?? [0, 0, 0],
+        };
+        const bounds = computePlyBounds(ab);
+        const anchor = item.center
+          ? { x: item.center[0], y: item.center[1], z: item.center[2] }
+          : placementAnchorFromBounds(bounds);
+        if (!item.center) p.center = [anchor.x, anchor.y, anchor.z];
+        let visualAb = decimatePlyArrayBuffer(ab, getVisualDecimationRatio(ab.byteLength));
+        visualAb = anchorPlyArrayBuffer(visualAb, anchor);
+        const splatBuffer = await GaussianSplats3D.PlyLoader.loadFromFileData(
+          visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
+        );
+        const sceneIdx = viewer.splatMesh.scenes.length;
+        await viewer.addSplatBuffers([splatBuffer], [placementOpts(p)], true, false, false, false, true);
+        p.sceneIdx = sceneIdx;
+        placements.push(p);
+      }
+      renderList();
+      status(`底板就绪 · 已恢复 ${placements.length} 个摆放`);
+    }
+
+    function setupDragDrop() {
+      const view = el('view');
+      const prevent = (e) => { e.preventDefault(); e.stopPropagation(); };
+      view.addEventListener('dragenter', (e) => { prevent(e); view.classList.add('drag-over'); });
+      view.addEventListener('dragover', prevent);
+      view.addEventListener('dragleave', (e) => { prevent(e); view.classList.remove('drag-over'); });
+      view.addEventListener('drop', async (e) => {
+        prevent(e);
+        view.classList.remove('drag-over');
+        const files = [...(e.dataTransfer?.files || [])].filter((f) => f.name.toLowerCase().endsWith('.ply'));
+        if (!files.length) { status('请拖入 .ply 模型文件'); return; }
+        for (const f of files) {
+          try { await addPlacementFromFile(f); } catch (err) { status(`失败: ${err.message}`); }
+        }
+      });
+    }
+
+    function showError(e) {
+      console.error(e);
+      hideLoadProgress();
+      status(`错误: ${e.message}`);
+    }
+
+    el('importBtn').onclick = () => el('pickFile').click();
+    el('pickFile').onchange = async () => {
+      const files = [...(el('pickFile').files || [])];
+      el('pickFile').value = '';
+      for (const f of files) {
+        try { await addPlacementFromFile(f); } catch (e) { showError(e); }
+      }
+    };
+    el('viewBgSelect').onchange = (e) => applyViewBackground(e.target.value);
+    el('defaultScale').oninput = (e) => {
+      defaultScale = parseFloat(e.target.value);
+      el('scaleVal').textContent = defaultScale.toFixed(2);
+    };
+    el('defaultZ').oninput = (e) => {
+      defaultZ = parseFloat(e.target.value);
+      el('zVal').textContent = defaultZ.toFixed(4);
+    };
+    for (const id of ['selX', 'selY', 'selZ', 'selScale', 'selYaw']) el(id).oninput = onSelSliderChange;
+    el('gizmoMove').onclick = () => togglePlacementGizmo('translate');
+    el('gizmoRotate').onclick = () => togglePlacementGizmo('rotate');
+    el('gizmoMoveRig').onclick = () => toggleRigGizmo('translate');
+    el('gizmoRotateRig').onclick = () => toggleRigGizmo('rotate');
+    el('toggleRigBtn').onclick = () => toggleRigCamera();
+    el('tabModelsBtn').onclick = () => switchPanelTab('models');
+    el('tabCameraBtn').onclick = () => switchPanelTab('camera');
+    el('saveBtn').onclick = () => savePlacements().catch(showError);
+    el('importJsonBtn').onclick = () => el('importConfigFile').click();
+    el('importConfigFile').onchange = async () => {
+      const file = el('importConfigFile').files?.[0];
+      el('importConfigFile').value = '';
+      if (!file) return;
+      try { await importConfigFromFile(file); } catch (e) { showError(e); }
+    };
+    el('exportJsonBtn').onclick = () => exportConfigJson();
+    el('mergeBtn').onclick = () => mergeScene().catch(showError);
+    el('addMarkerBtn').onclick = () => addCameraMarker();
+    el('addPathGroupBtn').onclick = () => addCameraPathGroup();
+    el('deletePathGroupBtn').onclick = () => deleteCameraPathGroup();
+    el('confirmKeypointBtn').onclick = () => confirmPathKeypoint();
+    el('deleteKeypointBtn').onclick = () => deleteSelectedPathKeypoint();
+    el('pathFrames').oninput = (e) => {
+      pathFramesPerSeg = parseInt(e.target.value, 10);
+      el('pathFramesVal').textContent = pathFramesPerSeg;
+      syncActivePathFromState();
+    };
+    el('pathFps').oninput = (e) => {
+      pathFps = parseInt(e.target.value, 10);
+      el('pathFpsVal').textContent = pathFps;
+      syncActivePathFromState();
+    };
+    el('renderPreviewBtn').onclick = () => onRenderPreviewClick().catch(showError);
+    el('renderExportBtn').onclick = () => gaussianRenderFromRig().catch(showError);
+    for (const id of ['rigX', 'rigY', 'rigZ']) el(id).oninput = onRigSliderChange;
+    for (const id of ['rigYaw', 'rigPitch', 'rigRoll']) el(id).oninput = onRigRotationChange;
+    for (const id of ['rigFov', 'rigNear', 'rigFar']) el(id).oninput = syncRenderCameraParams;
+    el('renderWidth').onchange = syncRenderCameraParams;
+    el('renderHeight').onchange = syncRenderCameraParams;
+    el('showFrustum').onchange = (e) => {
+      const show = e.target.checked;
+      if (cameraHelper) {
+        cameraHelper.visible = rigOpen && show;
+        if (show) styleCameraHelperOnTop();
+      }
+      viewer?.forceRenderNextFrame();
+    };
+
+    const rigPreviewCanvas = el('rigPreviewCanvas');
+    rigPreviewCanvas.width = RIG_PREVIEW_W;
+    rigPreviewCanvas.height = RIG_PREVIEW_H;
+
+    window.addEventListener('keydown', (e) => {
+      if (e.target.matches('input,select,textarea')) return;
+      if (selected >= 0) {
+        if (e.key === 'q' || e.key === 'Q') togglePlacementGizmo('translate');
+        if (e.key === 'w' || e.key === 'W') togglePlacementGizmo('rotate');
+      } else if (rigOpen) {
+        if (selectedCpPointIdx >= 0) {
+          if (e.key === 'Enter') { confirmPathKeypoint(); return; }
+          if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelectedPathKeypoint(); return; }
+          if (e.key === 'q' || e.key === 'Q') toggleRigGizmo('translate');
+        } else if (selectedMarkerIdx >= 0 || selectedCpSegIdx >= 0) {
+          if (e.key === 'q' || e.key === 'Q') toggleRigGizmo('translate');
+        } else {
+          if (e.key === 'q' || e.key === 'Q') toggleRigGizmo('translate');
+          if (e.key === 'w' || e.key === 'W') toggleRigGizmo('rotate');
+        }
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      if (!viewer?.renderer?.domElement?.parentElement) return;
+      const root = el('viewMain');
+      if (root.clientWidth > 0 && root.clientHeight > 0) viewer.renderer.setSize(root.clientWidth, root.clientHeight);
+    });
+
+    setupDragDrop();
+    applyViewBackground();
+    updatePlacementGizmoUI();
+    updateRigGizmoUI();
+
+    (async () => {
+      try {
+        hostMode = await detectHostMode();
+        updateHostModeUI();
+        await ensureViewer();
+        await loadBase();
+        const cfg = await loadSavedConfig();
+        applyConfigMeta(cfg);
+        if (cfg.placements.length) {
+          await restorePlacements(cfg.placements);
+        } else if (hostMode === 'server') {
+          status('底板就绪 · 拖入模型恢复摆放（需同名文件）');
+        }
+        restoreCameraPaths(cfg.cameraPaths, cfg.activePathId, cfg.renderSettings);
+        const saveOk = await checkSaveApiHealth();
+        if (saveOk === false) {
+          status('底板就绪 · 保存接口版本过旧，请重启 serve_editor.py 后再点保存');
+        } else if (cfg.placements.length) {
+          status(`底板就绪 · ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
+        } else if (baseReady) {
+          const modeNote = hostMode === 'static' ? ' · 在线版（配置存浏览器）' : '';
+          status(`底板就绪${modeNote} · 拖入模型开始摆放`);
+        }
+      } catch (e) { showError(e); }
+    })();
+  </script>
+</body>
+</html>
