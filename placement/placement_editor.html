@@ -51,6 +51,13 @@
     .hint { font-size: 12px; color: #888; line-height: 1.5; }
     .status { font-size: 12px; color: #6cf; min-height: 18px; word-break: break-all; }
     .val { color: #aaa; font-size: 11px; }
+    .val-editable { cursor: pointer; border-bottom: 1px dotted #666; }
+    .val-editable:hover { color: #ddd; border-bottom-color: #6cf; }
+    .val-inline-input {
+      width: 72px; background: #252525; border: 1px solid #6cf; color: #eee;
+      padding: 1px 4px; border-radius: 3px; font-size: 11px;
+    }
+    .render-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
     #loadProgressWrap[hidden] { display: none !important; }
     #loadProgressBar { height: 5px; background: #2a2a2a; border-radius: 3px; overflow: hidden; }
     #loadProgressFill { height: 100%; width: 0%; background: linear-gradient(90deg, #2d6cdf, #6cf); transition: width .12s; }
@@ -259,6 +266,14 @@
           </div>
         </div>
         <p id="pathSlideStatus" class="hint" style="color:#2a8f6a;font-weight:600" hidden>路径预览：待机</p>
+        <div id="pathPinSection" hidden>
+          <h2 style="margin-top:8px">路径定点</h2>
+          <label>路径位置 <span class="val" id="pathPinTVal">0%</span>
+            <input type="range" id="pathPinT" min="0" max="100" step="0.1" value="0" />
+          </label>
+          <label><input type="checkbox" id="pathPinLock" /> 定点（暂停滑动）</label>
+          <p class="hint">拖动位置条可预览轨迹上任意点；勾选定点后可用下方单帧渲染/保存</p>
+        </div>
         <h2 style="margin-top:8px">默认参数</h2>
         <label>每段帧数 <span class="val" id="pathFramesVal">16</span>
           <input type="range" id="pathFrames" min="8" max="48" step="1" value="16" />
@@ -300,8 +315,12 @@
           <label>渲染高 <input type="number" id="renderHeight" min="240" max="4096" step="1" value="1080" /></label>
         </div>
         <label><input type="checkbox" id="showFrustum" checked /> 显示四棱锥</label>
-        <button type="button" id="renderPreviewBtn">渲染预览</button>
-        <button type="button" id="renderExportBtn" class="secondary">导出 PNG</button>
+        <div class="render-actions">
+          <button type="button" id="renderPreviewBtn">预览单帧</button>
+          <button type="button" id="renderExportSingleBtn" class="secondary">保存单帧 PNG</button>
+          <button type="button" id="renderExportSequenceBtn" class="secondary">导出路径 PNG 序列</button>
+          <button type="button" id="renderPathVideoBtn" class="secondary">预览路径视频</button>
+        </div>
       </section>
     </div>
     <input type="file" id="importConfigFile" accept=".json,application/json" hidden />
@@ -424,6 +443,8 @@
     let previewPlaybackRaf = 0;
     let pathFramesPerSeg = 16;
     let pathFps = 12;
+    let pathPinT = 0;
+    let pathPinLocked = false;
 
     const _tmpEuler = new THREE.Euler();
     const _tmpQuatA = new THREE.Quaternion();
@@ -1401,6 +1422,36 @@
       return { position: _tmpVecPos.clone(), quaternion: _tmpQuatOut.clone() };
     }
 
+    function updatePathPinUI() {
+      const hasPath = cameraMarkers.length >= 2;
+      el('pathPinSection').hidden = !hasPath;
+      el('renderExportSequenceBtn').disabled = !hasPath;
+      el('renderPathVideoBtn').disabled = !hasPath;
+      if (!hasPath) {
+        pathPinLocked = false;
+        if (el('pathPinLock')) el('pathPinLock').checked = false;
+      }
+    }
+
+    function applyPathPinPosition() {
+      if (cameraMarkers.length < 2 || !renderCamRig) return;
+      const sample = samplePathAt(pathPinT);
+      if (!sample) return;
+      renderCamRig.position.copy(sample.position);
+      renderCamRig.quaternion.copy(sample.quaternion);
+      syncCameraHelper();
+      updateRigSliders();
+      viewer?.forceRenderNextFrame();
+      el('rigPreviewStatus').textContent = '需重新渲染';
+    }
+
+    function onPathPinTChange() {
+      pathPinT = Math.max(0, Math.min(1, parseFloat(el('pathPinT').value) / 100));
+      el('pathPinTVal').textContent = `${(pathPinT * 100).toFixed(1)}%`;
+      stopPathSlidePreview();
+      applyPathPinPosition();
+    }
+
     function refreshPathVisuals() {
       if (!pathRoot) return;
       cameraMarkers.forEach((m, i) => {
@@ -1413,6 +1464,7 @@
         });
       });
       updatePathLine();
+      updatePathPinUI();
       viewer?.forceRenderNextFrame();
     }
 
@@ -1467,6 +1519,10 @@
 
     function selectMarker(idx) {
       selectedMarkerIdx = idx;
+      if (idx >= 0 && pathPinLocked) {
+        pathPinLocked = false;
+        el('pathPinLock').checked = false;
+      }
       selectedCpSegIdx = -1;
       selectedCpPointIdx = -1;
       selected = -1;
@@ -1757,8 +1813,182 @@
     }
 
     async function onRenderPreviewClick() {
-      if (cameraMarkers.length >= 2) await renderPathVideoPreview();
-      else await renderRigPreviewFrame();
+      await renderRigPreviewFrame();
+    }
+
+    function canvasToPngBlob(canvas) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('PNG 编码失败'))), 'image/png');
+      });
+    }
+
+    function downloadBlob(blob, filename) {
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = URL.createObjectURL(blob);
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+
+    async function withRenderSceneHidden(fn) {
+      const orbitCam = viewer.camera;
+      const renderer = viewer.renderer;
+      const saved = {
+        position: orbitCam.position.clone(),
+        quaternion: orbitCam.quaternion.clone(),
+        fov: orbitCam.fov,
+        near: orbitCam.near,
+        far: orbitCam.far,
+        aspect: orbitCam.aspect,
+        target: viewer.controls?.target?.clone(),
+        controlsEnabled: viewer.controls?.enabled ?? true,
+      };
+      const oldSize = renderer.getSize(new THREE.Vector2());
+      const oldPixelRatio = renderer.getPixelRatio();
+      const oldClear = renderer.getClearColor(new THREE.Color());
+      const oldAlpha = renderer.getClearAlpha();
+      const oldViewBg = viewBgMode;
+      const helperWasVisible = cameraHelper?.visible ?? true;
+      const tcHelper = transformControls?.getHelper?.();
+      const tcHelperWasVisible = tcHelper?.visible ?? true;
+      const pathWasVisible = pathRoot?.visible ?? false;
+      const gizmoWasAttached = transformControls?.object != null;
+
+      transformControls?.detach();
+      if (cameraHelper) cameraHelper.visible = false;
+      if (tcHelper) tcHelper.visible = false;
+      if (pathRoot) pathRoot.visible = false;
+      el('viewHelper').style.visibility = 'hidden';
+
+      try {
+        return await fn();
+      } finally {
+        orbitCam.position.copy(saved.position);
+        orbitCam.quaternion.copy(saved.quaternion);
+        if (orbitCam.isPerspectiveCamera) {
+          orbitCam.fov = saved.fov;
+          orbitCam.near = saved.near;
+          orbitCam.far = saved.far;
+          orbitCam.aspect = saved.aspect;
+          orbitCam.updateProjectionMatrix();
+        }
+        if (viewer.controls) {
+          if (saved.target) viewer.controls.target.copy(saved.target);
+          viewer.controls.enabled = saved.controlsEnabled;
+          viewer.controls.update();
+        }
+        renderer.setPixelRatio(oldPixelRatio);
+        renderer.setSize(oldSize.x, oldSize.y, false);
+        renderer.setClearColor(oldClear, oldAlpha);
+        applyViewBackground(oldViewBg);
+        if (cameraHelper) cameraHelper.visible = helperWasVisible;
+        if (tcHelper) tcHelper.visible = tcHelperWasVisible;
+        if (pathRoot) pathRoot.visible = pathWasVisible && rigOpen;
+        el('viewHelper').style.visibility = '';
+        if (gizmoWasAttached) attachGizmo();
+        viewer.updateSplatMesh();
+        viewer.forceRenderNextFrame();
+      }
+    }
+
+    async function renderGaussFullResCanvas() {
+      if (!viewer?.renderer || !sceneReady || !renderCamera) throw new Error('场景未就绪');
+      const renderer = viewer.renderer;
+      const renderW = Math.max(1, parseInt(el('renderWidth').value, 10) || 1920);
+      const renderH = Math.max(1, parseInt(el('renderHeight').value, 10) || 1080);
+      const orbitCam = viewer.camera;
+
+      return withRenderSceneHidden(async () => {
+        applyRenderCameraToViewer(orbitCam, renderW / renderH);
+        if (viewer.controls) viewer.controls.enabled = false;
+
+        renderer.setPixelRatio(1);
+        renderer.setSize(renderW, renderH, false);
+        renderer.setClearColor(0x000000, 0);
+        el('view').style.background = 'transparent';
+
+        viewer.updateSplatMesh();
+        viewer.render();
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        viewer.updateSplatMesh();
+        viewer.render();
+        await new Promise((r) => requestAnimationFrame(r));
+
+        const out = document.createElement('canvas');
+        out.width = renderW;
+        out.height = renderH;
+        out.getContext('2d').drawImage(renderer.domElement, 0, 0, renderW, renderH);
+        return out;
+      });
+    }
+
+    async function gaussianRenderFromRig() {
+      status('保存单帧 PNG…');
+      const canvas = await renderGaussFullResCanvas();
+      const blob = await canvasToPngBlob(canvas);
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      downloadBlob(blob, `gaussian_frame_${ts}.png`);
+      status(`单帧已保存 ${canvas.width}×${canvas.height}`);
+    }
+
+    async function exportPathSequencePngs() {
+      if (cameraMarkers.length < 2) throw new Error('至少需要 2 个机位才能导出路径序列');
+      stopPathSlidePreview();
+      stopPreviewPlayback();
+
+      const segs = cameraMarkers.length - 1;
+      const totalFrames = segs * pathFramesPerSeg + 1;
+      const renderW = Math.max(1, parseInt(el('renderWidth').value, 10) || 1920);
+      const renderH = Math.max(1, parseInt(el('renderHeight').value, 10) || 1080);
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const folderName = `gaussian_sequence_${ts}`;
+
+      const savedPos = renderCamRig.position.clone();
+      const savedQuat = renderCamRig.quaternion.clone();
+      const frames = [];
+
+      try {
+        for (let f = 0; f < totalFrames; f++) {
+          const sample = samplePathAt(f / (totalFrames - 1));
+          renderCamRig.position.copy(sample.position);
+          renderCamRig.quaternion.copy(sample.quaternion);
+          syncCameraHelper();
+          const canvas = await renderGaussFullResCanvas();
+          const blob = await canvasToPngBlob(canvas);
+          const name = `frame_${String(f + 1).padStart(5, '0')}.png`;
+          frames.push({ name, blob });
+          if (f % 2 === 0 || f === totalFrames - 1) {
+            status(`渲染路径序列 ${f + 1}/${totalFrames}…`);
+          }
+        }
+
+        if (typeof window.showDirectoryPicker === 'function') {
+          const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+          const seqDir = await dirHandle.getDirectoryHandle(folderName, { create: true });
+          for (const { name, blob } of frames) {
+            const fileHandle = await seqDir.getFileHandle(name, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+          }
+          status(`已导出 ${totalFrames} 帧到文件夹 ${folderName}/`);
+        } else {
+          const { default: JSZip } = await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm');
+          const zip = new JSZip();
+          const folder = zip.folder(folderName);
+          for (const { name, blob } of frames) folder.file(name, blob);
+          const zipBlob = await zip.generateAsync({ type: 'blob' });
+          downloadBlob(zipBlob, `${folderName}.zip`);
+          status(`已下载 ${folderName}.zip（${totalFrames} 帧 @ ${renderW}×${renderH}）`);
+        }
+      } finally {
+        renderCamRig.position.copy(savedPos);
+        renderCamRig.quaternion.copy(savedQuat);
+        syncCameraHelper();
+        updateRigSliders();
+        refreshPathVisuals();
+        if (!pathPinLocked && cameraMarkers.length >= 2 && !isPathSlideBlocked()) startPathSlidePreview();
+      }
     }
 
     function updateRigSliders() {
@@ -1909,7 +2139,8 @@
       attachGizmo();
       syncCameraHelper();
       updateKeypointEditUI();
-      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      updatePathPinUI();
+      if (cameraMarkers.length >= 2 && !pathPinLocked) startPathSlidePreview();
       el('rigPreviewStatus').textContent = '未渲染';
       status(cameraMarkers.length >= 2 ? '路径预览中' : (cameraPaths.length ? '＋ 当前机位 开始' : '新建轨迹 或 ＋ 当前机位'));
     }
@@ -2019,95 +2250,6 @@
         if (aspectOverride != null) targetCam.aspect = aspectOverride;
         else targetCam.aspect = renderCamera.aspect;
         targetCam.updateProjectionMatrix();
-      }
-    }
-
-    async function gaussianRenderFromRig() {
-      if (!viewer?.renderer || !sceneReady || !renderCamera) throw new Error('场景未就绪');
-
-      status('从高斯机位渲染…');
-      const renderer = viewer.renderer;
-      const renderW = Math.max(1, parseInt(el('renderWidth').value, 10) || 1920);
-      const renderH = Math.max(1, parseInt(el('renderHeight').value, 10) || 1080);
-
-      const orbitCam = viewer.camera;
-      const saved = {
-        position: orbitCam.position.clone(),
-        quaternion: orbitCam.quaternion.clone(),
-        fov: orbitCam.fov,
-        near: orbitCam.near,
-        far: orbitCam.far,
-        aspect: orbitCam.aspect,
-        target: viewer.controls?.target?.clone(),
-        controlsEnabled: viewer.controls?.enabled ?? true,
-      };
-      const oldSize = renderer.getSize(new THREE.Vector2());
-      const oldPixelRatio = renderer.getPixelRatio();
-      const oldClear = renderer.getClearColor(new THREE.Color());
-      const oldAlpha = renderer.getClearAlpha();
-      const oldViewBg = viewBgMode;
-      const helperWasVisible = cameraHelper?.visible ?? true;
-      const tcHelper = transformControls?.getHelper?.();
-      const tcHelperWasVisible = tcHelper?.visible ?? true;
-
-      const gizmoWasAttached = transformControls?.object != null;
-      transformControls?.detach();
-      if (cameraHelper) cameraHelper.visible = false;
-      if (tcHelper) tcHelper.visible = false;
-      el('viewHelper').style.visibility = 'hidden';
-
-      try {
-        applyRenderCameraToViewer(orbitCam, renderW / renderH);
-        if (viewer.controls) viewer.controls.enabled = false;
-
-        renderer.setPixelRatio(1);
-        renderer.setSize(renderW, renderH, false);
-        renderer.setClearColor(0x000000, 0);
-        el('view').style.background = 'transparent';
-
-        viewer.updateSplatMesh();
-        viewer.render();
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-        viewer.updateSplatMesh();
-        viewer.render();
-        await new Promise((r) => requestAnimationFrame(r));
-
-        const out = document.createElement('canvas');
-        out.width = renderW;
-        out.height = renderH;
-        out.getContext('2d').drawImage(renderer.domElement, 0, 0, renderW, renderH);
-
-        const link = document.createElement('a');
-        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        link.download = `gaussian_render_${ts}.png`;
-        link.href = out.toDataURL('image/png');
-        link.click();
-        status(`高斯渲染完成 ${renderW}×${renderH}`);
-      } finally {
-        orbitCam.position.copy(saved.position);
-        orbitCam.quaternion.copy(saved.quaternion);
-        if (orbitCam.isPerspectiveCamera) {
-          orbitCam.fov = saved.fov;
-          orbitCam.near = saved.near;
-          orbitCam.far = saved.far;
-          orbitCam.aspect = saved.aspect;
-          orbitCam.updateProjectionMatrix();
-        }
-        if (viewer.controls) {
-          if (saved.target) viewer.controls.target.copy(saved.target);
-          viewer.controls.enabled = saved.controlsEnabled;
-          viewer.controls.update();
-        }
-        renderer.setPixelRatio(oldPixelRatio);
-        renderer.setSize(oldSize.x, oldSize.y, false);
-        renderer.setClearColor(oldClear, oldAlpha);
-        applyViewBackground(oldViewBg);
-        if (cameraHelper) cameraHelper.visible = helperWasVisible;
-        if (tcHelper) tcHelper.visible = tcHelperWasVisible;
-        el('viewHelper').style.visibility = '';
-        if (gizmoWasAttached) attachGizmo();
-        viewer.updateSplatMesh();
-        viewer.forceRenderNextFrame();
       }
     }
 
@@ -2829,6 +2971,65 @@
       }
     };
     el('viewBgSelect').onchange = (e) => applyViewBackground(e.target.value);
+    function makeValEditable(valId, sliderId, opts = {}) {
+      const valEl = el(valId);
+      if (!valEl) return;
+      const parse = opts.parse || ((t) => parseFloat(String(t).replace(/[^\d.-]/g, '')));
+      const canEdit = opts.canEdit || (() => !el(sliderId).disabled);
+      valEl.classList.add('val-editable');
+      valEl.title = '点击输入数值';
+      valEl.addEventListener('click', () => {
+        if (!canEdit()) return;
+        const slider = el(sliderId);
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'val-inline-input';
+        input.value = parse(valEl.textContent);
+        input.step = slider.step || 'any';
+        valEl.style.display = 'none';
+        valEl.insertAdjacentElement('afterend', input);
+        input.focus();
+        input.select();
+        const finish = (apply) => {
+          if (apply) {
+            const v = parse(input.value);
+            if (!Number.isNaN(v)) {
+              slider.value = v;
+              slider.dispatchEvent(new Event('input', { bubbles: true }));
+              if (sliderId === 'pathPinT') slider.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }
+          input.remove();
+          valEl.style.display = '';
+        };
+        input.addEventListener('blur', () => finish(true));
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+          if (e.key === 'Escape') finish(false);
+        });
+      });
+    }
+
+    function setupEditableVals() {
+      [
+        ['scaleVal', 'defaultScale'],
+        ['zVal', 'defaultZ'],
+        ['selXVal', 'selX'],
+        ['selYVal', 'selY'],
+        ['selZVal', 'selZ'],
+        ['selScaleVal', 'selScale'],
+        ['pathFramesVal', 'pathFrames', { parse: (v) => parseInt(v, 10) }],
+        ['pathFpsVal', 'pathFps', { parse: (v) => parseInt(v, 10) }],
+        ['pathPinTVal', 'pathPinT', { parse: (t) => parseFloat(String(t).replace(/%/g, '')), canEdit: () => cameraMarkers.length >= 2 }],
+        ['rigXVal', 'rigX'],
+        ['rigYVal', 'rigY'],
+        ['rigZVal', 'rigZ'],
+        ['rigFovVal', 'rigFov', { parse: (t) => parseFloat(String(t).replace(/°/g, '')) }],
+        ['rigNearVal', 'rigNear'],
+        ['rigFarVal', 'rigFar'],
+      ].forEach((args) => makeValEditable(...args));
+    }
+
     el('defaultScale').oninput = (e) => {
       defaultScale = parseFloat(e.target.value);
       el('scaleVal').textContent = defaultScale.toFixed(2);
@@ -2870,8 +3071,23 @@
       el('pathFpsVal').textContent = pathFps;
       syncActivePathFromState();
     };
+    el('pathPinT').oninput = onPathPinTChange;
+    el('pathPinT').onchange = () => {
+      if (!pathPinLocked && cameraMarkers.length >= 2 && !isPathSlideBlocked()) startPathSlidePreview();
+    };
+    el('pathPinLock').onchange = () => {
+      pathPinLocked = el('pathPinLock').checked;
+      if (pathPinLocked) {
+        stopPathSlidePreview();
+        applyPathPinPosition();
+      } else if (cameraMarkers.length >= 2 && !isPathSlideBlocked()) {
+        startPathSlidePreview();
+      }
+    };
     el('renderPreviewBtn').onclick = () => onRenderPreviewClick().catch(showError);
-    el('renderExportBtn').onclick = () => gaussianRenderFromRig().catch(showError);
+    el('renderExportSingleBtn').onclick = () => gaussianRenderFromRig().catch(showError);
+    el('renderExportSequenceBtn').onclick = () => exportPathSequencePngs().catch(showError);
+    el('renderPathVideoBtn').onclick = () => renderPathVideoPreview().catch(showError);
     for (const id of ['rigX', 'rigY', 'rigZ']) el(id).oninput = onRigSliderChange;
     for (const id of ['rigYaw', 'rigPitch', 'rigRoll']) el(id).oninput = onRigRotationChange;
     for (const id of ['rigFov', 'rigNear', 'rigFar']) el(id).oninput = syncRenderCameraParams;
@@ -2919,6 +3135,9 @@
     applyViewBackground();
     updatePlacementGizmoUI();
     updateRigGizmoUI();
+
+    setupEditableVals();
+    updatePathPinUI();
 
     (async () => {
       try {
