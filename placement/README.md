@@ -1,10 +1,10 @@
 # 摆放器（placement）
 
-在 `map1.ply` 底板上摆放 Gaussian Splat 建筑，编辑相机轨迹，导出 JSON 配置。
+拖入 Gaussian Splat 模型（PLY）进行摆放，编辑相机轨迹，导出 JSON 配置。
 
 ## 在线
 
-`https://jonnnty.github.io/AI-block/placement/placement_editor.html`
+https://jonnnty.github.io/AI-block/placement/placement_editor.html
 
 ## 本地
 

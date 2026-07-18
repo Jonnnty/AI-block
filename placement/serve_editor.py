@@ -91,7 +91,6 @@ class Handler(SimpleHTTPRequestHandler):
             cmd = [
                 sys.executable,
                 str(ROOT / "place_buildings.py"),
-                "--base", "map1.ply",
                 "--config", "placements.json",
                 "--out", out,
             ]
@@ -111,7 +110,7 @@ def main() -> None:
     host = os.environ.get("HOST", "127.0.0.1")
     httpd = ReusableThreadingHTTPServer((host, port), Handler)
     print(f"摆放器: http://{host}:{port}/placement_editor.html")
-    print(f"  底板: {ROOT / 'map1.ply'}")
+    print("  拖入 PLY 模型开始摆放")
     print("  Ctrl+C to stop")
     try:
         httpd.serve_forever()

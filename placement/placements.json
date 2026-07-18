@@ -1,34 +1,13 @@
 {
   "version": 2,
-  "base": {
-    "asset": "map1.ply",
-    "surfaceZ": 0.000308458402287215
-  },
   "defaults": {
     "scale": 0.12,
-    "z": 0.000308458402287215
+    "z": 0.0006
   },
   "view": {
     "background": "cream"
   },
-  "placements": [
-    {
-      "asset": "three_story_house.ply",
-      "x": 0,
-      "y": 0,
-      "z": 0.000308458402287215,
-      "scale": 0.12,
-      "yaw_deg": 0,
-      "center": [
-        -0.01545533324550436,
-        0.0718055306631693,
-        -0.5020318627357483
-      ],
-      "pitch_deg": 0,
-      "roll_deg": 0,
-      "visible": true
-    }
-  ],
+  "placements": [],
   "cameraPaths": [],
   "activePathId": null,
   "renderSettings": {
@@ -37,7 +16,6 @@
     "far": 8,
     "width": 1920,
     "height": 1080,
-    "hideBaseExport": true,
     "showFrustum": true
   }
 }

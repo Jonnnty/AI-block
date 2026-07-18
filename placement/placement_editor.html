@@ -59,7 +59,6 @@
     }
     .scene-row:hover { background: #2a2a2a; }
     .scene-row.active { background: #1e2a40; border-color: #2d6cdf; }
-    .scene-row.base { opacity: .7; cursor: default; }
     .scene-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .icon-btn {
       width: 24px; height: 24px; padding: 0; border-radius: 4px; background: transparent;
@@ -165,7 +164,7 @@
   <div id="panel">
     <div class="panel-head">
       <div class="panel-head-left">
-        <div class="status" id="status">加载底板…</div>
+        <div class="status" id="status">初始化…</div>
       </div>
       <div class="panel-head-actions">
         <button type="button" id="saveBtn" class="panel-action-btn" title="保存配置">保存</button>
@@ -185,10 +184,6 @@
 
     <div id="modelsPanel">
       <section>
-        <h2>底板</h2>
-        <p class="hint">map1.ply（固定）</p>
-      </section>
-      <section>
         <h2>导入模型</h2>
         <input type="file" id="pickFile" accept=".ply" multiple />
         <button type="button" id="importBtn" class="secondary">选择 PLY 文件</button>
@@ -206,7 +201,7 @@
         <label>落地高度 Z <span class="val" id="zVal">0.0006</span>
           <input type="range" id="defaultZ" min="-0.002" max="0.003" step="0.0001" value="0.0006" />
         </label>
-        <p class="hint">建筑底部对齐底盘上层平台</p>
+        <p class="hint">新导入模型默认使用此比例与高度</p>
       </section>
       <section>
         <h2>选中项</h2>
@@ -315,7 +310,6 @@
     import { ViewHelper } from 'three/addons/helpers/ViewHelper.js';
     import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 
-    const BASE_NAME = 'map1.ply';
     const CONFIG_STORAGE_KEY = 'placement_editor_v2_config';
 
     function resolveAppBase() {
@@ -326,14 +320,13 @@
     }
 
     const APP_BASE = resolveAppBase();
-    const BASE = `${APP_BASE}${BASE_NAME}`;
     const apiUrl = (p) => `${APP_BASE}${p.replace(/^\//, '')}`;
 
     /** @type {'server' | 'static'} */
     let hostMode = 'static';
     const PLY_ALPHA = 1;
     const VIEW_OFFSET = { x: 0.14, y: 0, z: 0 };
-    const BASE_SURFACE_Z_FALLBACK = 0.0006;
+    const DEFAULT_Z_FALLBACK = 0.0006;
     const VISUAL_DECIMATION = 0.3;
     const VISUAL_DECIMATION_MEDIUM = 0.2;
     const VISUAL_DECIMATION_LARGE = 0.15;
@@ -379,11 +372,10 @@
     let rigGizmoMode = null;
     let selected = -1;
     let rigOpen = false;
-    let baseReady = false;
+    let sceneReady = false;
     let syncingFromGizmo = false;
     let defaultScale = 0.12;
-    let defaultZ = BASE_SURFACE_Z_FALLBACK;
-    let baseSurfaceZ = BASE_SURFACE_Z_FALLBACK;
+    let defaultZ = DEFAULT_Z_FALLBACK;
     let viewBgMode = localStorage.getItem('viewBackground') || 'cream';
 
     let renderCamRig = null;
@@ -759,12 +751,32 @@
       const cfg = parseSavedConfig(JSON.parse(text));
       applyConfigMeta(cfg);
       for (let i = placements.length - 1; i >= 0; i--) removePlacement(i);
-      if (cfg.placements.length) await restorePlacements(cfg.placements);
+      const savedPlacements = placementsFromConfig(cfg);
+      if (savedPlacements.length) await restorePlacements(savedPlacements);
       restoreCameraPaths(cfg.cameraPaths, cfg.activePathId, cfg.renderSettings);
       if (hostMode === 'static') {
         localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(configToJson()));
       }
       status(`已导入 · ${placements.length} 模型 · ${cameraPaths.length} 轨迹（建筑 PLY 需同名文件在缓存中）`);
+    }
+
+    function placementsFromConfig(cfg) {
+      const list = [...(cfg.placements || [])];
+      const baseAsset = cfg.base?.asset;
+      if (baseAsset && !list.some((p) => p.asset === baseAsset)) {
+        list.unshift({
+          asset: baseAsset,
+          x: 0,
+          y: 0,
+          z: cfg.base?.surfaceZ ?? cfg.defaults?.z ?? defaultZ,
+          scale: 1,
+          yaw_deg: 0,
+          pitch_deg: 0,
+          roll_deg: 0,
+          visible: true,
+        });
+      }
+      return list;
     }
 
     function parseSavedConfig(saved) {
@@ -2008,7 +2020,7 @@
     }
 
     async function gaussianRenderFromRig() {
-      if (!viewer?.renderer || !baseReady || !renderCamera) throw new Error('场景未就绪');
+      if (!viewer?.renderer || !sceneReady || !renderCamera) throw new Error('场景未就绪');
 
       status('从高斯机位渲染…');
       const renderer = viewer.renderer;
@@ -2222,20 +2234,11 @@
       };
     }
 
-    function computeBaseSurfaceZ(arrayBuffer) {
-      const meta = parsePlyHeader(arrayBuffer);
-      if (!meta.vertexCount || meta.propCount < 3) return BASE_SURFACE_Z_FALLBACK;
-      const dv = new DataView(arrayBuffer, meta.headerEnd);
-      const stride = meta.propCount * 4;
-      const step = Math.max(1, Math.floor(meta.vertexCount / 16384));
-      const upperZs = [];
-      for (let i = 0; i < meta.vertexCount; i += step) {
-        const z = dv.getFloat32(i * stride + 8, true);
-        if (z > -0.002) upperZs.push(z);
-      }
-      if (!upperZs.length) return BASE_SURFACE_Z_FALLBACK;
-      upperZs.sort((a, b) => a - b);
-      return upperZs[Math.floor(upperZs.length * 0.85)];
+    async function initScene() {
+      sceneReady = true;
+      hideLoadProgress();
+      status('就绪 · 拖入 PLY 模型开始');
+      renderList();
     }
 
     function anchorPlyArrayBuffer(arrayBuffer, anchor) {
@@ -2251,14 +2254,6 @@
         dv.setFloat32(off + 8, dv.getFloat32(off + 8, true) - anchor.z, true);
       }
       return out;
-    }
-
-    async function bufferFromPly(ab, byteLength) {
-      const decRatio = getVisualDecimationRatio(byteLength);
-      const visualAb = decimatePlyArrayBuffer(ab, decRatio);
-      return GaussianSplats3D.PlyLoader.loadFromFileData(
-        visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
-      );
     }
 
     function placementOpts(p) {
@@ -2527,26 +2522,8 @@
       syncingFromGizmo = false;
     }
 
-    async function loadBase() {
-      setLoadProgress(10, '加载底板 map1.ply…');
-      const res = await fetch(BASE);
-      if (!res.ok) throw new Error('找不到 map1.ply');
-      const ab = await res.arrayBuffer();
-      baseSurfaceZ = computeBaseSurfaceZ(ab);
-      defaultZ = baseSurfaceZ;
-      el('defaultZ').value = defaultZ;
-      el('zVal').textContent = defaultZ.toFixed(4);
-      const buffer = await bufferFromPly(ab, ab.byteLength);
-      setLoadProgress(70, '渲染底板…');
-      await viewer.addSplatBuffers([buffer], [{ splatAlphaRemovalThreshold: PLY_ALPHA }], true, false, false, false, true);
-      baseReady = true;
-      hideLoadProgress();
-      status('底板就绪 · 拖入模型开始摆放');
-      renderList();
-    }
-
     async function addPlacementFromFile(file) {
-      if (!baseReady) throw new Error('底板尚未就绪');
+      if (!sceneReady) throw new Error('场景尚未就绪');
       status(`加载 ${file.name}…`);
       setLoadProgress(20, `解析 ${file.name}…`);
       let ab = fileCache.get(file.name);
@@ -2651,10 +2628,6 @@
     function renderList() {
       const list = el('sceneList');
       list.innerHTML = '';
-      const baseRow = document.createElement('div');
-      baseRow.className = 'scene-row base';
-      baseRow.innerHTML = `<span class="scene-name">${BASE_NAME}</span><span class="val">底板</span>`;
-      list.appendChild(baseRow);
       placements.forEach((p, i) => {
         const row = document.createElement('div');
         row.className = 'scene-row' + (i === selected ? ' active' : '');
@@ -2685,10 +2658,6 @@
       syncActivePathFromState();
       return {
         version: 2,
-        base: {
-          asset: BASE_NAME,
-          surfaceZ: baseSurfaceZ ?? defaultZ,
-        },
         defaults: {
           scale: defaultScale,
           z: defaultZ,
@@ -2794,7 +2763,7 @@
       if (!Array.isArray(saved) || !saved.length) return;
       for (const item of saved) {
         const name = item.asset;
-        if (!name || name === BASE_NAME) continue;
+        if (!name) continue;
         let ab = fileCache.get(name);
         if (!ab) continue;
         const file = new File([ab], name);
@@ -2822,7 +2791,7 @@
         placements.push(p);
       }
       renderList();
-      status(`底板就绪 · 已恢复 ${placements.length} 个摆放`);
+      status(`已恢复 ${placements.length} 个模型`);
     }
 
     function setupDragDrop() {
@@ -2953,23 +2922,24 @@
         hostMode = await detectHostMode();
         updateHostModeUI();
         await ensureViewer();
-        await loadBase();
+        await initScene();
         const cfg = await loadSavedConfig();
         applyConfigMeta(cfg);
-        if (cfg.placements.length) {
-          await restorePlacements(cfg.placements);
+        const savedPlacements = placementsFromConfig(cfg);
+        if (savedPlacements.length) {
+          await restorePlacements(savedPlacements);
         } else if (hostMode === 'server') {
-          status('底板就绪 · 拖入模型恢复摆放（需同名文件）');
+          status('就绪 · 拖入模型恢复摆放（需同名文件）');
         }
         restoreCameraPaths(cfg.cameraPaths, cfg.activePathId, cfg.renderSettings);
         const saveOk = await checkSaveApiHealth();
         if (saveOk === false) {
-          status('底板就绪 · 保存接口版本过旧，请重启 serve_editor.py 后再点保存');
-        } else if (cfg.placements.length) {
-          status(`底板就绪 · ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
-        } else if (baseReady) {
+          status('就绪 · 保存接口版本过旧，请重启 serve_editor.py 后再点保存');
+        } else if (savedPlacements.length) {
+          status(`就绪 · ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
+        } else if (sceneReady) {
           const modeNote = hostMode === 'static' ? ' · 在线版（配置存浏览器）' : '';
-          status(`底板就绪${modeNote} · 拖入模型开始摆放`);
+          status(`就绪${modeNote} · 拖入 PLY 模型开始`);
         }
       } catch (e) { showError(e); }
     })();

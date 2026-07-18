@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Merge placed buildings (full PLY) onto base terrain using placements.json.
+"""Merge placed Gaussian Splat models using placements.json.
 
 Design with lightweight models (outputs_50pct/), save placements.json,
 then merge with full models (outputs/) by matching filename.
 
-  python place_buildings.py --base map1.ply --config placements.json --out scene.ply
+  python place_buildings.py --config placements.json --out scene.ply
 """
 
 from __future__ import annotations
@@ -73,7 +73,6 @@ def transform_gaussian_block(block: np.ndarray, placement: dict) -> np.ndarray:
     xyz = out[:, 0:3]
     center = placement.get("center")
     if center is not None:
-        # center = [centroid_x, centroid_y, bottom_z] — bottom-aligned anchor
         xyz = xyz - np.asarray(center, dtype=np.float32)
 
     R = yaw_matrix(yaw)
@@ -106,38 +105,54 @@ def load_placements(config_path: Path) -> list:
     if isinstance(raw, list):
         return raw
     if isinstance(raw, dict):
-        placements = raw.get("placements")
-        if isinstance(placements, list):
-            return placements
+        placements = list(raw.get("placements") or [])
+        base = raw.get("base")
+        if isinstance(base, dict) and base.get("asset"):
+            asset = base["asset"]
+            if not any(p.get("asset") == asset for p in placements):
+                placements.insert(0, {
+                    "asset": asset,
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": base.get("surfaceZ", 0.0),
+                    "scale": 1.0,
+                    "yaw_deg": 0.0,
+                })
+        return placements
     raise ValueError("config must be a JSON list or v2 object with placements")
 
 
-def merge_scene(base_path: Path, config_path: Path, out_path: Path) -> None:
-    base_header, base_data, n_props = read_ply(str(base_path))
-    merged = [base_data]
-
+def merge_scene(config_path: Path, out_path: Path) -> None:
     placements = load_placements(config_path)
+    if not placements:
+        raise ValueError("no placements in config")
+
+    merged: list[np.ndarray] = []
+    header: list[str] | None = None
+    n_props: int | None = None
 
     for i, p in enumerate(placements):
         asset = resolve_asset_path(p["asset"])
-        _, block, n = read_ply(str(asset))
-        if n != n_props:
-            raise ValueError(f"{asset}: property count {n} != base {n_props}")
+        ply_header, block, n = read_ply(str(asset))
+        if header is None:
+            header = ply_header
+            n_props = n
+        elif n != n_props:
+            raise ValueError(f"{asset}: property count {n} != reference {n_props}")
         merged.append(transform_gaussian_block(block, p))
         print(f"[{i+1}] {p['asset']} -> x={p.get('x',0)} y={p.get('y',0)} scale={p.get('scale',1)}")
 
     out = np.vstack(merged)
-    write_ply(str(out_path), base_header, out)
+    write_ply(str(out_path), header, out)
     print(f"saved {out_path} ({out.shape[0]:,} gaussians)")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--base", default="map1.ply")
     ap.add_argument("--config", default="placements.json")
     ap.add_argument("--out", default="scene.ply")
     args = ap.parse_args()
-    merge_scene(ROOT / args.base, ROOT / args.config, ROOT / args.out)
+    merge_scene(ROOT / args.config, ROOT / args.out)
 
 
 if __name__ == "__main__":
