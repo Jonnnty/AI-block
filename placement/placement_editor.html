@@ -57,6 +57,9 @@
       width: 72px; background: #252525; border: 1px solid #6cf; color: #eee;
       padding: 1px 4px; border-radius: 3px; font-size: 11px;
     }
+    .path-transport { margin-top: 6px; }
+    .path-transport button { flex: 1; font-size: 12px; padding: 6px 8px; }
+    .path-transport button.active { background: #2d6cdf; }
     .render-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
     #loadProgressWrap[hidden] { display: none !important; }
     #loadProgressBar { height: 5px; background: #2a2a2a; border-radius: 3px; overflow: hidden; }
@@ -256,6 +259,10 @@
           <h2>机位序列</h2>
           <button type="button" id="addMarkerBtn" class="secondary pose-add-btn">＋ 当前机位</button>
         </div>
+        <div class="row path-transport" id="pathTransportRow" hidden>
+          <button type="button" id="pathPlayBtn" class="secondary" title="沿轨迹播放">▶ 播放</button>
+          <button type="button" id="pathPauseBtn" class="secondary" title="暂停后可移动机位">⏸ 暂停</button>
+        </div>
         <div id="markerList" class="marker-list"></div>
         <div id="keypointEditRow" class="curve-edit-bar" hidden>
           <span class="curve-dot"></span>
@@ -267,12 +274,10 @@
         </div>
         <p id="pathSlideStatus" class="hint" style="color:#2a8f6a;font-weight:600" hidden>路径预览：待机</p>
         <div id="pathPinSection" hidden>
-          <h2 style="margin-top:8px">路径定点</h2>
           <label>路径位置 <span class="val" id="pathPinTVal">0%</span>
             <input type="range" id="pathPinT" min="0" max="100" step="0.1" value="0" />
           </label>
-          <label><input type="checkbox" id="pathPinLock" /> 定点（暂停滑动）</label>
-          <p class="hint">拖动位置条可预览轨迹上任意点；勾选定点后可用下方单帧渲染/保存</p>
+          <p class="hint">暂停后：点击轨迹移动机位，或拖路径位置条；Shift+点击轨迹添加弯折点</p>
         </div>
         <h2 style="margin-top:8px">默认参数</h2>
         <label>每段帧数 <span class="val" id="pathFramesVal">16</span>
@@ -444,7 +449,7 @@
     let pathFramesPerSeg = 16;
     let pathFps = 12;
     let pathPinT = 0;
-    let pathPinLocked = false;
+    let pathSlidePlaying = false;
 
     const _tmpEuler = new THREE.Euler();
     const _tmpQuatA = new THREE.Quaternion();
@@ -602,7 +607,7 @@
       renderPathGroupList();
       attachGizmo();
       updateKeypointEditUI();
-      if (rigOpen && cameraMarkers.length >= 2) startPathSlidePreview();
+      if (rigOpen && cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       else stopPathSlidePreview();
       el('rigPreviewStatus').textContent = '需重新渲染';
       viewer?.forceRenderNextFrame();
@@ -696,7 +701,7 @@
       renderPathGroupList();
       attachGizmo();
       updateKeypointEditUI();
-      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       else stopPathSlidePreview();
       el('rigPreviewStatus').textContent = '需重新渲染';
       status(cameraPaths.length ? '已删除轨迹' : '已清空全部轨迹');
@@ -902,7 +907,7 @@
       syncActivePathFromState();
       renderPathGroupList();
       el('rigPreviewStatus').textContent = '需重新渲染';
-      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       else stopPathSlidePreview();
       status('机位顺序已更新');
     }
@@ -979,6 +984,87 @@
       return false;
     }
 
+    function globalTFromSegmentHit(segIdx, localT) {
+      const segs = cameraMarkers.length - 1;
+      if (segs <= 0) return 0;
+      return (segIdx + localT) / segs;
+    }
+
+    function applyPathPinAtGlobalT(globalT) {
+      pathPinT = Math.max(0, Math.min(1, globalT));
+      el('pathPinT').value = pathPinT * 100;
+      el('pathPinTVal').textContent = `${(pathPinT * 100).toFixed(1)}%`;
+      applyPathPinPosition();
+    }
+
+    function syncPathPinFromCamera() {
+      if (cameraMarkers.length < 2 || !renderCamRig) return;
+      let bestT = pathPinT;
+      let bestD = Infinity;
+      const px = renderCamRig.position.x;
+      const py = renderCamRig.position.y;
+      const pz = renderCamRig.position.z;
+      for (let i = 0; i <= 200; i++) {
+        const t = i / 200;
+        const s = samplePathAt(t);
+        if (!s) continue;
+        const dx = s.position.x - px;
+        const dy = s.position.y - py;
+        const dz = s.position.z - pz;
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d < bestD) {
+          bestD = d;
+          bestT = t;
+        }
+      }
+      pathPinT = bestT;
+      el('pathPinT').value = pathPinT * 100;
+      el('pathPinTVal').textContent = `${(pathPinT * 100).toFixed(1)}%`;
+    }
+
+    function updatePathTransportUI() {
+      const hasPath = cameraMarkers.length >= 2;
+      el('pathTransportRow').hidden = !hasPath;
+      el('pathPinSection').hidden = !hasPath;
+      el('renderExportSequenceBtn').disabled = !hasPath;
+      el('renderPathVideoBtn').disabled = !hasPath;
+      if (el('pathPlayBtn')) {
+        el('pathPlayBtn').disabled = !hasPath || pathSlidePlaying;
+        el('pathPlayBtn').classList.toggle('active', pathSlidePlaying);
+      }
+      if (el('pathPauseBtn')) {
+        el('pathPauseBtn').disabled = !hasPath || !pathSlidePlaying;
+        el('pathPauseBtn').classList.toggle('active', hasPath && !pathSlidePlaying);
+      }
+      if (!hasPath) {
+        pathSlidePlaying = false;
+        stopPathSlidePreview();
+      }
+    }
+
+    function pausePathSlide() {
+      if (cameraMarkers.length < 2) return;
+      stopPathSlidePreview();
+      pathSlidePlaying = false;
+      syncPathPinFromCamera();
+      updatePathTransportUI();
+      updatePathSlideStatus('路径预览：已暂停 · 点击轨迹或拖位置条移动机位', true);
+    }
+
+    function playPathSlide() {
+      if (cameraMarkers.length < 2 || !rigOpen) return;
+      if (isPathSlideBlocked()) return;
+      pathSlidePlaying = true;
+      pathSlidePhase = Math.asin(Math.max(-1, Math.min(1, 2 * pathPinT - 1)));
+      markerGizmoMode = null;
+      rigGizmoMode = null;
+      el('gizmoMoveRig').classList.remove('active');
+      el('gizmoRotateRig').classList.remove('active');
+      transformControls?.detach();
+      updatePathTransportUI();
+      startPathSlidePreview();
+    }
+
     function stopPathSlidePreview() {
       pathSlideActive = false;
       pathSlideLastTs = 0;
@@ -989,9 +1075,16 @@
       updatePathSlideStatus('', false);
     }
 
+    function resumePathSlideIfPlaying() {
+      if (pathSlidePlaying && cameraMarkers.length >= 2 && !isPathSlideBlocked()) {
+        startPathSlidePreview();
+      }
+    }
+
     function startPathSlidePreview() {
       stopPathSlidePreview();
       if (!rigOpen || cameraMarkers.length < 2 || !renderCamRig) return;
+      if (!pathSlidePlaying) return;
 
       const span = pathEndpointDistance();
       if (span < 0.02) {
@@ -1033,6 +1126,9 @@
       if (dt <= 0) return;
       pathSlidePhase += dt * PATH_SLIDE_SPEED;
       const t = (Math.sin(pathSlidePhase) + 1) * 0.5;
+      pathPinT = t;
+      el('pathPinT').value = t * 100;
+      el('pathPinTVal').textContent = `${(t * 100).toFixed(1)}%`;
       const sample = samplePathAt(t);
       if (!sample) return;
       renderCamRig.position.copy(sample.position);
@@ -1082,7 +1178,16 @@
       const hit = pathHits.find((h) => h.object.userData.pathSegIdx != null);
       if (!hit) return false;
 
-      stopPathSlidePreview();
+      const segIdx = hit.object.userData.pathSegIdx;
+      const t = approximateTOnSegment(segIdx, hit.point);
+
+      if (!pathSlidePlaying && !e.shiftKey) {
+        applyPathPinAtGlobalT(globalTFromSegmentHit(segIdx, t));
+        status(`机位 ${(pathPinT * 100).toFixed(0)}% · 可预览/保存单帧`);
+        return true;
+      }
+
+      pausePathSlide();
       selectedMarkerIdx = -1;
       selected = -1;
       markerGizmoMode = null;
@@ -1092,8 +1197,6 @@
       updateRigGizmoUI();
       ensurePathSegments();
 
-      const segIdx = hit.object.userData.pathSegIdx;
-      const t = approximateTOnSegment(segIdx, hit.point);
       sampleSegmentLocal(segIdx, t, _tmpVec);
       const pi = addPathControlPoint(segIdx, _tmpVec.x, _tmpVec.y, _tmpVec.z, t);
       if (pi < 0) {
@@ -1262,7 +1365,7 @@
       el('rigPreviewStatus').textContent = '需重新渲染';
       attachGizmo();
       updateKeypointEditUI();
-      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       viewer?.forceRenderNextFrame();
     }
 
@@ -1302,7 +1405,7 @@
       pathRoot.visible = rigOpen;
       rigOverlayScene.add(pathRoot);
       applyAlwaysOnTop(pathRoot);
-      startPathSlidePreview();
+      resumePathSlideIfPlaying();
     }
 
     function updatePathTubes() {
@@ -1422,17 +1525,6 @@
       return { position: _tmpVecPos.clone(), quaternion: _tmpQuatOut.clone() };
     }
 
-    function updatePathPinUI() {
-      const hasPath = cameraMarkers.length >= 2;
-      el('pathPinSection').hidden = !hasPath;
-      el('renderExportSequenceBtn').disabled = !hasPath;
-      el('renderPathVideoBtn').disabled = !hasPath;
-      if (!hasPath) {
-        pathPinLocked = false;
-        if (el('pathPinLock')) el('pathPinLock').checked = false;
-      }
-    }
-
     function applyPathPinPosition() {
       if (cameraMarkers.length < 2 || !renderCamRig) return;
       const sample = samplePathAt(pathPinT);
@@ -1446,9 +1538,9 @@
     }
 
     function onPathPinTChange() {
+      if (pathSlidePlaying) pausePathSlide();
       pathPinT = Math.max(0, Math.min(1, parseFloat(el('pathPinT').value) / 100));
       el('pathPinTVal').textContent = `${(pathPinT * 100).toFixed(1)}%`;
-      stopPathSlidePreview();
       applyPathPinPosition();
     }
 
@@ -1464,7 +1556,7 @@
         });
       });
       updatePathLine();
-      updatePathPinUI();
+      updatePathTransportUI();
       viewer?.forceRenderNextFrame();
     }
 
@@ -1519,10 +1611,7 @@
 
     function selectMarker(idx) {
       selectedMarkerIdx = idx;
-      if (idx >= 0 && pathPinLocked) {
-        pathPinLocked = false;
-        el('pathPinLock').checked = false;
-      }
+      if (idx >= 0 && pathSlidePlaying) pausePathSlide();
       selectedCpSegIdx = -1;
       selectedCpPointIdx = -1;
       selected = -1;
@@ -1537,7 +1626,7 @@
       updateKeypointEditUI();
       if (idx >= 0 && markerGizmoMode) applyMarkerToRig(cameraMarkers[idx]);
       attachGizmo();
-      if (idx < 0 && cameraMarkers.length >= 2) startPathSlidePreview();
+      if (idx < 0 && cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       else stopPathSlidePreview();
     }
 
@@ -1571,7 +1660,7 @@
       rebuildCpVisuals();
       updateKeypointEditUI();
       attachGizmo();
-      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       status('弯折已调整');
       syncActivePathFromState();
       viewer?.forceRenderNextFrame();
@@ -1598,7 +1687,7 @@
         rebuildCpVisuals();
         updateKeypointEditUI();
         attachGizmo();
-        if (cameraMarkers.length >= 2) startPathSlidePreview();
+        if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
         return;
       }
       selectedCpSegIdx = segIdx;
@@ -1632,7 +1721,7 @@
         el('gizmoRotateRig').classList.remove('active');
         renderMarkerList();
         attachGizmo();
-        startPathSlidePreview();
+        playPathSlide();
         status(`${cameraMarkers.length} 机位 · 路径预览中`);
       } else {
         selectedMarkerIdx = -1;
@@ -1666,7 +1755,7 @@
       attachGizmo();
       syncActivePathFromState();
       renderPathGroupList();
-      if (cameraMarkers.length >= 2) startPathSlidePreview();
+      if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       else stopPathSlidePreview();
     }
 
@@ -1808,7 +1897,7 @@
         syncCameraHelper();
         updateRigSliders();
         refreshPathVisuals();
-        startPathSlidePreview();
+        resumePathSlideIfPlaying();
       }
     }
 
@@ -1987,7 +2076,7 @@
         syncCameraHelper();
         updateRigSliders();
         refreshPathVisuals();
-        if (!pathPinLocked && cameraMarkers.length >= 2 && !isPathSlideBlocked()) startPathSlidePreview();
+        if (pathSlidePlaying && cameraMarkers.length >= 2 && !isPathSlideBlocked()) resumePathSlideIfPlaying();
       }
     }
 
@@ -2091,7 +2180,7 @@
         }
         attachGizmo();
         if (markerGizmoMode) stopPathSlidePreview();
-        else if (cameraMarkers.length >= 2) startPathSlidePreview();
+        else if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
         status(markerGizmoMode ? '机位编辑（预览暂停）' : 'Gizmo 已关闭');
         return;
       }
@@ -2102,7 +2191,7 @@
       }
       updateRigGizmoUI();
       attachGizmo();
-      if (!rigGizmoMode && cameraMarkers.length >= 2) startPathSlidePreview();
+      if (!rigGizmoMode && cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       status(rigGizmoMode ? (rigGizmoMode === 'translate' ? '机位移动（滑动已暂停）' : '机位旋转（滑动已暂停）') : 'Gizmo 已关闭 · 恢复滑动');
     }
 
@@ -2139,8 +2228,8 @@
       attachGizmo();
       syncCameraHelper();
       updateKeypointEditUI();
-      updatePathPinUI();
-      if (cameraMarkers.length >= 2 && !pathPinLocked) startPathSlidePreview();
+      updatePathTransportUI();
+      if (cameraMarkers.length >= 2) playPathSlide();
       el('rigPreviewStatus').textContent = '未渲染';
       status(cameraMarkers.length >= 2 ? '路径预览中' : (cameraPaths.length ? '＋ 当前机位 开始' : '新建轨迹 或 ＋ 当前机位'));
     }
@@ -2574,7 +2663,7 @@
           syncActivePathFromState();
           renderPathGroupList();
           if (pathSlideActive && cameraMarkers.length >= 2 && !isPathSlideBlocked()) {
-            startPathSlidePreview();
+            resumePathSlideIfPlaying();
           }
         }
       });
@@ -2713,7 +2802,7 @@
         updateRigGizmoUI();
         el('gizmoMoveRig').classList.remove('active');
         el('gizmoRotateRig').classList.remove('active');
-        if (rigOpen && cameraMarkers.length >= 2) startPathSlidePreview();
+        if (rigOpen && cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       }
       if (idx < 0) placementGizmoMode = null;
       updatePlacementGizmoUI();
@@ -2971,6 +3060,17 @@
       }
     };
     el('viewBgSelect').onchange = (e) => applyViewBackground(e.target.value);
+    function setSliderValueUnbounded(slider, v) {
+      if (Number.isNaN(v)) return;
+      const curMin = parseFloat(slider.min);
+      const curMax = parseFloat(slider.max);
+      const pad = Math.max(Math.abs(v) * 0.5, 1);
+      if (v < curMin) slider.min = String(v - pad);
+      if (v > curMax) slider.max = String(v + pad);
+      slider.value = v;
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
     function makeValEditable(valId, sliderId, opts = {}) {
       const valEl = el(valId);
       if (!valEl) return;
@@ -2994,9 +3094,7 @@
           if (apply) {
             const v = parse(input.value);
             if (!Number.isNaN(v)) {
-              slider.value = v;
-              slider.dispatchEvent(new Event('input', { bubbles: true }));
-              if (sliderId === 'pathPinT') slider.dispatchEvent(new Event('change', { bubbles: true }));
+              setSliderValueUnbounded(slider, v);
             }
           }
           input.remove();
@@ -3072,18 +3170,8 @@
       syncActivePathFromState();
     };
     el('pathPinT').oninput = onPathPinTChange;
-    el('pathPinT').onchange = () => {
-      if (!pathPinLocked && cameraMarkers.length >= 2 && !isPathSlideBlocked()) startPathSlidePreview();
-    };
-    el('pathPinLock').onchange = () => {
-      pathPinLocked = el('pathPinLock').checked;
-      if (pathPinLocked) {
-        stopPathSlidePreview();
-        applyPathPinPosition();
-      } else if (cameraMarkers.length >= 2 && !isPathSlideBlocked()) {
-        startPathSlidePreview();
-      }
-    };
+    el('pathPlayBtn').onclick = () => playPathSlide();
+    el('pathPauseBtn').onclick = () => pausePathSlide();
     el('renderPreviewBtn').onclick = () => onRenderPreviewClick().catch(showError);
     el('renderExportSingleBtn').onclick = () => gaussianRenderFromRig().catch(showError);
     el('renderExportSequenceBtn').onclick = () => exportPathSequencePngs().catch(showError);
@@ -3137,7 +3225,7 @@
     updateRigGizmoUI();
 
     setupEditableVals();
-    updatePathPinUI();
+    updatePathTransportUI();
 
     (async () => {
       try {
