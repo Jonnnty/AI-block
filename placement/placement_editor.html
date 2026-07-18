@@ -922,7 +922,7 @@
     function applyAlwaysOnTop(root) {
       if (!root) return;
       root.traverse((o) => {
-        o.renderOrder = 1000;
+        if (o.renderOrder == null || o.renderOrder < 1000) o.renderOrder = 1000;
         if (!o.material) return;
         const mats = Array.isArray(o.material) ? o.material : [o.material];
         for (const m of mats) {
@@ -930,6 +930,25 @@
           m.depthWrite = false;
           if (m.opacity !== undefined && m.opacity < 1) m.transparent = true;
         }
+      });
+    }
+
+    /** 轨迹管在底层，弯折关键点在最上层，避免白芯轨迹盖住球体 */
+    function refreshPathRenderOrder() {
+      if (pathTubeGroup) {
+        pathTubeGroup.traverse((o) => {
+          if (!o.material) return;
+          const op = o.material.opacity;
+          if (op === 0) o.renderOrder = 1005;
+          else if (o.material.color?.getHex?.() === 0xffffff) o.renderOrder = 1010;
+          else o.renderOrder = 1008;
+        });
+      }
+      if (pathLine) pathLine.renderOrder = 1012;
+      markerMeshes.forEach((m) => { m.renderOrder = 1018; });
+      cpMeshes.forEach((g) => {
+        g.renderOrder = 1030;
+        g.children.forEach((c, i) => { c.renderOrder = 1031 + i; });
       });
     }
 
@@ -1353,6 +1372,7 @@
           cpMeshes.push(group);
         });
       });
+      refreshPathRenderOrder();
     }
 
     function addPathControlPoint(segIdx, x, y, z, t) {
@@ -1422,6 +1442,7 @@
       pathRoot.visible = rigOpen;
       rigOverlayScene.add(pathRoot);
       applyAlwaysOnTop(pathRoot);
+      refreshPathRenderOrder();
       resumePathSlideIfPlaying();
     }
 
@@ -1473,7 +1494,13 @@
 
         const core = new THREE.Mesh(
           new THREE.TubeGeometry(curve, 64, coreR, 8, false),
-          new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false }),
+          new THREE.MeshBasicMaterial({
+            color: 0x88ddff,
+            transparent: true,
+            opacity: 0.35,
+            depthTest: false,
+            depthWrite: false,
+          }),
         );
         core.userData.pathSegIdx = s;
         core.renderOrder = 11;
@@ -1513,6 +1540,7 @@
       pathLine.renderOrder = 12;
       pathTubeGroup.add(pathLine);
       pathRoot.add(pathTubeGroup);
+      refreshPathRenderOrder();
     }
 
     function updatePathLine() {
