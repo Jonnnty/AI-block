@@ -2889,13 +2889,14 @@
       syncingFromGizmo = false;
     }
 
-    async function addPlacementFromFile(file) {
+    async function addPlacementFromFile(file, loadToken = sessionResetToken) {
       if (!sceneReady) throw new Error('场景尚未就绪');
       status(`加载 ${file.name}…`);
       setLoadProgress(20, `解析 ${file.name}…`);
       let ab = fileCache.get(file.name);
       if (!ab) {
         ab = await file.arrayBuffer();
+        if (isSessionAborted(loadToken)) return;
         fileCache.set(file.name, ab);
         idbPutAsset(file.name, ab).catch((e) => console.warn('模型缓存写入失败', e));
       }
@@ -2907,6 +2908,7 @@
       const splatBuffer = await GaussianSplats3D.PlyLoader.loadFromFileData(
         visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
       );
+      if (isSessionAborted(loadToken)) return;
       const p = {
         name: file.name,
         x: 0, y: 0, z: defaultZ,
@@ -2915,8 +2917,12 @@
         sceneIdx: null,
         center: [anchor.x, anchor.y, anchor.z],
       };
-      const sceneIdx = viewer.splatMesh?.scenes?.length ?? 1;
+      const sceneIdx = viewer.splatMesh?.scenes?.length ?? 0;
       await viewer.addSplatBuffers([splatBuffer], [placementOpts(p)], true, false, false, false, true);
+      if (isSessionAborted(loadToken)) {
+        try { await viewer.removeSplatScene(sceneIdx, false); } catch (_) {}
+        return;
+      }
       p.sceneIdx = sceneIdx;
       placements.push(p);
       selectPlacement(placements.length - 1);
@@ -3060,12 +3066,19 @@
       status(`已导出 JSON · ${data.placements.length} 模型 · ${data.cameraPaths.length} 轨迹`);
     }
 
-    function clearAllPlacementsFromViewer() {
+    async function clearAllPlacementsFromViewer() {
       placements.length = 0;
       selected = -1;
-      if (viewer?.splatMesh?.scenes) {
-        while (viewer.splatMesh.scenes.length > 0) {
-          try { viewer.removeSplatScene(0, false); } catch (_) { break; }
+      const sceneCount = viewer?.splatMesh?.scenes?.length ?? 0;
+      if (sceneCount > 0) {
+        const indexes = Array.from({ length: sceneCount }, (_, i) => i);
+        try {
+          await viewer.removeSplatScenes(indexes, false);
+        } catch (e) {
+          console.warn('批量清空模型失败，改为逐个移除', e);
+          while (viewer?.splatMesh?.scenes?.length > 0) {
+            await viewer.removeSplatScene(0, false);
+          }
         }
       }
       viewer?.forceRenderNextFrame?.();
@@ -3109,7 +3122,7 @@
       sessionResetToken++;
       hideLoadProgress();
       fileCache.clear();
-      clearAllPlacementsFromViewer();
+      await clearAllPlacementsFromViewer();
       resetCameraEditorState();
       resetEditorDefaults();
       selectPlacement(-1);
