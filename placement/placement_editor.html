@@ -875,22 +875,25 @@
     }
 
     function placementsFromConfig(cfg) {
-      const list = [...(cfg.placements || [])];
-      const baseAsset = cfg.base?.asset;
-      if (baseAsset && !list.some((p) => p.asset === baseAsset)) {
-        list.unshift({
-          asset: baseAsset,
-          x: 0,
-          y: 0,
-          z: cfg.base?.surfaceZ ?? cfg.defaults?.z ?? defaultZ,
-          scale: 1,
-          yaw_deg: 0,
-          pitch_deg: 0,
-          roll_deg: 0,
-          visible: true,
-        });
-      }
-      return list;
+      return [...(cfg.placements || [])];
+    }
+
+    function emptyConfigJson() {
+      return {
+        version: 2,
+        defaults: {
+          scale: defaultScale,
+          z: defaultZ,
+        },
+        view: {
+          background: viewBgMode,
+          rigOpen: false,
+        },
+        placements: [],
+        cameraPaths: [],
+        activePathId: null,
+        renderSettings: getRenderSettings(),
+      };
     }
 
     function parseSavedConfig(saved) {
@@ -901,7 +904,6 @@
           cameraPaths: null,
           activePathId: null,
           renderSettings: null,
-          base: null,
           defaults: null,
           view: null,
         };
@@ -913,7 +915,6 @@
           cameraPaths: saved.cameraPaths || [],
           activePathId: saved.activePathId || null,
           renderSettings: saved.renderSettings || null,
-          base: saved.base || null,
           defaults: saved.defaults || null,
           view: saved.view || null,
         };
@@ -924,7 +925,6 @@
         cameraPaths: null,
         activePathId: null,
         renderSettings: null,
-        base: null,
         defaults: null,
         view: null,
       };
@@ -3061,14 +3061,13 @@
     }
 
     function clearAllPlacementsFromViewer() {
-      while (placements.length) {
-        const p = placements[placements.length - 1];
-        if (p?.sceneIdx != null && viewer) {
-          try { viewer.removeSplatScene(p.sceneIdx, false); } catch (_) {}
-        }
-        placements.pop();
-      }
+      placements.length = 0;
       selected = -1;
+      if (viewer?.splatMesh?.scenes) {
+        while (viewer.splatMesh.scenes.length > 0) {
+          try { viewer.removeSplatScene(0, false); } catch (_) { break; }
+        }
+      }
       viewer?.forceRenderNextFrame?.();
     }
 
@@ -3115,7 +3114,12 @@
       resetEditorDefaults();
       selectPlacement(-1);
       renderList();
-      localStorage.removeItem(CONFIG_STORAGE_KEY);
+      const emptyCfg = JSON.stringify(emptyConfigJson());
+      try {
+        localStorage.setItem(CONFIG_STORAGE_KEY, emptyCfg);
+      } catch (_) {
+        localStorage.removeItem(CONFIG_STORAGE_KEY);
+      }
       try {
         await idbClearAll();
       } catch (e) {
@@ -3126,13 +3130,7 @@
           await fetch(apiUrl('api/placements'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              version: 2,
-              placements: [],
-              cameraPaths: [],
-              activePathId: null,
-              renderSettings: getRenderSettings(),
-            }),
+            body: emptyCfg,
           });
         } catch (_) {}
       }
