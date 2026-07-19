@@ -24,14 +24,28 @@
     #viewHelper { position: absolute; right: 12px; top: 12px; width: 128px; height: 128px; pointer-events: auto; z-index: 3; }
     #panel {
       width: 300px; background: #1a1a1a; border-left: 1px solid #333;
-      padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+      padding: 14px 16px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 0;
+    }
+    .panel-chrome {
+      display: flex; flex-direction: column; gap: 10px;
+      padding-bottom: 12px; border-bottom: 1px solid #2e2e2e; margin-bottom: 10px;
+    }
+    .panel-zone-label {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+      color: #777; margin-bottom: 7px;
+    }
+    .panel-zone-hint {
+      font-weight: 400; text-transform: none; letter-spacing: 0; color: #555; font-size: 10px;
     }
     .panel-head {
-      display: flex; flex-direction: column; gap: 10px;
+      display: flex; flex-direction: column; gap: 0;
     }
     .config-toolbar {
       display: flex; flex-direction: column; gap: 6px;
-      padding: 8px; background: #141414; border: 1px solid #2c2c2c; border-radius: 10px;
+      padding: 8px; background: linear-gradient(180deg, #171717 0%, #121212 100%);
+      border: 1px solid #333; border-radius: 10px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
     }
     .config-toolbar-row {
       display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
@@ -161,12 +175,28 @@
     .drag-handle { cursor: grab; color: #666; font-size: 14px; line-height: 1; user-select: none; flex-shrink: 0; }
     .marker-row.drag-over { border-color: #6cf; }
     .marker-row.dragging { opacity: 0.55; }
-    .panel-tabs { display: flex; gap: 6px; margin-bottom: 4px; }
-    .panel-tab {
-      flex: 1; background: #252525; border: 1px solid #444; color: #bbb;
-      padding: 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    .panel-nav {
+      margin-bottom: 12px;
     }
-    .panel-tab.active { background: #2d6cdf; border-color: #2d6cdf; color: #fff; }
+    .panel-tabs {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding: 3px;
+      background: #111; border: 1px solid #333; border-radius: 9px;
+    }
+    .panel-tab {
+      width: auto; background: transparent; border: none; color: #888;
+      padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
+      position: relative; transition: color .15s, background .15s, box-shadow .15s;
+    }
+    .panel-tab:hover { filter: none; color: #bbb; background: rgba(255, 255, 255, 0.03); }
+    .panel-tab.active {
+      background: #222; color: #eee;
+      box-shadow: inset 0 0 0 1px #3d3d3d, 0 1px 2px rgba(0, 0, 0, 0.35);
+    }
+    .panel-tab.active::after {
+      content: ''; position: absolute; left: 18%; right: 18%; bottom: 5px; height: 2px;
+      background: #6cf; border-radius: 2px;
+    }
+    .panel-body { display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; }
     #modelsPanel, #cameraPanel { display: flex; flex-direction: column; gap: 14px; }
     #cameraPanel[hidden], #modelsPanel[hidden] { display: none !important; }
     .path-group-row { cursor: pointer; }
@@ -202,37 +232,50 @@
     </div>
   </div>
   <div id="panel">
-    <div class="panel-head">
+    <header class="panel-chrome">
       <div class="status" id="status">初始化…</div>
-      <div class="config-toolbar">
-        <button type="button" id="saveBtn" class="cfg-btn cfg-btn-primary" title="保存到浏览器或 placements.json">
-          <span class="cfg-btn-label">保存</span>
-          <span class="cfg-btn-sub">配置 + 模型缓存</span>
-        </button>
-        <div class="config-toolbar-row">
-          <button type="button" id="importJsonBtn" class="cfg-btn cfg-btn-ghost" title="从 JSON 文件恢复">
-            <span class="cfg-btn-label">导入 JSON</span>
+      <section class="panel-global">
+        <div class="panel-zone-label">
+          <span>场景配置</span>
+          <span class="panel-zone-hint">全局 · 随时可用</span>
+        </div>
+        <div class="config-toolbar">
+          <button type="button" id="saveBtn" class="cfg-btn cfg-btn-primary" title="保存到浏览器或 placements.json">
+            <span class="cfg-btn-label">保存</span>
+            <span class="cfg-btn-sub">配置 + 模型缓存</span>
           </button>
-          <button type="button" id="exportJsonBtn" class="cfg-btn cfg-btn-ghost" title="下载完整 JSON 配置">
-            <span class="cfg-btn-label">导出 JSON</span>
+          <div class="config-toolbar-row">
+            <button type="button" id="importJsonBtn" class="cfg-btn cfg-btn-ghost" title="从 JSON 文件恢复">
+              <span class="cfg-btn-label">导入 JSON</span>
+            </button>
+            <button type="button" id="exportJsonBtn" class="cfg-btn cfg-btn-ghost" title="下载完整 JSON 配置">
+              <span class="cfg-btn-label">导出 JSON</span>
+            </button>
+          </div>
+          <button type="button" id="clearBtn" class="cfg-btn cfg-btn-danger" title="清空场景与浏览器缓存">
+            <span class="cfg-btn-label">清空</span>
+            <span class="cfg-btn-sub">重置场景</span>
           </button>
         </div>
-        <button type="button" id="clearBtn" class="cfg-btn cfg-btn-danger" title="清空场景与浏览器缓存">
-          <span class="cfg-btn-label">清空</span>
-          <span class="cfg-btn-sub">重置场景</span>
-        </button>
-      </div>
-    </div>
+      </section>
+    </header>
     <div id="loadProgressWrap" hidden>
       <div id="loadProgressBar"><div id="loadProgressFill"></div></div>
       <div id="loadProgressText"></div>
     </div>
 
-    <div class="panel-tabs">
-      <button type="button" id="tabModelsBtn" class="panel-tab active">模型</button>
-      <button type="button" id="tabCameraBtn" class="panel-tab">相机</button>
-    </div>
+    <nav class="panel-nav" aria-label="工作区">
+      <div class="panel-zone-label">
+        <span>工作区</span>
+        <span class="panel-zone-hint">分页切换</span>
+      </div>
+      <div class="panel-tabs" role="tablist">
+        <button type="button" id="tabModelsBtn" class="panel-tab active" role="tab" aria-selected="true">模型</button>
+        <button type="button" id="tabCameraBtn" class="panel-tab" role="tab" aria-selected="false">相机</button>
+      </div>
+    </nav>
 
+    <div class="panel-body">
     <div id="modelsPanel">
       <section>
         <h2>导入模型</h2>
@@ -365,6 +408,7 @@
           <button type="button" id="renderPathVideoBtn" class="secondary">预览路径视频</button>
         </div>
       </section>
+    </div>
     </div>
     <input type="file" id="importConfigFile" accept=".json,application/json" hidden />
   </div>
@@ -828,6 +872,8 @@
       el('cameraPanel').hidden = showModels;
       el('tabModelsBtn').classList.toggle('active', showModels);
       el('tabCameraBtn').classList.toggle('active', !showModels);
+      el('tabModelsBtn').setAttribute('aria-selected', showModels ? 'true' : 'false');
+      el('tabCameraBtn').setAttribute('aria-selected', showModels ? 'false' : 'true');
     }
 
     function getRenderSettings() {
