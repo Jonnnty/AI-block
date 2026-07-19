@@ -30,6 +30,11 @@
       display: flex; flex-direction: column; gap: 10px;
       padding-bottom: 12px; border-bottom: 1px solid #2e2e2e; margin-bottom: 10px;
     }
+    .panel-global {
+      padding: 10px 10px 11px;
+      background: linear-gradient(180deg, #2a2a2a 0%, #242424 100%);
+      border: 1px solid #3a3a3a; border-radius: 10px;
+    }
     .panel-zone-label {
       display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
       font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
@@ -43,9 +48,7 @@
     }
     .config-toolbar {
       display: flex; flex-direction: column; gap: 6px;
-      padding: 8px; background: linear-gradient(180deg, #171717 0%, #121212 100%);
-      border: 1px solid #333; border-radius: 10px;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+      padding: 0; background: transparent; border: none; border-radius: 0; box-shadow: none;
     }
     .config-toolbar-row {
       display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
@@ -62,9 +65,9 @@
     }
     .cfg-btn-primary:hover { background: linear-gradient(180deg, #4a8af0 0%, #3578e8 100%); }
     .cfg-btn-ghost {
-      background: #222; border-color: #383838; color: #c8c8c8;
+      background: #333; border-color: #454545; color: #d0d0d0;
     }
-    .cfg-btn-ghost:hover { background: #2a2a2a; border-color: #505050; color: #fff; }
+    .cfg-btn-ghost:hover { background: #3a3a3a; border-color: #555; color: #fff; }
     .cfg-btn-danger {
       background: rgba(120, 40, 40, 0.12); border-color: #5a3030; color: #e09090;
     }
