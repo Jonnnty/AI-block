@@ -181,8 +181,9 @@
       </div>
       <div class="panel-head-actions">
         <button type="button" id="saveBtn" class="panel-action-btn" title="保存配置">保存</button>
-        <button type="button" id="importJsonBtn" class="panel-action-btn secondary" title="从 JSON 文件恢复">导入</button>
-        <button type="button" id="exportJsonBtn" class="panel-action-btn secondary" title="下载完整 JSON 配置">导出</button>
+        <button type="button" id="importJsonBtn" class="panel-action-btn secondary" title="从 JSON 文件恢复">导入json</button>
+        <button type="button" id="exportJsonBtn" class="panel-action-btn secondary" title="下载完整 JSON 配置">导出json</button>
+        <button type="button" id="clearBtn" class="panel-action-btn secondary" title="清空场景与浏览器缓存">清空</button>
       </div>
     </div>
     <div id="loadProgressWrap" hidden>
@@ -384,16 +385,35 @@
       await Promise.all(jobs);
     }
 
-    async function preloadAssetsForConfig(cfg) {
+    async function idbClearAll() {
+      const db = await openAssetDb();
+      try {
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(ASSET_STORE, 'readwrite');
+          tx.objectStore(ASSET_STORE).clear();
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error || new Error('清空模型缓存失败'));
+        });
+      } finally {
+        db.close();
+      }
+    }
+
+    async function preloadAssetsForConfig(cfg, loadToken = sessionResetToken) {
       const names = new Set();
       for (const item of placementsFromConfig(cfg)) {
         if (item.asset) names.add(item.asset);
       }
       for (const name of names) {
+        if (isSessionAborted(loadToken)) return;
         if (fileCache.has(name)) continue;
         const ab = await idbGetAsset(name);
         if (ab) fileCache.set(name, ab);
       }
+    }
+
+    function isSessionAborted(loadToken) {
+      return loadToken !== sessionResetToken;
     }
 
     function resolveAppBase() {
@@ -442,6 +462,7 @@
     const placements = [];
     /** @type {Map<string, ArrayBuffer>} */
     const fileCache = new Map();
+    let sessionResetToken = 0;
 
     let viewer = null;
     let sharedRenderer = null;
@@ -839,9 +860,11 @@
       const cfg = parseSavedConfig(JSON.parse(text));
       applyConfigMeta(cfg);
       for (let i = placements.length - 1; i >= 0; i--) removePlacement(i);
-      await preloadAssetsForConfig(cfg);
+      await preloadAssetsForConfig(cfg, sessionResetToken);
+      if (isSessionAborted(sessionResetToken)) return;
       const savedPlacements = placementsFromConfig(cfg);
-      if (savedPlacements.length) await restorePlacements(savedPlacements);
+      if (savedPlacements.length) await restorePlacements(savedPlacements, sessionResetToken);
+      if (isSessionAborted(sessionResetToken)) return;
       restoreCameraPaths(cfg.cameraPaths, cfg.activePathId, cfg.renderSettings);
       restoreRigUiState(cfg);
       if (hostMode === 'static') {
@@ -3037,6 +3060,87 @@
       status(`已导出 JSON · ${data.placements.length} 模型 · ${data.cameraPaths.length} 轨迹`);
     }
 
+    function clearAllPlacementsFromViewer() {
+      while (placements.length) {
+        const p = placements[placements.length - 1];
+        if (p?.sceneIdx != null && viewer) {
+          try { viewer.removeSplatScene(p.sceneIdx, false); } catch (_) {}
+        }
+        placements.pop();
+      }
+      selected = -1;
+      viewer?.forceRenderNextFrame?.();
+    }
+
+    function resetCameraEditorState() {
+      stopPathSlidePreview();
+      pathSlidePlaying = false;
+      if (rigOpen) closeRigCamera();
+      cameraMarkers = [];
+      cameraPathSegments = [];
+      cameraPaths = [];
+      activePathId = null;
+      nextPathId = 1;
+      markerDragFromIdx = -1;
+      selectedMarkerIdx = -1;
+      selectedCpSegIdx = -1;
+      selectedCpPointIdx = -1;
+      markerGizmoMode = null;
+      rigGizmoMode = null;
+      placementGizmoMode = null;
+      clearPathVisuals();
+      renderMarkerList();
+      renderPathGroupList();
+      updatePathTransportUI();
+      updateKeypointEditUI();
+      attachGizmo();
+    }
+
+    function resetEditorDefaults() {
+      defaultScale = 0.12;
+      defaultZ = DEFAULT_Z_FALLBACK;
+      el('defaultScale').value = defaultScale;
+      el('scaleVal').textContent = defaultScale.toFixed(2);
+      el('defaultZ').value = defaultZ;
+      el('zVal').textContent = defaultZ.toFixed(4);
+    }
+
+    async function clearEditorSession() {
+      if (!confirm('确定清空当前场景？\n\n将删除所有模型、相机轨迹和浏览器中的已保存配置，且无法撤销。')) return;
+      sessionResetToken++;
+      hideLoadProgress();
+      fileCache.clear();
+      clearAllPlacementsFromViewer();
+      resetCameraEditorState();
+      resetEditorDefaults();
+      selectPlacement(-1);
+      renderList();
+      localStorage.removeItem(CONFIG_STORAGE_KEY);
+      try {
+        await idbClearAll();
+      } catch (e) {
+        console.warn('清空模型缓存失败', e);
+      }
+      if (hostMode === 'server') {
+        try {
+          await fetch(apiUrl('api/placements'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              version: 2,
+              placements: [],
+              cameraPaths: [],
+              activePathId: null,
+              renderSettings: getRenderSettings(),
+            }),
+          });
+        } catch (_) {}
+      }
+      el('rigPreviewStatus').textContent = '未渲染';
+      status('已清空 · 可重新拖入模型');
+      viewer?.forceRenderNextFrame?.();
+    }
+
     async function mergeScene() {
       if (hostMode !== 'server') {
         throw new Error('合并完整模型需本地运行 python serve_editor.py');
@@ -3112,10 +3216,11 @@
       }
     }
 
-    async function restorePlacements(saved) {
+    async function restorePlacements(saved, loadToken = sessionResetToken) {
       if (!Array.isArray(saved) || !saved.length) return;
       const missing = [];
       for (const item of saved) {
+        if (isSessionAborted(loadToken)) return;
         const name = item.asset;
         if (!name) continue;
         let ab = fileCache.get(name);
@@ -3142,8 +3247,10 @@
         const splatBuffer = await GaussianSplats3D.PlyLoader.loadFromFileData(
           visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
         );
+        if (isSessionAborted(loadToken)) return;
         const sceneIdx = viewer.splatMesh.scenes.length;
         await viewer.addSplatBuffers([splatBuffer], [placementOpts(p)], true, false, false, false, true);
+        if (isSessionAborted(loadToken)) return;
         p.sceneIdx = sceneIdx;
         placements.push(p);
       }
@@ -3280,6 +3387,7 @@
       try { await importConfigFromFile(file); } catch (e) { showError(e); }
     };
     el('exportJsonBtn').onclick = () => exportConfigJson();
+    el('clearBtn').onclick = () => clearEditorSession().catch(showError);
     el('mergeBtn').onclick = () => mergeScene().catch(showError);
     el('addMarkerBtn').onclick = () => addCameraMarker();
     el('addPathGroupBtn').onclick = () => addCameraPathGroup();
@@ -3355,22 +3463,29 @@
     updatePathTransportUI();
 
     (async () => {
+      const loadToken = sessionResetToken;
       try {
         hostMode = await detectHostMode();
+        if (isSessionAborted(loadToken)) return;
         updateHostModeUI();
         await ensureViewer();
+        if (isSessionAborted(loadToken)) return;
         await initScene();
         const cfg = await loadSavedConfig();
+        if (isSessionAborted(loadToken)) return;
         applyConfigMeta(cfg);
-        await preloadAssetsForConfig(cfg);
+        await preloadAssetsForConfig(cfg, loadToken);
+        if (isSessionAborted(loadToken)) return;
         const savedPlacements = placementsFromConfig(cfg);
         if (savedPlacements.length) {
-          await restorePlacements(savedPlacements);
+          await restorePlacements(savedPlacements, loadToken);
         } else if (hostMode === 'server') {
           status('就绪 · 拖入模型恢复摆放（需同名文件）');
         }
+        if (isSessionAborted(loadToken)) return;
         restoreCameraPaths(cfg.cameraPaths, cfg.activePathId, cfg.renderSettings);
         restoreRigUiState(cfg);
+        if (isSessionAborted(loadToken)) return;
         const saveOk = await checkSaveApiHealth();
         if (saveOk === false) {
           status('就绪 · 保存接口版本过旧，请重启 serve_editor.py 后再点保存');
