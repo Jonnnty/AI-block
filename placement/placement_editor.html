@@ -27,11 +27,38 @@
       padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
     }
     .panel-head {
-      display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+      display: flex; flex-direction: column; gap: 10px;
     }
-    .panel-head-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-    .panel-head-actions { display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
-    .panel-action-btn { width: auto; min-width: 56px; padding: 6px 10px; font-size: 11px; }
+    .config-toolbar {
+      display: flex; flex-direction: column; gap: 6px;
+      padding: 8px; background: #141414; border: 1px solid #2c2c2c; border-radius: 10px;
+    }
+    .config-toolbar-row {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    }
+    .cfg-btn {
+      width: 100%; padding: 7px 8px; font-size: 12px; font-weight: 500; line-height: 1.2;
+      border-radius: 7px; border: 1px solid transparent; cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
+    }
+    .cfg-btn:hover { filter: none; }
+    .cfg-btn-primary {
+      background: linear-gradient(180deg, #3a7de6 0%, #2d6cdf 100%);
+      color: #fff; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset;
+    }
+    .cfg-btn-primary:hover { background: linear-gradient(180deg, #4a8af0 0%, #3578e8 100%); }
+    .cfg-btn-ghost {
+      background: #222; border-color: #383838; color: #c8c8c8;
+    }
+    .cfg-btn-ghost:hover { background: #2a2a2a; border-color: #505050; color: #fff; }
+    .cfg-btn-danger {
+      background: rgba(120, 40, 40, 0.12); border-color: #5a3030; color: #e09090;
+    }
+    .cfg-btn-danger:hover {
+      background: rgba(139, 46, 46, 0.28); border-color: #8b4040; color: #ffc0c0;
+    }
+    .cfg-btn-label { display: block; font-size: 12px; }
+    .cfg-btn-sub { display: block; font-size: 10px; opacity: 0.72; font-weight: 400; margin-top: 1px; }
     h1 { font-size: 16px; font-weight: 600; }
     h2 { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
     label { font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
@@ -49,7 +76,7 @@
     .row.gizmo-row { margin-bottom: 4px; }
     .row button { flex: 1; }
     .hint { font-size: 12px; color: #888; line-height: 1.5; }
-    .status { font-size: 12px; color: #6cf; min-height: 18px; word-break: break-all; }
+    .status { font-size: 12px; color: #6cf; min-height: 18px; word-break: break-all; line-height: 1.45; }
     .val { color: #aaa; font-size: 11px; }
     .val-editable { cursor: pointer; border-bottom: 1px dotted #666; }
     .val-editable:hover { color: #ddd; border-bottom-color: #6cf; }
@@ -176,14 +203,24 @@
   </div>
   <div id="panel">
     <div class="panel-head">
-      <div class="panel-head-left">
-        <div class="status" id="status">初始化…</div>
-      </div>
-      <div class="panel-head-actions">
-        <button type="button" id="saveBtn" class="panel-action-btn" title="保存配置">保存</button>
-        <button type="button" id="importJsonBtn" class="panel-action-btn secondary" title="从 JSON 文件恢复">导入json</button>
-        <button type="button" id="exportJsonBtn" class="panel-action-btn secondary" title="下载完整 JSON 配置">导出json</button>
-        <button type="button" id="clearBtn" class="panel-action-btn secondary" title="清空场景与浏览器缓存">清空</button>
+      <div class="status" id="status">初始化…</div>
+      <div class="config-toolbar">
+        <button type="button" id="saveBtn" class="cfg-btn cfg-btn-primary" title="保存到浏览器或 placements.json">
+          <span class="cfg-btn-label">保存</span>
+          <span class="cfg-btn-sub">配置 + 模型缓存</span>
+        </button>
+        <div class="config-toolbar-row">
+          <button type="button" id="importJsonBtn" class="cfg-btn cfg-btn-ghost" title="从 JSON 文件恢复">
+            <span class="cfg-btn-label">导入 JSON</span>
+          </button>
+          <button type="button" id="exportJsonBtn" class="cfg-btn cfg-btn-ghost" title="下载完整 JSON 配置">
+            <span class="cfg-btn-label">导出 JSON</span>
+          </button>
+        </div>
+        <button type="button" id="clearBtn" class="cfg-btn cfg-btn-danger" title="清空场景与浏览器缓存">
+          <span class="cfg-btn-label">清空</span>
+          <span class="cfg-btn-sub">重置场景</span>
+        </button>
       </div>
     </div>
     <div id="loadProgressWrap" hidden>
