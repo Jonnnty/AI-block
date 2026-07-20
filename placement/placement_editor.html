@@ -1141,6 +1141,7 @@
       if (viewer._rigOverlayPatched) return;
       viewer._rigOverlayPatched = true;
       const origRender = viewer.render.bind(viewer);
+      viewer._origGaussianRender = origRender;
       viewer.render = function () {
         origRender();
         renderRigOverlayPass();
@@ -1997,67 +1998,37 @@
     }
 
     async function renderGaussToImageData() {
-      const renderer = viewer.renderer;
-      const orbitCam = viewer.camera;
-      const saved = {
-        position: orbitCam.position.clone(),
-        quaternion: orbitCam.quaternion.clone(),
-        fov: orbitCam.fov,
-        near: orbitCam.near,
-        far: orbitCam.far,
-        aspect: orbitCam.aspect,
-      };
-      const oldTarget = renderer.getRenderTarget();
-      const oldSize = renderer.getSize(new THREE.Vector2());
-      const oldPixelRatio = renderer.getPixelRatio();
-      const oldClear = renderer.getClearColor(new THREE.Color());
-      const oldAlpha = renderer.getClearAlpha();
+      if (!viewer?.renderer || !renderCamera) throw new Error('场景未就绪');
+      if (!rigPreviewRt) rigPreviewRt = new THREE.WebGLRenderTarget(RIG_PREVIEW_W, RIG_PREVIEW_H);
+
       const helperWasVisible = cameraHelper?.visible ?? false;
       const tcHelper = transformControls?.getHelper?.();
       const tcHelperWasVisible = tcHelper?.visible ?? true;
       const pathWasVisible = pathRoot?.visible ?? false;
-
-      if (!rigPreviewRt) rigPreviewRt = new THREE.WebGLRenderTarget(RIG_PREVIEW_W, RIG_PREVIEW_H);
 
       if (cameraHelper) cameraHelper.visible = false;
       if (tcHelper) tcHelper.visible = false;
       if (pathRoot) pathRoot.visible = false;
 
       try {
-        applyRenderCameraToViewer(orbitCam, RIG_PREVIEW_W / RIG_PREVIEW_H);
-        renderer.setPixelRatio(1);
-        renderer.setRenderTarget(rigPreviewRt);
-        renderer.setSize(RIG_PREVIEW_W, RIG_PREVIEW_H, false);
-        renderer.setClearColor(0x000000, 0);
-        viewer.updateSplatMesh();
-        viewer.render();
-        await new Promise((r) => requestAnimationFrame(r));
-        renderer.readRenderTargetPixels(rigPreviewRt, 0, 0, RIG_PREVIEW_W, RIG_PREVIEW_H, _rigPreviewBuf);
-        const rowBytes = RIG_PREVIEW_W * 4;
-        for (let y = 0; y < RIG_PREVIEW_H; y++) {
-          const srcY = RIG_PREVIEW_H - 1 - y;
-          _rigPreviewImg.data.set(_rigPreviewBuf.subarray(srcY * rowBytes, srcY * rowBytes + rowBytes), y * rowBytes);
-        }
-        return new ImageData(new Uint8ClampedArray(_rigPreviewImg.data), RIG_PREVIEW_W, RIG_PREVIEW_H);
+        return await withRigGaussCapture(
+          RIG_PREVIEW_W,
+          RIG_PREVIEW_H,
+          { renderTarget: rigPreviewRt },
+          ({ renderer, width, height, renderTarget }) => {
+            renderer.readRenderTargetPixels(renderTarget, 0, 0, width, height, _rigPreviewBuf);
+            const rowBytes = width * 4;
+            for (let y = 0; y < height; y++) {
+              const srcY = height - 1 - y;
+              _rigPreviewImg.data.set(_rigPreviewBuf.subarray(srcY * rowBytes, srcY * rowBytes + rowBytes), y * rowBytes);
+            }
+            return new ImageData(new Uint8ClampedArray(_rigPreviewImg.data), width, height);
+          },
+        );
       } finally {
-        orbitCam.position.copy(saved.position);
-        orbitCam.quaternion.copy(saved.quaternion);
-        if (orbitCam.isPerspectiveCamera) {
-          orbitCam.fov = saved.fov;
-          orbitCam.near = saved.near;
-          orbitCam.far = saved.far;
-          orbitCam.aspect = saved.aspect;
-          orbitCam.updateProjectionMatrix();
-        }
-        renderer.setRenderTarget(oldTarget);
-        renderer.setPixelRatio(oldPixelRatio);
-        renderer.setSize(oldSize.x, oldSize.y, false);
-        renderer.setClearColor(oldClear, oldAlpha);
         if (cameraHelper) cameraHelper.visible = helperWasVisible;
         if (tcHelper) tcHelper.visible = tcHelperWasVisible;
         if (pathRoot) pathRoot.visible = pathWasVisible && rigOpen;
-        viewer.updateSplatMesh();
-        viewer.forceRenderNextFrame();
       }
     }
 
@@ -2199,32 +2170,18 @@
 
     async function renderGaussFullResCanvas() {
       if (!viewer?.renderer || !sceneReady || !renderCamera) throw new Error('场景未就绪');
-      const renderer = viewer.renderer;
       const renderW = Math.max(1, parseInt(el('renderWidth').value, 10) || 1920);
       const renderH = Math.max(1, parseInt(el('renderHeight').value, 10) || 1080);
-      const orbitCam = viewer.camera;
 
       return withRenderSceneHidden(async () => {
-        applyRenderCameraToViewer(orbitCam, renderW / renderH);
-        if (viewer.controls) viewer.controls.enabled = false;
-
-        renderer.setPixelRatio(1);
-        renderer.setSize(renderW, renderH, false);
-        renderer.setClearColor(0x000000, 0);
         el('view').style.background = 'transparent';
-
-        viewer.updateSplatMesh();
-        viewer.render();
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-        viewer.updateSplatMesh();
-        viewer.render();
-        await new Promise((r) => requestAnimationFrame(r));
-
-        const out = document.createElement('canvas');
-        out.width = renderW;
-        out.height = renderH;
-        out.getContext('2d').drawImage(renderer.domElement, 0, 0, renderW, renderH);
-        return out;
+        return withRigGaussCapture(renderW, renderH, {}, ({ renderer, width, height }) => {
+          const out = document.createElement('canvas');
+          out.width = width;
+          out.height = height;
+          out.getContext('2d').drawImage(renderer.domElement, 0, 0, width, height);
+          return out;
+        });
       });
     }
 
@@ -2487,6 +2444,7 @@
       renderCamRig.position.set(0, -0.5, 0.25);
 
       renderCamera = new THREE.PerspectiveCamera(50, 16 / 9, 0.01, 8);
+      renderCamera.up.set(0, 0, 1);
       renderCamera.position.set(0, 0, 0);
       renderCamRig.add(renderCamera);
 
@@ -2556,6 +2514,85 @@
         if (aspectOverride != null) targetCam.aspect = aspectOverride;
         else targetCam.aspect = renderCamera.aspect;
         targetCam.updateProjectionMatrix();
+      }
+      targetCam.updateMatrixWorld(true);
+    }
+
+    /** 离屏渲染时 Viewer.getRenderDimensions 仍读 viewport，会导致 splat 焦距与相机投影不一致 */
+    function overrideViewerRenderDimensions(width, height) {
+      const restore = viewer.getRenderDimensions.bind(viewer);
+      viewer.getRenderDimensions = (out) => {
+        out.x = width;
+        out.y = height;
+      };
+      return () => { viewer.getRenderDimensions = restore; };
+    }
+
+    /**
+     * 从 renderCamera 捕获高斯帧。必须暂停 selfDriven 循环并用库内 origRender，
+     * 否则 rAF 里 OrbitControls.update() 会把 orbit 相机写回 RT/画布，预览几乎不随机位变化。
+     */
+    async function withRigGaussCapture(width, height, { renderTarget = null } = {}, drawFn) {
+      syncRenderCameraParams();
+      renderCamRig.updateMatrixWorld(true);
+      renderCamera.updateMatrixWorld(true);
+
+      const renderer = viewer.renderer;
+      const orbitCam = viewer.camera;
+      const savedCam = {
+        position: orbitCam.position.clone(),
+        quaternion: orbitCam.quaternion.clone(),
+        up: orbitCam.up.clone(),
+        fov: orbitCam.fov,
+        near: orbitCam.near,
+        far: orbitCam.far,
+        aspect: orbitCam.aspect,
+      };
+      const savedTarget = renderer.getRenderTarget();
+      const savedSize = renderer.getSize(new THREE.Vector2());
+      const savedPixelRatio = renderer.getPixelRatio();
+      const savedClear = renderer.getClearColor(new THREE.Color());
+      const savedAlpha = renderer.getClearAlpha();
+      const savedControlsEnabled = viewer.controls?.enabled ?? true;
+      const wasRunning = viewer.selfDrivenModeRunning;
+
+      if (wasRunning) viewer.stop();
+      if (viewer.controls) viewer.controls.enabled = false;
+
+      const restoreRenderDims = overrideViewerRenderDimensions(width, height);
+      const drawFrame = viewer._origGaussianRender || viewer.render.bind(viewer);
+
+      try {
+        applyRenderCameraToViewer(orbitCam, width / height);
+        renderer.setPixelRatio(1);
+        renderer.setRenderTarget(renderTarget);
+        renderer.setSize(width, height, false);
+        renderer.setClearColor(0x000000, 0);
+
+        await viewer.runSplatSort(true, true);
+        viewer.updateSplatMesh();
+        drawFrame();
+        return await drawFn({ renderer, width, height, renderTarget });
+      } finally {
+        restoreRenderDims();
+        orbitCam.position.copy(savedCam.position);
+        orbitCam.quaternion.copy(savedCam.quaternion);
+        orbitCam.up.copy(savedCam.up);
+        if (orbitCam.isPerspectiveCamera) {
+          orbitCam.fov = savedCam.fov;
+          orbitCam.near = savedCam.near;
+          orbitCam.far = savedCam.far;
+          orbitCam.aspect = savedCam.aspect;
+          orbitCam.updateProjectionMatrix();
+        }
+        renderer.setRenderTarget(savedTarget);
+        renderer.setPixelRatio(savedPixelRatio);
+        renderer.setSize(savedSize.x, savedSize.y, false);
+        renderer.setClearColor(savedClear, savedAlpha);
+        if (viewer.controls) viewer.controls.enabled = savedControlsEnabled;
+        viewer.updateSplatMesh();
+        if (wasRunning) viewer.start();
+        viewer.forceRenderNextFrame();
       }
     }
 
