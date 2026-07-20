@@ -622,8 +622,87 @@
     const _tmpVecPos = new THREE.Vector3();
     const _tmpVec = new THREE.Vector3();
     const _tmpQuat = new THREE.Quaternion();
+    const _tmpMat4 = new THREE.Matrix4();
+    const _tmpMat4B = new THREE.Matrix4();
 
     const RIG_EULER_ORDER = 'ZXY';
+
+    /** 相机跟随的参考模型：当前选中项，否则第一个模型 */
+    function getCameraFollowPlacementIdx() {
+      if (!placements.length) return -1;
+      return selected >= 0 ? selected : 0;
+    }
+
+    function getPlacementWorldMatrix(p, out = _tmpMat4) {
+      _tmpEuler.set(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ');
+      _tmpQuatA.setFromEuler(_tmpEuler);
+      return out.compose(
+        _tmpVecA.set(p.x, p.y, p.z),
+        _tmpQuatA,
+        _tmpVecB.set(p.scale, p.scale, p.scale),
+      );
+    }
+
+    /** 参考模型变换时，机位/轨迹/路径控制点随动，保持相对空间关系 */
+    function applyTransformDeltaToCameraRig(oldM, newM) {
+      if (!renderCamRig || !rigOpen) return;
+      const delta = _tmpMat4B.copy(newM).multiply(oldM.clone().invert());
+      const deltaRot = _tmpQuatOut.setFromRotationMatrix(delta);
+
+      renderCamRig.position.applyMatrix4(delta);
+      renderCamRig.quaternion.premultiply(deltaRot);
+
+      for (const m of cameraMarkers) {
+        _tmpVecA.set(m.x, m.y, m.z).applyMatrix4(delta);
+        m.x = _tmpVecA.x;
+        m.y = _tmpVecA.y;
+        m.z = _tmpVecA.z;
+        markerQuatInto(m, _tmpQuatA);
+        _tmpQuatA.premultiply(deltaRot);
+        _tmpEuler.setFromQuaternion(_tmpQuatA, RIG_EULER_ORDER);
+        m.pitch = THREE.MathUtils.radToDeg(_tmpEuler.x);
+        m.roll = THREE.MathUtils.radToDeg(_tmpEuler.y);
+        m.yaw = THREE.MathUtils.radToDeg(_tmpEuler.z);
+      }
+
+      for (const seg of cameraPathSegments) {
+        for (const pt of seg.points) {
+          _tmpVecA.set(pt.x, pt.y, pt.z).applyMatrix4(delta);
+          pt.x = _tmpVecA.x;
+          pt.y = _tmpVecA.y;
+          pt.z = _tmpVecA.z;
+        }
+      }
+
+      syncCameraHelper();
+      updateRigSliders();
+      refreshPathVisuals();
+      el('rigPreviewStatus').textContent = '需重新渲染';
+      viewer?.forceRenderNextFrame();
+    }
+
+    function withPlacementTransformFollow(p, applyFn) {
+      const followIdx = getCameraFollowPlacementIdx();
+      const shouldFollow = rigOpen && renderCamRig && followIdx >= 0 && p === placements[followIdx];
+      const oldM = shouldFollow ? getPlacementWorldMatrix(p, new THREE.Matrix4()) : null;
+      applyFn();
+      if (shouldFollow && oldM) {
+        applyTransformDeltaToCameraRig(oldM, getPlacementWorldMatrix(p, new THREE.Matrix4()));
+      }
+    }
+
+    function updateCameraFollowHint() {
+      const hint = el('rigCameraHint');
+      if (!hint) return;
+      const idx = getCameraFollowPlacementIdx();
+      const base = '打开后显示四棱锥；可创建多组轨迹，顺序即播放顺序';
+      if (!rigOpen || idx < 0) {
+        hint.textContent = base;
+        return;
+      }
+      const name = placements[idx]?.name || `#${idx + 1}`;
+      hint.textContent = `${base} · 相机跟随「${name}」`;
+    }
 
     /** 四棱锥线宽参考（世界坐标），轨迹=3倍，球=5倍 */
     function frustumLineRefSize() {
@@ -2405,6 +2484,7 @@
       updatePathTransportUI();
       if (cameraMarkers.length >= 2) playPathSlide();
       el('rigPreviewStatus').textContent = '未渲染';
+      updateCameraFollowHint();
       status(cameraMarkers.length >= 2 ? '路径预览中' : (cameraPaths.length ? '＋ 当前机位 开始' : '新建轨迹 或 ＋ 当前机位'));
     }
 
@@ -2428,6 +2508,7 @@
       stopPreviewPlayback();
       stopPathSlidePreview();
       el('rigPreviewStatus').textContent = '未渲染';
+      updateCameraFollowHint();
       viewer?.forceRenderNextFrame();
       status('渲染摄像机已关闭');
     }
@@ -2959,13 +3040,15 @@
         if (selected < 0) return;
         const p = placements[selected];
         if (!p) return;
-        p.x = pivot.position.x;
-        p.y = pivot.position.y;
-        p.z = pivot.position.z;
-        const euler = new THREE.Euler().setFromQuaternion(pivot.quaternion, 'XYZ');
-        p.yaw_deg = THREE.MathUtils.radToDeg(euler.z);
-        syncPlacementTransform(p);
-        updateSelSliders();
+        withPlacementTransformFollow(p, () => {
+          p.x = pivot.position.x;
+          p.y = pivot.position.y;
+          p.z = pivot.position.z;
+          const euler = new THREE.Euler().setFromQuaternion(pivot.quaternion, 'XYZ');
+          p.yaw_deg = THREE.MathUtils.radToDeg(euler.z);
+          syncPlacementTransform(p);
+          updateSelSliders();
+        });
       });
     }
 
@@ -3068,6 +3151,7 @@
       }
       if (idx < 0) placementGizmoMode = null;
       updatePlacementGizmoUI();
+      updateCameraFollowHint();
       renderList();
       const enabled = idx >= 0;
       for (const id of ['selX', 'selY', 'selZ', 'selScale', 'selYaw']) el(id).disabled = !enabled;
@@ -3093,17 +3177,19 @@
     function onSelSliderChange() {
       if (selected < 0) return;
       const p = placements[selected];
-      p.x = parseFloat(el('selX').value);
-      p.y = parseFloat(el('selY').value);
-      p.z = parseFloat(el('selZ').value);
-      p.scale = parseFloat(el('selScale').value);
-      p.yaw_deg = parseFloat(el('selYaw').value);
-      syncPlacementTransform(p);
-      updateSelSliders();
-      syncingFromGizmo = true;
-      pivot.position.set(p.x, p.y, p.z);
-      pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
-      syncingFromGizmo = false;
+      withPlacementTransformFollow(p, () => {
+        p.x = parseFloat(el('selX').value);
+        p.y = parseFloat(el('selY').value);
+        p.z = parseFloat(el('selZ').value);
+        p.scale = parseFloat(el('selScale').value);
+        p.yaw_deg = parseFloat(el('selYaw').value);
+        syncPlacementTransform(p);
+        updateSelSliders();
+        syncingFromGizmo = true;
+        pivot.position.set(p.x, p.y, p.z);
+        pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+        syncingFromGizmo = false;
+      });
     }
 
     function removePlacement(idx) {
