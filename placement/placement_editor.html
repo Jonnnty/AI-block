@@ -219,14 +219,17 @@
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
       "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
-      "@mkkellogg/gaussian-splats-3d": "https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.6/build/gaussian-splats-3d.module.js"
+      "@mkkellogg/gaussian-splats-3d": "./vendor/gaussian-splats-3d.module.js?v=20260721"
     }
   }
   </script>
   <script>
     window.addEventListener('error', (e) => {
       const s = document.getElementById('status');
-      if (s && s.textContent === '初始化…') s.textContent = `错误: ${e.message || '脚本加载失败'}`;
+      if (!s) return;
+      const where = e.filename ? ` (${String(e.filename).split('/').pop()}:${e.lineno || '?'})` : '';
+      const msg = `${e.message || '脚本加载失败'}${where}`;
+      if (s.textContent === '初始化…' || s.textContent.startsWith('正在')) s.textContent = `错误: ${msg}`;
     });
     window.addEventListener('unhandledrejection', (e) => {
       const s = document.getElementById('status');
