@@ -223,6 +223,18 @@
     }
   }
   </script>
+  <script>
+    window.addEventListener('error', (e) => {
+      const s = document.getElementById('status');
+      if (s && s.textContent === '初始化…') s.textContent = `错误: ${e.message || '脚本加载失败'}`;
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      const s = document.getElementById('status');
+      if (!s) return;
+      const msg = e.reason?.message || String(e.reason || '未知错误');
+      if (s.textContent === '初始化…' || s.textContent.startsWith('正在')) s.textContent = `错误: ${msg}`;
+    });
+  </script>
 </head>
 <body>
   <div id="view">
@@ -651,6 +663,7 @@
     }
 
     function normalizeMarkerPose(m) {
+      if (!m || typeof m !== 'object') return createScenePose(0, 0, 0);
       const yaw_deg = m.yaw_deg ?? m.yaw ?? 0;
       const pitch_deg = m.pitch_deg ?? m.pitch ?? 0;
       const roll_deg = m.roll_deg ?? m.roll ?? 0;
@@ -1123,10 +1136,20 @@
       syncRenderCameraParams();
     }
 
+    async function fetchWithTimeout(url, options = {}, ms = 4000) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), ms);
+      try {
+        return await fetch(url, { ...options, signal: ctrl.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
     async function detectHostMode() {
       if (location.protocol === 'file:') return 'static';
       try {
-        const res = await fetch(apiUrl('api/health'), { cache: 'no-store' });
+        const res = await fetchWithTimeout(apiUrl('api/health'), { cache: 'no-store' });
         if (!res.ok) return 'static';
         const data = await res.json();
         if (data?.ok && data.configVersion >= 2) return 'server';
@@ -1151,8 +1174,13 @@
 
     async function loadSavedConfig() {
       if (hostMode === 'server') {
-        const saved = await fetch(apiUrl('api/placements')).then((r) => r.json()).catch(() => []);
-        return parseSavedConfig(saved);
+        try {
+          const res = await fetchWithTimeout(apiUrl('api/placements'));
+          if (!res.ok) return parseSavedConfig([]);
+          return parseSavedConfig(await res.json());
+        } catch (_) {
+          return parseSavedConfig([]);
+        }
       }
       const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
       if (!raw) return parseSavedConfig([]);
@@ -3053,17 +3081,22 @@
       sharedRenderer = tryCreateRenderer(root, root.clientWidth, root.clientHeight);
       if (!sharedRenderer) throw new Error('无法创建 WebGL 渲染器');
       applyViewBackground();
-      viewer = new GaussianSplats3D.Viewer({ rootElement: root, renderer: sharedRenderer, ...viewerOpts });
-      viewer.start();
-      tuneCamera();
-      initRigOverlayScene();
-      setupViewHelper();
-      overlayRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
-      overlayRenderer.setSize(128, 128);
-      setupGizmo();
-      setupRenderCamera();
-      setupPathPick();
-      startOverlayLoop();
+      try {
+        viewer = new GaussianSplats3D.Viewer({ rootElement: root, renderer: sharedRenderer, ...viewerOpts });
+        viewer.start();
+        tuneCamera();
+        initRigOverlayScene();
+        setupViewHelper();
+        overlayRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
+        overlayRenderer.setSize(128, 128);
+        setupGizmo();
+        setupRenderCamera();
+        setupPathPick();
+        startOverlayLoop();
+      } catch (e) {
+        viewer = null;
+        throw e;
+      }
     }
 
     const _pickRay = new THREE.Raycaster();
@@ -3559,7 +3592,7 @@
     async function checkSaveApiHealth() {
       if (hostMode === 'static') return null;
       try {
-        const res = await fetch(apiUrl('api/health'));
+        const res = await fetchWithTimeout(apiUrl('api/health'));
         if (!res.ok) return false;
         const data = await res.json().catch(() => ({}));
         return data.configVersion >= 2;
@@ -3817,12 +3850,15 @@
     (async () => {
       const loadToken = sessionResetToken;
       try {
+        status('正在检测运行环境…');
         hostMode = await detectHostMode();
         if (isSessionAborted(loadToken)) return;
         updateHostModeUI();
+        status('正在加载 3D 引擎…');
         await ensureViewer();
         if (isSessionAborted(loadToken)) return;
         await initScene();
+        status('正在恢复场景…');
         const cfg = await loadSavedConfig();
         if (isSessionAborted(loadToken)) return;
         applyConfigMeta(cfg);
