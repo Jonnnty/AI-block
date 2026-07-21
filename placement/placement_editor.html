@@ -643,51 +643,134 @@
       );
     }
 
-    /** 参考模型变换时，机位/轨迹/路径控制点随动，保持相对空间关系 */
-    function applyTransformDeltaToCameraRig(oldM, newM) {
-      if (!renderCamRig || !rigOpen) return;
-      const delta = _tmpMat4B.copy(newM).multiply(oldM.clone().invert());
-      const deltaRot = _tmpQuatOut.setFromRotationMatrix(delta);
-
-      renderCamRig.position.applyMatrix4(delta);
-      renderCamRig.quaternion.premultiply(deltaRot);
-
-      for (const m of cameraMarkers) {
-        _tmpVecA.set(m.x, m.y, m.z).applyMatrix4(delta);
-        m.x = _tmpVecA.x;
-        m.y = _tmpVecA.y;
-        m.z = _tmpVecA.z;
-        markerQuatInto(m, _tmpQuatA);
-        _tmpQuatA.premultiply(deltaRot);
-        _tmpEuler.setFromQuaternion(_tmpQuatA, RIG_EULER_ORDER);
-        m.pitch = THREE.MathUtils.radToDeg(_tmpEuler.x);
-        m.roll = THREE.MathUtils.radToDeg(_tmpEuler.y);
-        m.yaw = THREE.MathUtils.radToDeg(_tmpEuler.z);
-      }
-
-      for (const seg of cameraPathSegments) {
-        for (const pt of seg.points) {
-          _tmpVecA.set(pt.x, pt.y, pt.z).applyMatrix4(delta);
-          pt.x = _tmpVecA.x;
-          pt.y = _tmpVecA.y;
-          pt.z = _tmpVecA.z;
-        }
-      }
-
-      syncCameraHelper();
-      updateRigSliders();
-      refreshPathVisuals();
-      el('rigPreviewStatus').textContent = '需重新渲染';
-      viewer?.forceRenderNextFrame();
+    function getAnchorPlacement() {
+      const idx = getCameraFollowPlacementIdx();
+      return idx >= 0 ? placements[idx] : null;
     }
 
+    function hasAnchorPlacement() {
+      return getAnchorPlacement() != null;
+    }
+
+    function markersUseAnchorLocal() {
+      return hasAnchorPlacement() && cameraMarkers.length > 0 && cameraMarkers[0].space === 'anchor';
+    }
+
+    function getAnchorWorldMatrix(out = _tmpMat4) {
+      const p = getAnchorPlacement();
+      if (!p) return out.identity();
+      return getPlacementWorldMatrix(p, out);
+    }
+
+    function worldPointToAnchorLocal(x, y, z, out = _tmpVecA) {
+      return out.set(x, y, z).applyMatrix4(_tmpMat4B.copy(getAnchorWorldMatrix()).invert());
+    }
+
+    function anchorLocalPointToWorld(x, y, z, out = _tmpVecA) {
+      return out.set(x, y, z).applyMatrix4(getAnchorWorldMatrix());
+    }
+
+    function worldQuatToAnchorLocal(worldQuat, out = _tmpQuatA) {
+      _tmpQuatB.setFromRotationMatrix(getAnchorWorldMatrix());
+      return out.copy(worldQuat).premultiply(_tmpQuatB.invert());
+    }
+
+    function anchorLocalQuatToWorld(localQuat, out = _tmpQuatA) {
+      _tmpQuatB.setFromRotationMatrix(getAnchorWorldMatrix());
+      return out.copy(localQuat).premultiply(_tmpQuatB);
+    }
+
+    function localEulerToQuat(yaw, pitch, roll, out = _tmpQuatA) {
+      _tmpEuler.set(pitch * Math.PI / 180, roll * Math.PI / 180, yaw * Math.PI / 180, RIG_EULER_ORDER);
+      return out.setFromEuler(_tmpEuler);
+    }
+
+    function quatToLocalEuler(q, out = { yaw: 0, pitch: 0, roll: 0 }) {
+      _tmpEuler.setFromQuaternion(q, RIG_EULER_ORDER);
+      out.yaw = THREE.MathUtils.radToDeg(_tmpEuler.z);
+      out.pitch = THREE.MathUtils.radToDeg(_tmpEuler.x);
+      out.roll = THREE.MathUtils.radToDeg(_tmpEuler.y);
+      return out;
+    }
+
+    function captureRigAnchorLocalPose() {
+      worldPointToAnchorLocal(renderCamRig.position.x, renderCamRig.position.y, renderCamRig.position.z, _tmpVecA);
+      worldQuatToAnchorLocal(renderCamRig.quaternion, _tmpQuatA);
+      return { ...quatToLocalEuler(_tmpQuatA), x: _tmpVecA.x, y: _tmpVecA.y, z: _tmpVecA.z };
+    }
+
+    function applyRigAnchorLocalPose(local) {
+      anchorLocalPointToWorld(local.x, local.y, local.z, _tmpVecA);
+      localEulerToQuat(local.yaw, local.pitch, local.roll, _tmpQuatA);
+      anchorLocalQuatToWorld(_tmpQuatA, _tmpQuatB);
+      renderCamRig.position.copy(_tmpVecA);
+      renderCamRig.quaternion.copy(_tmpQuatB);
+    }
+
+    function migrateMarkersToAnchorLocal(markers) {
+      if (!hasAnchorPlacement()) return markers;
+      return markers.map((m) => {
+        if (m.space === 'anchor') return { ...m };
+        worldPointToAnchorLocal(m.x, m.y, m.z, _tmpVecA);
+        localEulerToQuat(m.yaw ?? 0, m.pitch ?? 0, m.roll ?? 0, _tmpQuatA);
+        worldQuatToAnchorLocal(_tmpQuatA, _tmpQuatB);
+        const e = quatToLocalEuler(_tmpQuatB);
+        return {
+          x: _tmpVecA.x,
+          y: _tmpVecA.y,
+          z: _tmpVecA.z,
+          yaw: e.yaw,
+          pitch: e.pitch,
+          roll: e.roll,
+          space: 'anchor',
+        };
+      });
+    }
+
+    function migrateSegmentPointsToAnchorLocal(segments) {
+      if (!hasAnchorPlacement()) return segments;
+      return segments.map((s) => ({
+        points: (s.points || []).map((pt) => {
+          if (pt.space === 'anchor') return { ...pt };
+          worldPointToAnchorLocal(pt.x, pt.y, pt.z, _tmpVecA);
+          return { x: _tmpVecA.x, y: _tmpVecA.y, z: _tmpVecA.z, t: pt.t, space: 'anchor' };
+        }),
+      }));
+    }
+
+    function markerPointToWorld(m, out = _tmpVecA) {
+      if (m.space === 'anchor' && hasAnchorPlacement()) return anchorLocalPointToWorld(m.x, m.y, m.z, out);
+      return out.set(m.x, m.y, m.z);
+    }
+
+    function worldPointToMarkerStorage(x, y, z, target) {
+      if (hasAnchorPlacement()) {
+        worldPointToAnchorLocal(x, y, z, _tmpVecA);
+        target.x = _tmpVecA.x;
+        target.y = _tmpVecA.y;
+        target.z = _tmpVecA.z;
+        target.space = 'anchor';
+      } else {
+        target.x = x;
+        target.y = y;
+        target.z = z;
+        target.space = 'world';
+      }
+    }
+
+    /** 参考模型变换时，保持机位在模型局部坐标中不变 */
     function withPlacementTransformFollow(p, applyFn) {
       const followIdx = getCameraFollowPlacementIdx();
       const shouldFollow = rigOpen && renderCamRig && followIdx >= 0 && p === placements[followIdx];
-      const oldM = shouldFollow ? getPlacementWorldMatrix(p, new THREE.Matrix4()) : null;
+      const rigLocal = shouldFollow && hasAnchorPlacement() ? captureRigAnchorLocalPose() : null;
       applyFn();
-      if (shouldFollow && oldM) {
-        applyTransformDeltaToCameraRig(oldM, getPlacementWorldMatrix(p, new THREE.Matrix4()));
+      if (rigLocal) {
+        applyRigAnchorLocalPose(rigLocal);
+        syncCameraHelper();
+        updateRigSliders();
+        refreshPathVisuals();
+        el('rigPreviewStatus').textContent = '需重新渲染';
+        viewer?.forceRenderNextFrame();
       }
     }
 
@@ -736,11 +819,26 @@
     }
 
     function markerQuatInto(m, outQuat) {
-      _tmpEuler.set(m.pitch * Math.PI / 180, m.roll * Math.PI / 180, m.yaw * Math.PI / 180, RIG_EULER_ORDER);
-      return outQuat.setFromEuler(_tmpEuler);
+      localEulerToQuat(m.yaw ?? 0, m.pitch ?? 0, m.roll ?? 0, _tmpQuatA);
+      if (m.space === 'anchor' && hasAnchorPlacement()) return anchorLocalQuatToWorld(_tmpQuatA, outQuat);
+      return outQuat.copy(_tmpQuatA);
     }
 
     function markerFromRig() {
+      if (hasAnchorPlacement()) {
+        worldPointToAnchorLocal(renderCamRig.position.x, renderCamRig.position.y, renderCamRig.position.z, _tmpVecA);
+        worldQuatToAnchorLocal(renderCamRig.quaternion, _tmpQuatA);
+        const e = quatToLocalEuler(_tmpQuatA);
+        return {
+          x: _tmpVecA.x,
+          y: _tmpVecA.y,
+          z: _tmpVecA.z,
+          yaw: e.yaw,
+          pitch: e.pitch,
+          roll: e.roll,
+          space: 'anchor',
+        };
+      }
       const rot = rigEulerFromRig();
       return {
         x: renderCamRig.position.x,
@@ -749,12 +847,20 @@
         yaw: rot.yaw,
         pitch: rot.pitch,
         roll: rot.roll,
+        space: 'world',
       };
     }
 
     function applyMarkerToRig(m) {
-      renderCamRig.position.set(m.x, m.y, m.z);
-      applyRigEuler(m.yaw, m.pitch, m.roll);
+      if (m.space === 'anchor' && hasAnchorPlacement()) {
+        anchorLocalPointToWorld(m.x, m.y, m.z, _tmpVecA);
+        markerQuatInto(m, _tmpQuatB);
+        renderCamRig.position.copy(_tmpVecA);
+        renderCamRig.quaternion.copy(_tmpQuatB);
+      } else {
+        renderCamRig.position.set(m.x, m.y, m.z);
+        applyRigEuler(m.yaw, m.pitch, m.roll);
+      }
       syncCameraHelper();
       updateRigSliders();
     }
@@ -807,7 +913,7 @@
       if (!path) return;
       path.markers = cameraMarkers.map((m) => ({ ...m }));
       path.segments = cameraPathSegments.map((s) => ({
-        points: (s.points || []).map((pt) => ({ x: pt.x, y: pt.y, z: pt.z, t: pt.t })),
+        points: (s.points || []).map((pt) => ({ x: pt.x, y: pt.y, z: pt.z, t: pt.t, space: pt.space })),
       }));
       path.framesPerSeg = pathFramesPerSeg;
       path.fps = pathFps;
@@ -821,10 +927,10 @@
         pathFramesPerSeg = 16;
         pathFps = 12;
       } else {
-        cameraMarkers = path.markers.map((m) => ({ ...m }));
-        cameraPathSegments = path.segments.map((s) => ({
-          points: (s.points || []).map((pt) => ({ x: pt.x, y: pt.y, z: pt.z, t: pt.t })),
-        }));
+        cameraMarkers = migrateMarkersToAnchorLocal(path.markers.map((m) => ({ ...m })));
+        cameraPathSegments = migrateSegmentPointsToAnchorLocal(path.segments.map((s) => ({
+          points: (s.points || []).map((pt) => ({ x: pt.x, y: pt.y, z: pt.z, t: pt.t, space: pt.space })),
+        })));
         pathFramesPerSeg = path.framesPerSeg ?? 16;
         pathFps = path.fps ?? 12;
       }
@@ -1459,7 +1565,9 @@
       if (!hit) return false;
 
       const segIdx = hit.object.userData.pathSegIdx;
-      const t = approximateTOnSegment(segIdx, hit.point);
+      const hitPt = hit.point.clone();
+      if (markersUseAnchorLocal()) worldPointToAnchorLocal(hitPt.x, hitPt.y, hitPt.z, hitPt);
+      const t = approximateTOnSegment(segIdx, hitPt);
 
       if (pathSlidePlaying) pausePathSlide();
       selectedMarkerIdx = -1;
@@ -1513,15 +1621,19 @@
       return newIdx;
     }
 
-    function getSegmentWaypoints(segIdx) {
+    function getSegmentWaypoints(segIdx, { toWorld = false } = {}) {
       const a = cameraMarkers[segIdx];
       const b = cameraMarkers[segIdx + 1];
       const inner = (cameraPathSegments[segIdx]?.points || []).slice().sort((p, q) => p.t - q.t);
-      return [
+      const pts = [
         new THREE.Vector3(a.x, a.y, a.z),
         ...inner.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
         new THREE.Vector3(b.x, b.y, b.z),
       ];
+      if (toWorld && markersUseAnchorLocal()) {
+        return pts.map((v) => anchorLocalPointToWorld(v.x, v.y, v.z, new THREE.Vector3()));
+      }
+      return pts;
     }
 
     /** 相邻路点间三次 Hermite 衔接，过每个路点且不在弦中点强制对称 */
@@ -1551,8 +1663,8 @@
       return path;
     }
 
-    function buildSegmentCurveSpec(segIdx) {
-      const wps = getSegmentWaypoints(segIdx);
+    function buildSegmentCurveSpec(segIdx, { toWorld = false } = {}) {
+      const wps = getSegmentWaypoints(segIdx, { toWorld });
       if (wps.length <= 2) {
         return { straight: true, a: wps[0], b: wps[1] };
       }
@@ -1560,7 +1672,7 @@
     }
 
     function segmentCurveForTube(segIdx) {
-      const spec = buildSegmentCurveSpec(segIdx);
+      const spec = buildSegmentCurveSpec(segIdx, { toWorld: true });
       if (spec.straight) return new THREE.LineCurve3(spec.a, spec.b);
       return spec.curve;
     }
@@ -1599,7 +1711,11 @@
           const selected = si === selectedCpSegIdx && pi === selectedCpPointIdx;
           const r = pathCpRadius();
           const group = new THREE.Group();
-          group.position.set(pt.x, pt.y, pt.z);
+          group.position.copy(
+            pt.space === 'anchor' && hasAnchorPlacement()
+              ? anchorLocalPointToWorld(pt.x, pt.y, pt.z, new THREE.Vector3())
+              : new THREE.Vector3(pt.x, pt.y, pt.z),
+          );
           group.userData.cpSegIdx = si;
           group.userData.cpPointIdx = pi;
           const halo = new THREE.Mesh(
@@ -1633,7 +1749,9 @@
       if (!seg) return -1;
       if (!seg.points) seg.points = [];
       if (seg.points.some((p) => Math.abs(p.t - t) < 0.025)) return -1;
-      seg.points.push({ x, y, z, t });
+      const pt = { x, y, z, t };
+      if (hasAnchorPlacement()) pt.space = 'anchor';
+      seg.points.push(pt);
       seg.points.sort((a, b) => a.t - b.t);
       rebuildCpVisuals();
       updatePathLine();
@@ -1682,7 +1800,7 @@
           depthTest: false,
           depthWrite: false,
         }));
-        mesh.position.set(m.x, m.y, m.z);
+        mesh.position.copy(markerPointToWorld(m));
         mesh.userData.markerIdx = i;
         pathRoot.add(mesh);
         markerMeshes.push(mesh);
@@ -1819,6 +1937,9 @@
       markerQuatInto(cameraMarkers[segIdx], _tmpQuatA);
       markerQuatInto(cameraMarkers[segIdx + 1], _tmpQuatB);
       _tmpQuatOut.copy(_tmpQuatA).slerp(_tmpQuatB, localT);
+      if (markersUseAnchorLocal()) {
+        anchorLocalPointToWorld(_tmpVecPos.x, _tmpVecPos.y, _tmpVecPos.z, _tmpVecPos);
+      }
       return { position: _tmpVecPos.clone(), quaternion: _tmpQuatOut.clone() };
     }
 
@@ -1844,12 +1965,18 @@
     function refreshPathVisuals() {
       if (!pathRoot) return;
       cameraMarkers.forEach((m, i) => {
-        if (markerMeshes[i]) markerMeshes[i].position.set(m.x, m.y, m.z);
+        if (markerMeshes[i]) markerMeshes[i].position.copy(markerPointToWorld(m));
       });
       cameraPathSegments.forEach((seg, si) => {
         (seg.points || []).forEach((pt, pi) => {
           const mesh = findCpMesh(si, pi);
-          if (mesh) mesh.position.set(pt.x, pt.y, pt.z);
+          if (mesh) {
+            mesh.position.copy(
+              pt.space === 'anchor' && hasAnchorPlacement()
+                ? anchorLocalPointToWorld(pt.x, pt.y, pt.z, new THREE.Vector3())
+                : new THREE.Vector3(pt.x, pt.y, pt.z),
+            );
+          }
         });
       });
       updatePathLine();
@@ -2483,6 +2610,8 @@
       updateKeypointEditUI();
       updatePathTransportUI();
       if (cameraMarkers.length >= 2) playPathSlide();
+      cameraMarkers = migrateMarkersToAnchorLocal(cameraMarkers);
+      cameraPathSegments = migrateSegmentPointsToAnchorLocal(cameraPathSegments);
       el('rigPreviewStatus').textContent = '未渲染';
       updateCameraFollowHint();
       status(cameraMarkers.length >= 2 ? '路径预览中' : (cameraPaths.length ? '＋ 当前机位 开始' : '新建轨迹 或 ＋ 当前机位'));
@@ -3010,9 +3139,7 @@
           const i = obj.userData.cpSegIdx;
           const j = obj.userData.cpPointIdx;
           const p = obj.position;
-          cameraPathSegments[i].points[j].x = p.x;
-          cameraPathSegments[i].points[j].y = p.y;
-          cameraPathSegments[i].points[j].z = p.z;
+          worldPointToMarkerStorage(p.x, p.y, p.z, cameraPathSegments[i].points[j]);
           syncKeypointOrderAfterDrag(i, j, obj);
           updatePathLine();
           el('rigPreviewStatus').textContent = '需重新渲染';
@@ -3022,9 +3149,7 @@
         if (obj?.userData?.markerIdx != null) {
           const i = obj.userData.markerIdx;
           const p = obj.position;
-          cameraMarkers[i].x = p.x;
-          cameraMarkers[i].y = p.y;
-          cameraMarkers[i].z = p.z;
+          worldPointToMarkerStorage(p.x, p.y, p.z, cameraMarkers[i]);
           applyMarkerToRig(cameraMarkers[i]);
           refreshPathVisuals();
           el('rigPreviewStatus').textContent = '需重新渲染';
