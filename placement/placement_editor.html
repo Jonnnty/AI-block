@@ -2444,8 +2444,23 @@
       status(`单帧已保存 ${canvas.width}×${canvas.height}`);
     }
 
-    async function exportPathSequencePngs() {
+    async function exportPathSequencePngs(dirHandle = null) {
       if (cameraMarkers.length < 2) throw new Error('至少需要 2 个机位才能导出路径序列');
+
+      const useDirectoryPicker = !dirHandle && typeof window.showDirectoryPicker === 'function';
+      if (useDirectoryPicker) {
+        status('请选择导出文件夹…');
+        try {
+          dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        } catch (e) {
+          if (e && e.name === 'AbortError') {
+            status('已取消导出');
+            return;
+          }
+          throw e;
+        }
+      }
+
       stopPathSlidePreview();
       stopPreviewPlayback();
 
@@ -2473,8 +2488,7 @@
           }
         }
 
-        if (typeof window.showDirectoryPicker === 'function') {
-          const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        if (dirHandle) {
           const seqDir = await dirHandle.getDirectoryHandle(folderName, { create: true });
           for (const { name, blob } of frames) {
             const fileHandle = await seqDir.getFileHandle(name, { create: true });
