@@ -712,9 +712,22 @@
       return poseWorldMatrix(placementToPose(p), out);
     }
 
+    function poseToQuaternion(pose, outQuat = _tmpQuatA) {
+      if (poseUsesCameraEuler(pose)) {
+        _tmpEuler.set(
+          pose.pitch_deg * Math.PI / 180,
+          pose.roll_deg * Math.PI / 180,
+          pose.yaw_deg * Math.PI / 180,
+          RIG_EULER_ORDER,
+        );
+      } else {
+        _tmpEuler.set(0, 0, pose.yaw_deg * Math.PI / 180, PLACEMENT_EULER_ORDER);
+      }
+      return outQuat.setFromEuler(_tmpEuler);
+    }
+
     function poseQuatInto(pose, outQuat) {
-      poseWorldMatrix(pose, _tmpMat4);
-      return outQuat.setFromRotationMatrix(_tmpMat4);
+      return poseToQuaternion(normalizeMarkerPose(pose), outQuat);
     }
 
     function applyRigidDeltaToPose(pose, deltaM) {
@@ -776,17 +789,7 @@
     function syncRigFromPose(pose = renderCameraPose) {
       if (!renderCamRig || !pose) return;
       renderCamRig.position.set(pose.x, pose.y, pose.z);
-      if (poseUsesCameraEuler(pose)) {
-        _tmpEuler.set(
-          pose.pitch_deg * Math.PI / 180,
-          pose.roll_deg * Math.PI / 180,
-          pose.yaw_deg * Math.PI / 180,
-          RIG_EULER_ORDER,
-        );
-      } else {
-        _tmpEuler.set(0, 0, pose.yaw_deg * Math.PI / 180, PLACEMENT_EULER_ORDER);
-      }
-      renderCamRig.quaternion.setFromEuler(_tmpEuler);
+      poseToQuaternion(pose, renderCamRig.quaternion);
       renderCamRig.scale.setScalar(_n(pose.scale, 1));
       syncCameraHelper();
       updateRigSliders();
@@ -806,18 +809,16 @@
     }
 
     function applySamplePoseToRig(sample) {
-      if (!renderCameraPose || !sample) return;
-      renderCameraPose.x = sample.position.x;
-      renderCameraPose.y = sample.position.y;
-      renderCameraPose.z = sample.position.z;
-      _tmpEuler.setFromQuaternion(sample.quaternion, RIG_EULER_ORDER);
-      renderCameraPose.yaw_deg = THREE.MathUtils.radToDeg(_tmpEuler.z);
-      renderCameraPose.pitch_deg = THREE.MathUtils.radToDeg(_tmpEuler.x);
-      renderCameraPose.roll_deg = THREE.MathUtils.radToDeg(_tmpEuler.y);
-      syncRigFromPose();
+      if (!renderCamRig || !renderCameraPose || !sample) return;
+      renderCamRig.position.copy(sample.position);
+      renderCamRig.quaternion.copy(sample.quaternion);
+      syncPoseFromRig(renderCameraPose);
+      syncCameraHelper();
+      updateRigSliders();
     }
 
     function markerFromRig() {
+      syncPoseFromRig(renderCameraPose);
       return { ...renderCameraPose };
     }
 
@@ -1988,15 +1989,26 @@
       return outVec;
     }
 
+    function markerToSample(m) {
+      const pose = normalizeMarkerPose(m);
+      poseToQuaternion(pose, _tmpQuatOut);
+      return {
+        position: new THREE.Vector3(pose.x, pose.y, pose.z),
+        quaternion: _tmpQuatOut.clone(),
+      };
+    }
+
     function samplePathAt(globalT) {
       const segs = cameraMarkers.length - 1;
       if (segs <= 0) return null;
       const f = globalT * segs;
       const segIdx = Math.min(segs - 1, Math.floor(f));
       const localT = f - segIdx;
+      if (localT <= 1e-10) return markerToSample(cameraMarkers[segIdx]);
+      if (localT >= 1 - 1e-10) return markerToSample(cameraMarkers[segIdx + 1]);
       sampleSegmentLocal(segIdx, localT, _tmpVecPos);
-      poseQuatInto(cameraMarkers[segIdx], _tmpQuatA);
-      poseQuatInto(cameraMarkers[segIdx + 1], _tmpQuatB);
+      poseToQuaternion(normalizeMarkerPose(cameraMarkers[segIdx]), _tmpQuatA);
+      poseToQuaternion(normalizeMarkerPose(cameraMarkers[segIdx + 1]), _tmpQuatB);
       _tmpQuatOut.copy(_tmpQuatA).slerp(_tmpQuatB, localT);
       return { position: _tmpVecPos.clone(), quaternion: _tmpQuatOut.clone() };
     }
