@@ -231,7 +231,7 @@
     window.addEventListener('unhandledrejection', (e) => {
       const s = document.getElementById('status');
       if (!s) return;
-      const msg = e.reason?.message || String(e.reason || '未知错误');
+      const msg = (e.reason && e.reason.message) || String(e.reason || '未知错误');
       if (s.textContent === '初始化…' || s.textContent.startsWith('正在')) s.textContent = `错误: ${msg}`;
     });
   </script>
@@ -433,6 +433,8 @@
     import { ViewHelper } from 'three/addons/helpers/ViewHelper.js';
     import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 
+
+    function _n(v, fb) { return v !== undefined && v !== null ? v : fb; }
     const CONFIG_STORAGE_KEY = 'placement_editor_v2_config';
     const ASSET_DB_NAME = 'placement_editor_assets_v1';
     const ASSET_STORE = 'files';
@@ -546,8 +548,8 @@
       dynamicScene: true,
       enableOptionalEffects: false,
       optimizeSplatData: false,
-      sceneRevealMode: GaussianSplats3D.SceneRevealMode?.Instant ?? 2,
-      renderMode: GaussianSplats3D.RenderMode?.Always ?? 0,
+      sceneRevealMode: (GaussianSplats3D.SceneRevealMode && GaussianSplats3D.SceneRevealMode.Instant != null) ? GaussianSplats3D.SceneRevealMode.Instant : 2,
+      renderMode: (GaussianSplats3D.RenderMode && GaussianSplats3D.RenderMode.Always != null) ? GaussianSplats3D.RenderMode.Always : 0,
     };
 
     const el = (id) => document.getElementById(id);
@@ -664,10 +666,10 @@
 
     function normalizeMarkerPose(m) {
       if (!m || typeof m !== 'object') return createScenePose(0, 0, 0);
-      const yaw_deg = m.yaw_deg ?? m.yaw ?? 0;
-      const pitch_deg = m.pitch_deg ?? m.pitch ?? 0;
-      const roll_deg = m.roll_deg ?? m.roll ?? 0;
-      return createScenePose(m.x, m.y, m.z, yaw_deg, pitch_deg, roll_deg, m.scale ?? 1);
+      const yaw_deg = _n(m.yaw_deg, _n(m.yaw, 0));
+      const pitch_deg = _n(m.pitch_deg, _n(m.pitch, 0));
+      const roll_deg = _n(m.roll_deg, _n(m.roll, 0));
+      return createScenePose(m.x, m.y, m.z, yaw_deg, pitch_deg, roll_deg, _n(m.scale, 1));
     }
 
     function poseUsesCameraEuler(pose) {
@@ -686,7 +688,7 @@
         _tmpEuler.set(0, 0, pose.yaw_deg * Math.PI / 180, PLACEMENT_EULER_ORDER);
       }
       _tmpQuatA.setFromEuler(_tmpEuler);
-      const s = pose.scale ?? 1;
+      const s = _n(pose.scale, 1);
       return out.compose(_tmpVecA.set(pose.x, pose.y, pose.z), _tmpQuatA, _tmpVecB.set(s, s, s));
     }
 
@@ -765,7 +767,7 @@
       if (selected >= 0) updateSelSliders();
       refreshPathVisuals();
       if (rigOpen) el('rigPreviewStatus').textContent = '需重新渲染';
-      viewer?.forceRenderNextFrame();
+      viewer && viewer.forceRenderNextFrame();
     }
 
     function syncRigFromPose(pose = renderCameraPose) {
@@ -782,7 +784,7 @@
         _tmpEuler.set(0, 0, pose.yaw_deg * Math.PI / 180, PLACEMENT_EULER_ORDER);
       }
       renderCamRig.quaternion.setFromEuler(_tmpEuler);
-      renderCamRig.scale.setScalar(pose.scale ?? 1);
+      renderCamRig.scale.setScalar(_n(pose.scale, 1));
       syncCameraHelper();
       updateRigSliders();
     }
@@ -879,7 +881,7 @@
 
     /** 四棱锥线宽参考（世界坐标），轨迹=3倍，球=5倍 */
     function frustumLineRefSize() {
-      if (!renderCamera?.isPerspectiveCamera) return 0.003;
+      if (!(renderCamera && renderCamera.isPerspectiveCamera)) return 0.003;
       const vFov = THREE.MathUtils.degToRad(renderCamera.fov);
       const halfH = renderCamera.near * Math.tan(vFov * 0.5);
       return Math.max(0.0015, halfH * 0.64);
@@ -903,10 +905,10 @@
 
     function clearPathVisuals() {
       if (pathRoot) {
-        pathRoot.parent?.remove(pathRoot);
+        pathRoot.parent && pathRoot.parent.remove(pathRoot);
         pathRoot.traverse((o) => {
           if (o.geometry) o.geometry.dispose();
-          if (o.material) o.material.dispose?.();
+          if (o.material) o.material.dispose && o.material.dispose();
         });
         pathRoot = null;
       }
@@ -959,8 +961,8 @@
         );
         cameraMarkers = normalized.markers;
         cameraPathSegments = normalized.segments;
-        pathFramesPerSeg = path.framesPerSeg ?? 16;
-        pathFps = path.fps ?? 12;
+        pathFramesPerSeg = _n(path.framesPerSeg, 16);
+        pathFps = _n(path.fps, 12);
       }
       el('pathFrames').value = pathFramesPerSeg;
       el('pathFramesVal').textContent = pathFramesPerSeg;
@@ -984,7 +986,7 @@
       if (rigOpen && cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       else stopPathSlidePreview();
       el('rigPreviewStatus').textContent = '需重新渲染';
-      viewer?.forceRenderNextFrame();
+      viewer && viewer.forceRenderNextFrame();
     }
 
     function renderPathGroupList() {
@@ -995,7 +997,7 @@
       cameraPaths.forEach((path) => {
         const row = document.createElement('div');
         row.className = 'marker-row path-group-row' + (path.id === activePathId ? ' active' : '');
-        const nodeCount = path.markers?.length ?? 0;
+        const nodeCount = _n(path.markers && path.markers.length, 0);
         const nameSpan = document.createElement('span');
         nameSpan.className = 'scene-name path-name';
         nameSpan.textContent = path.name;
@@ -1018,7 +1020,7 @@
 
     function startPathRename(pathId, anchorEl) {
       const path = cameraPaths.find((p) => p.id === pathId);
-      if (!path || !anchorEl?.replaceWith) return;
+      if (!path || !(anchorEl && anchorEl.replaceWith)) return;
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'path-rename-input';
@@ -1105,12 +1107,12 @@
 
     function applyRenderCameraPose(rc) {
       if (!rc || !renderCameraPose) return;
-      renderCameraPose.x = rc.x ?? renderCameraPose.x;
-      renderCameraPose.y = rc.y ?? renderCameraPose.y;
-      renderCameraPose.z = rc.z ?? renderCameraPose.z;
-      renderCameraPose.yaw_deg = rc.yaw_deg ?? renderCameraPose.yaw_deg;
-      renderCameraPose.pitch_deg = rc.pitch_deg ?? renderCameraPose.pitch_deg;
-      renderCameraPose.roll_deg = rc.roll_deg ?? renderCameraPose.roll_deg;
+      renderCameraPose.x = _n(rc.x, renderCameraPose.x);
+      renderCameraPose.y = _n(rc.y, renderCameraPose.y);
+      renderCameraPose.z = _n(rc.z, renderCameraPose.z);
+      renderCameraPose.yaw_deg = _n(rc.yaw_deg, renderCameraPose.yaw_deg);
+      renderCameraPose.pitch_deg = _n(rc.pitch_deg, renderCameraPose.pitch_deg);
+      renderCameraPose.roll_deg = _n(rc.roll_deg, renderCameraPose.roll_deg);
       if (renderCamRig) syncRigFromPose();
     }
 
@@ -1152,7 +1154,7 @@
         const res = await fetchWithTimeout(apiUrl('api/health'), { cache: 'no-store' });
         if (!res.ok) return 'static';
         const data = await res.json();
-        if (data?.ok && data.configVersion >= 2) return 'server';
+        if (data && data.ok && data.configVersion >= 2) return 'server';
       } catch (_) {}
       return 'static';
     }
@@ -1284,15 +1286,15 @@
           el('zVal').textContent = defaultZ.toFixed(4);
         }
       }
-      if (cfg.view?.background) applyViewBackground(cfg.view.background);
+      if (cfg.view && cfg.view.background) applyViewBackground(cfg.view.background);
     }
 
     function restoreRigUiState(cfg) {
-      if (cfg?.view?.rigOpen && cameraPaths.length) openRigCamera();
+      if (cfg && cfg.view && cfg.view.rigOpen && cameraPaths.length) openRigCamera();
     }
 
     function restoreCameraPaths(paths, activeId, renderSettings, renderCamera) {
-      if (paths?.length) {
+      if (paths && paths.length) {
         cameraPaths = paths.map((p) => ({
           id: p.id || `path-${nextPathId++}`,
           name: p.name || '轨迹',
@@ -1300,8 +1302,8 @@
           segments: (p.segments || []).map((s) => ({
             points: (s.points || []).map((pt) => ({ x: pt.x, y: pt.y, z: pt.z, t: pt.t })),
           })),
-          framesPerSeg: p.framesPerSeg ?? 16,
-          fps: p.fps ?? 12,
+          framesPerSeg: _n(p.framesPerSeg, 16),
+          fps: _n(p.fps, 12),
         }));
         for (const p of cameraPaths) {
           const m = /^path-(\d+)$/.exec(p.id);
@@ -1370,7 +1372,7 @@
           if (!o.material) return;
           const op = o.material.opacity;
           if (op === 0) o.renderOrder = 1005;
-          else if (o.material.color?.getHex?.() === 0xffffff) o.renderOrder = 1010;
+          else if (o.material.color && o.material.color.getHex && o.material.color.getHex() === 0xffffff) o.renderOrder = 1010;
           else o.renderOrder = 1008;
         });
       }
@@ -1405,8 +1407,8 @@
     }
 
     function renderRigOverlayPass() {
-      if (!viewer?.initialized || !rigOverlayScene || !viewer.camera) return;
-      if (viewer.isDisposingOrDisposed?.()) return;
+      if (!(viewer && viewer.initialized) || !rigOverlayScene || !viewer.camera) return;
+      if (viewer.isDisposingOrDisposed && viewer.isDisposingOrDisposed()) return;
       syncCameraHelper();
       const renderer = viewer.renderer;
       if (!renderer) return;
@@ -1428,7 +1430,7 @@
     }
 
     function isPathSlideBlocked() {
-      if (transformControls?.dragging) return true;
+      if (transformControls && transformControls.dragging) return true;
       if (markerGizmoMode) return true;
       if (rigGizmoMode) return true;
       return false;
@@ -1510,8 +1512,8 @@
       updateKeypointEditUI();
       el('gizmoMoveRig').classList.remove('active');
       el('gizmoRotateRig').classList.remove('active');
-      transformControls?.detach();
-      if (transformControls?.dragging) {
+      transformControls && transformControls.detach();
+      if (transformControls && transformControls.dragging) {
         status('请先松开 Gizmo 再播放');
         return;
       }
@@ -1553,7 +1555,7 @@
 
       pathSlideActive = true;
       pathSlideLastTs = 0;
-      transformControls?.detach();
+      transformControls && transformControls.detach();
       if (cameraHelper && el('showFrustum').checked) {
         cameraHelper.visible = true;
         styleCameraHelperOnTop();
@@ -1597,7 +1599,7 @@
           true,
         );
       }
-      if (viewer?.initialized) viewer.forceRenderNextFrame();
+      if (viewer && viewer.initialized) viewer.forceRenderNextFrame();
     }
 
     function rebuildPathSegments() {
@@ -1605,7 +1607,7 @@
       for (let i = 0; i < cameraMarkers.length - 1; i++) {
         const prev = cameraPathSegments[i];
         newSegs.push({
-          points: prev?.points ? prev.points.map((p) => ({ x: p.x, y: p.y, z: p.z, t: p.t })) : [],
+          points: prev && prev.points ? prev.points.map((p) => ({ x: p.x, y: p.y, z: p.z, t: p.t })) : [],
         });
       }
       cameraPathSegments = newSegs;
@@ -1625,7 +1627,7 @@
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       _pickRay.setFromCamera(_pickMouse, viewer.camera);
-      pathRoot?.updateMatrixWorld(true);
+      pathRoot && pathRoot.updateMatrixWorld(true);
       const targets = pathPickMeshes.length ? pathPickMeshes : pathTubeGroup.children.filter((c) => c.userData.pathSegIdx != null);
       if (!targets.length) return false;
       const pathHits = _pickRay.intersectObjects(targets, false);
@@ -1670,7 +1672,7 @@
 
     function syncKeypointOrderAfterDrag(segIdx, pointIdx, dragObj = null) {
       const seg = cameraPathSegments[segIdx];
-      const pt = seg?.points?.[pointIdx];
+      const pt = seg && seg.points && seg.points[pointIdx];
       if (!pt) return pointIdx;
       const sx = pt.x;
       const sy = pt.y;
@@ -1690,7 +1692,7 @@
     function getSegmentWaypoints(segIdx) {
       const a = cameraMarkers[segIdx];
       const b = cameraMarkers[segIdx + 1];
-      const inner = (cameraPathSegments[segIdx]?.points || []).slice().sort((p, q) => p.t - q.t);
+      const inner = (cameraPathSegments[segIdx] && cameraPathSegments[segIdx].points || []).slice().sort((p, q) => p.t - q.t);
       return [
         new THREE.Vector3(a.x, a.y, a.z),
         ...inner.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
@@ -1764,7 +1766,7 @@
         pathRoot.remove(m);
         m.traverse((o) => {
           if (o.geometry) o.geometry.dispose();
-          if (o.material) o.material?.dispose();
+          if (o.material) o.material && o.material.dispose();
         });
       }
       cpMeshes = [];
@@ -1817,7 +1819,7 @@
 
     function removePathControlPoint(segIdx, pointIdx) {
       const seg = cameraPathSegments[segIdx];
-      if (!seg?.points?.length || pointIdx < 0 || pointIdx >= seg.points.length) return;
+      if (!seg && seg.points && seg.points.length || pointIdx < 0 || pointIdx >= seg.points.length) return;
       seg.points.splice(pointIdx, 1);
       selectedCpSegIdx = -1;
       selectedCpPointIdx = -1;
@@ -1829,16 +1831,16 @@
       attachGizmo();
       updateKeypointEditUI();
       if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
-      viewer?.forceRenderNextFrame();
+      viewer && viewer.forceRenderNextFrame();
     }
 
     function setupPathVisuals() {
       if (!rigOverlayScene) initRigOverlayScene();
       if (pathRoot) {
-        pathRoot.parent?.remove(pathRoot);
+        pathRoot.parent && pathRoot.parent.remove(pathRoot);
         pathRoot.traverse((o) => {
           if (o.geometry) o.geometry.dispose();
-          if (o.material) o.material.dispose?.();
+          if (o.material) o.material.dispose && o.material.dispose();
         });
       }
       pathRoot = new THREE.Group();
@@ -1879,7 +1881,7 @@
         pathRoot.remove(pathTubeGroup);
         pathTubeGroup.traverse((o) => {
           if (o.geometry) o.geometry.dispose();
-          if (o.material) o.material.dispose?.();
+          if (o.material) o.material.dispose && o.material.dispose();
         });
         pathTubeGroup = null;
       }
@@ -2001,7 +2003,7 @@
       const sample = samplePathAt(pathPinT);
       if (!sample) return;
       applySamplePoseToRig(sample);
-      viewer?.forceRenderNextFrame();
+      viewer && viewer.forceRenderNextFrame();
       el('rigPreviewStatus').textContent = '需重新渲染';
     }
 
@@ -2025,7 +2027,7 @@
       });
       updatePathLine();
       updatePathTransportUI();
-      viewer?.forceRenderNextFrame();
+      viewer && viewer.forceRenderNextFrame();
     }
 
     function renderMarkerList() {
@@ -2124,14 +2126,14 @@
       updateRigGizmoUI();
       el('gizmoMoveRig').classList.remove('active');
       el('gizmoRotateRig').classList.remove('active');
-      transformControls?.detach();
+      transformControls && transformControls.detach();
       rebuildCpVisuals();
       updateKeypointEditUI();
       attachGizmo();
       if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       status('弯折已调整');
       syncActivePathFromState();
-      viewer?.forceRenderNextFrame();
+      viewer && viewer.forceRenderNextFrame();
     }
 
     function deleteSelectedPathKeypoint() {
@@ -2248,13 +2250,13 @@
     }
 
     async function renderGaussToImageData() {
-      if (!viewer?.renderer || !renderCamera) throw new Error('场景未就绪');
+      if (!(viewer && viewer.renderer) || !renderCamera) throw new Error('场景未就绪');
       if (!rigPreviewRt) rigPreviewRt = new THREE.WebGLRenderTarget(RIG_PREVIEW_W, RIG_PREVIEW_H);
 
-      const helperWasVisible = cameraHelper?.visible ?? false;
-      const tcHelper = transformControls?.getHelper?.();
-      const tcHelperWasVisible = tcHelper?.visible ?? true;
-      const pathWasVisible = pathRoot?.visible ?? false;
+      const helperWasVisible = _n(cameraHelper && cameraHelper.visible, false);
+      const tcHelper = transformControls && transformControls.getHelper && transformControls.getHelper();
+      const tcHelperWasVisible = _n(tcHelper && tcHelper.visible, true);
+      const pathWasVisible = _n(pathRoot && pathRoot.visible, false);
 
       if (cameraHelper) cameraHelper.visible = false;
       if (tcHelper) tcHelper.visible = false;
@@ -2362,21 +2364,21 @@
         near: orbitCam.near,
         far: orbitCam.far,
         aspect: orbitCam.aspect,
-        target: viewer.controls?.target?.clone(),
-        controlsEnabled: viewer.controls?.enabled ?? true,
+        target: viewer.controls && viewer.controls.target && viewer.controls.target.clone(),
+        controlsEnabled: _n(viewer.controls && viewer.controls.enabled, true),
       };
       const oldSize = renderer.getSize(new THREE.Vector2());
       const oldPixelRatio = renderer.getPixelRatio();
       const oldClear = renderer.getClearColor(new THREE.Color());
       const oldAlpha = renderer.getClearAlpha();
       const oldViewBg = viewBgMode;
-      const helperWasVisible = cameraHelper?.visible ?? true;
-      const tcHelper = transformControls?.getHelper?.();
-      const tcHelperWasVisible = tcHelper?.visible ?? true;
-      const pathWasVisible = pathRoot?.visible ?? false;
-      const gizmoWasAttached = transformControls?.object != null;
+      const helperWasVisible = _n(cameraHelper && cameraHelper.visible, true);
+      const tcHelper = transformControls && transformControls.getHelper && transformControls.getHelper();
+      const tcHelperWasVisible = _n(tcHelper && tcHelper.visible, true);
+      const pathWasVisible = _n(pathRoot && pathRoot.visible, false);
+      const gizmoWasAttached = transformControls && transformControls.object != null;
 
-      transformControls?.detach();
+      transformControls && transformControls.detach();
       if (cameraHelper) cameraHelper.visible = false;
       if (tcHelper) tcHelper.visible = false;
       if (pathRoot) pathRoot.visible = false;
@@ -2414,7 +2416,7 @@
     }
 
     async function renderGaussFullResCanvas() {
-      if (!viewer?.renderer || !sceneReady || !renderCamera) throw new Error('场景未就绪');
+      if (!(viewer && viewer.renderer) || !sceneReady || !renderCamera) throw new Error('场景未就绪');
       const renderW = Math.max(1, parseInt(el('renderWidth').value, 10) || 1920);
       const renderH = Math.max(1, parseInt(el('renderHeight').value, 10) || 1080);
 
@@ -2533,7 +2535,7 @@
     }
 
     async function renderRigPreviewFrame() {
-      if (!viewer?.renderer || !renderCamera || !rigOpen) return;
+      if (!(viewer && viewer.renderer) || !renderCamera || !rigOpen) return;
       stopPreviewPlayback();
       status('渲染机位预览…');
       el('rigPreviewStatus').textContent = '渲染中…';
@@ -2614,7 +2616,7 @@
       if (activePathId && cameraPaths.some((p) => p.id === activePathId)) {
         loadActivePathToState();
       } else {
-        activePathId = cameraPaths[0]?.id ?? null;
+        activePathId = _n(cameraPaths[0] && cameraPaths[0].id, null);
         loadActivePathToState();
       }
       rigOpen = true;
@@ -2664,11 +2666,11 @@
       if (pathRoot) pathRoot.visible = false;
       setRigControlsEnabled(false);
       updateKeypointEditUI();
-      transformControls?.detach();
+      transformControls && transformControls.detach();
       stopPreviewPlayback();
       stopPathSlidePreview();
       el('rigPreviewStatus').textContent = '未渲染';
-      viewer?.forceRenderNextFrame();
+      viewer && viewer.forceRenderNextFrame();
       status('渲染摄像机已关闭');
     }
 
@@ -2735,10 +2737,10 @@
       el('rigNearVal').textContent = renderCamera.near.toFixed(3);
       el('rigFarVal').textContent = renderCamera.far.toFixed(0);
       if (rigOpen) el('rigPreviewStatus').textContent = '需重新渲染';
-      viewer?.forceRenderNextFrame();
+      viewer && viewer.forceRenderNextFrame();
     }
 
-    function applyRenderCameraToViewer(targetCam = viewer?.camera, aspectOverride = null) {
+    function applyRenderCameraToViewer(targetCam = viewer && viewer.camera, aspectOverride = null) {
       if (!renderCamera || !targetCam) return;
       renderCamRig.updateMatrixWorld(true);
       renderCamera.updateMatrixWorld(true);
@@ -2793,7 +2795,7 @@
       const savedPixelRatio = renderer.getPixelRatio();
       const savedClear = renderer.getClearColor(new THREE.Color());
       const savedAlpha = renderer.getClearAlpha();
-      const savedControlsEnabled = viewer.controls?.enabled ?? true;
+      const savedControlsEnabled = _n(viewer.controls && viewer.controls.enabled, true);
       const wasRunning = viewer.selfDrivenModeRunning;
 
       if (wasRunning) viewer.stop();
@@ -2989,7 +2991,7 @@
     }
 
     function syncPlacementTransform(p) {
-      if (!viewer?.splatMesh || p.sceneIdx == null) return;
+      if (!viewer && viewer.splatMesh || p.sceneIdx == null) return;
       const scene = viewer.splatMesh.getScene(p.sceneIdx);
       scene.position.set(p.x, p.y, p.z);
       scene.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
@@ -3029,7 +3031,7 @@
       el('view').style.background = t.css;
       el('view').classList.toggle('view-bg-black', viewBgMode === 'black');
       el('viewBgSelect').value = viewBgMode;
-      if (viewer?.renderer) {
+      if (viewer && viewer.renderer) {
         viewer.renderer.setClearColor(t.hex, viewBgMode === 'black' ? 1 : 0);
         viewer.forceRenderNextFrame();
       }
@@ -3039,7 +3041,7 @@
     function tuneCamera() {
       if (!viewer) return;
       for (const cam of [viewer.perspectiveCamera, viewer.orthographicCamera, viewer.camera]) {
-        if (cam?.isCamera) { cam.near = 0.001; cam.far = 2000; cam.updateProjectionMatrix(); }
+        if (cam && cam.isCamera) { cam.near = 0.001; cam.far = 2000; cam.updateProjectionMatrix(); }
       }
       if (viewer.controls) {
         viewer.controls.target.set(VIEW_OFFSET.x, VIEW_OFFSET.y, VIEW_OFFSET.z);
@@ -3065,7 +3067,7 @@
     function startOverlayLoop() {
       const loop = () => {
         overlayRaf = requestAnimationFrame(loop);
-        if (overlayRenderer && viewHelper && viewer?.initialized) viewHelper.render(overlayRenderer);
+        if (overlayRenderer && viewHelper && viewer && viewer.initialized) viewHelper.render(overlayRenderer);
       };
       if (overlayRaf) cancelAnimationFrame(overlayRaf);
       overlayRaf = requestAnimationFrame(loop);
@@ -3111,13 +3113,13 @@
           -((e.clientY - rect.top) / rect.height) * 2 + 1,
         );
         _pickRay.setFromCamera(_pickMouse, viewer.camera);
-        pathRoot?.updateMatrixWorld(true);
+        pathRoot && pathRoot.updateMatrixWorld(true);
 
         const objHits = _pickRay.intersectObjects([...cpMeshes, ...markerMeshes], true);
         if (objHits.length) {
           let obj = objHits[0].object;
           while (obj && obj.userData.cpPointIdx == null && obj.parent) obj = obj.parent;
-          if (obj?.userData?.cpPointIdx != null) {
+          if (obj && obj.userData && obj.userData.cpPointIdx != null) {
             const si = obj.userData.cpSegIdx;
             const pi = obj.userData.cpPointIdx;
             if (si === selectedCpSegIdx && pi === selectedCpPointIdx) {
@@ -3168,7 +3170,7 @@
       transformControls.addEventListener('change', () => {
         if (syncingFromGizmo) return;
         const obj = transformControls.object;
-        if (obj?.userData?.cpPointIdx != null) {
+        if (obj && obj.userData && obj.userData.cpPointIdx != null) {
           const i = obj.userData.cpSegIdx;
           const j = obj.userData.cpPointIdx;
           const p = obj.position;
@@ -3181,7 +3183,7 @@
           viewer.forceRenderNextFrame();
           return;
         }
-        if (obj?.userData?.markerIdx != null) {
+        if (obj && obj.userData && obj.userData.markerIdx != null) {
           const i = obj.userData.markerIdx;
           const p = obj.position;
           cameraMarkers[i].x = p.x;
@@ -3220,7 +3222,7 @@
 
     function attachGizmo() {
       if (!transformControls || !pivot) {
-        transformControls?.detach();
+        transformControls && transformControls.detach();
         return;
       }
       applyGizmoForSelection();
@@ -3288,7 +3290,7 @@
         sceneIdx: null,
         center: [anchor.x, anchor.y, anchor.z],
       };
-      const sceneIdx = viewer.splatMesh?.scenes?.length ?? 0;
+      const sceneIdx = _n(viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
       await viewer.addSplatBuffers([splatBuffer], [placementOpts(p)], true, false, false, false, true);
       if (isSessionAborted(loadToken)) {
         try { await viewer.removeSplatScene(sceneIdx, false); } catch (_) {}
@@ -3443,19 +3445,19 @@
     async function clearAllPlacementsFromViewer() {
       placements.length = 0;
       selected = -1;
-      const sceneCount = viewer?.splatMesh?.scenes?.length ?? 0;
+      const sceneCount = _n(viewer && viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
       if (sceneCount > 0) {
         const indexes = Array.from({ length: sceneCount }, (_, i) => i);
         try {
           await viewer.removeSplatScenes(indexes, false);
         } catch (e) {
           console.warn('批量清空模型失败，改为逐个移除', e);
-          while (viewer?.splatMesh?.scenes?.length > 0) {
+          while (viewer && viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length > 0) {
             await viewer.removeSplatScene(0, false);
           }
         }
       }
-      viewer?.forceRenderNextFrame?.();
+      viewer && viewer.forceRenderNextFrame && viewer.forceRenderNextFrame();
     }
 
     function resetCameraEditorState() {
@@ -3523,7 +3525,7 @@
       }
       el('rigPreviewStatus').textContent = '未渲染';
       status('已清空 · 可重新拖入模型');
-      viewer?.forceRenderNextFrame?.();
+      viewer && viewer.forceRenderNextFrame && viewer.forceRenderNextFrame();
     }
 
     async function mergeScene() {
@@ -3616,11 +3618,11 @@
         const file = new File([ab], name);
         const p = {
           name,
-          x: item.x ?? 0, y: item.y ?? 0, z: item.z ?? defaultZ,
-          scale: item.scale ?? defaultScale,
-          yaw_deg: item.yaw_deg ?? 0,
+          x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
+          scale: _n(item.scale, defaultScale),
+          yaw_deg: _n(item.yaw_deg, 0),
           sceneIdx: null,
-          center: item.center ?? [0, 0, 0],
+          center: _n(item.center, [0, 0, 0]),
         };
         const bounds = computePlyBounds(ab);
         const anchor = item.center
@@ -3656,7 +3658,7 @@
       view.addEventListener('drop', async (e) => {
         prevent(e);
         view.classList.remove('drag-over');
-        const files = [...(e.dataTransfer?.files || [])].filter((f) => f.name.toLowerCase().endsWith('.ply'));
+        const files = [...(e.dataTransfer && e.dataTransfer.files || [])].filter((f) => f.name.toLowerCase().endsWith('.ply'));
         if (!files.length) { status('请拖入 .ply 模型文件'); return; }
         for (const f of files) {
           try { await addPlacementFromFile(f); } catch (err) { status(`失败: ${err.message}`); }
@@ -3766,7 +3768,7 @@
     el('saveBtn').onclick = () => savePlacements().catch(showError);
     el('importJsonBtn').onclick = () => el('importConfigFile').click();
     el('importConfigFile').onchange = async () => {
-      const file = el('importConfigFile').files?.[0];
+      const file = el('importConfigFile').files && el('importConfigFile').files[0];
       el('importConfigFile').value = '';
       if (!file) return;
       try { await importConfigFromFile(file); } catch (e) { showError(e); }
@@ -3807,7 +3809,7 @@
         cameraHelper.visible = rigOpen && show;
         if (show) styleCameraHelperOnTop();
       }
-      viewer?.forceRenderNextFrame();
+      viewer && viewer.forceRenderNextFrame();
     };
 
     const rigPreviewCanvas = el('rigPreviewCanvas');
@@ -3834,7 +3836,7 @@
     });
 
     window.addEventListener('resize', () => {
-      if (!viewer?.renderer?.domElement?.parentElement) return;
+      if (!(viewer && viewer.renderer && viewer.renderer.domElement && viewer.renderer.domElement.parentElement)) return;
       const root = el('viewMain');
       if (root.clientWidth > 0 && root.clientHeight > 0) viewer.renderer.setSize(root.clientWidth, root.clientHeight);
     });
