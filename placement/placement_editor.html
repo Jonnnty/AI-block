@@ -101,6 +101,14 @@
     .row button { flex: 1; }
     .hint { font-size: 12px; color: #888; line-height: 1.5; }
     .status { font-size: 12px; color: #6cf; min-height: 18px; word-break: break-all; line-height: 1.45; }
+    .local-bridge-hint {
+      margin-top: 6px; padding: 8px 9px; border-radius: 7px;
+      background: rgba(180, 120, 20, 0.15); border: 1px solid rgba(200, 150, 40, 0.45);
+      font-size: 11px; line-height: 1.5; color: #e8c878;
+    }
+    .local-bridge-hint.connected {
+      background: rgba(40, 120, 60, 0.15); border-color: rgba(60, 160, 90, 0.45); color: #8fdfaa;
+    }
     .model-load-debug {
       margin-top: 8px; padding: 8px 9px;
       background: #241818; border: 1px solid #7a4040; border-radius: 7px;
@@ -469,6 +477,9 @@
   <div id="panel">
     <header class="panel-chrome">
       <div class="status" id="status">初始化…</div>
+      <div id="localBridgeHint" class="local-bridge-hint" hidden>
+        模型在 D 盘，需本机服务读取。请双击运行 <strong>placement/start_editor.bat</strong>，保持黑窗口不关；连接成功后会自动加载 scene1。
+      </div>
       <section class="panel-global">
         <div class="panel-zone-label">
           <span>场景</span>
@@ -722,7 +733,7 @@
     }
 
     /** 模型变红调试：页面内「模型加载诊断」面板 + 控制台 [模型加载] */
-    const MODEL_LOAD_BUILD = '20260722g';
+    const MODEL_LOAD_BUILD = '20260722h';
     const MODEL_LOAD_DEBUG = !new URLSearchParams(location.search).has('quietModels');
     const modelLoadDiagEntries = [];
     const lastResolveTraceByAsset = new Map();
@@ -1904,6 +1915,62 @@
       if (localServerBridge) return '在线版·已桥接本地 D 盘';
       if (hostMode === 'server') return '本地路径模式';
       return '在线版·未连接本地服务';
+    }
+
+    let localBridgePollTimer = null;
+
+    function updateLocalBridgeHint(connected) {
+      const box = el('localBridgeHint');
+      if (!box) return;
+      if (connected || (hostMode === 'server' && !localServerBridge)) {
+        box.hidden = true;
+        return;
+      }
+      box.hidden = false;
+      box.classList.remove('connected');
+      box.textContent = '模型在 D 盘，需本机服务读取。请双击运行 placement/start_editor.bat，保持黑窗口不关；连接成功后会自动加载。';
+    }
+
+    function stopLocalBridgePoll() {
+      if (localBridgePollTimer) {
+        clearInterval(localBridgePollTimer);
+        localBridgePollTimer = null;
+      }
+    }
+
+    async function tryConnectLocalBridge(reloadScene = true) {
+      if (hostMode === 'server' && !localServerBridge) {
+        updateLocalBridgeHint(true);
+        stopLocalBridgePoll();
+        return true;
+      }
+      if (localServerBridge) {
+        updateLocalBridgeHint(true);
+        stopLocalBridgePoll();
+        return true;
+      }
+      const bridge = await detectLocalEditorBridge();
+      if (!bridge) return false;
+      localServerBridge = bridge;
+      hostMode = 'server';
+      updateHostModeUI();
+      updateLocalBridgeHint(true);
+      stopLocalBridgePoll();
+      if (scenesStore) await migrateScenesSourcePaths(scenesStore);
+      const sceneCount = scenesStore && scenesStore.scenes.length || 0;
+      status(`已连接本地 D 盘 · ${hostModeLabel()} · ${sceneCount} 个场景`);
+      if (reloadScene && activeSceneId) {
+        await loadSceneById(activeSceneId);
+      }
+      return true;
+    }
+
+    function startLocalBridgePoll() {
+      if (localBridgePollTimer || canLoadAssetsFromDisk()) return;
+      updateLocalBridgeHint(false);
+      localBridgePollTimer = setInterval(() => {
+        tryConnectLocalBridge(true).catch(() => {});
+      }, 3000);
     }
 
     function emptyScenesStore() {
@@ -5138,6 +5205,8 @@
         } else {
           status(`就绪 v${MODEL_LOAD_BUILD} · ${hostModeLabel()} · 新建或导入 JSON`);
         }
+        if (!canLoadAssetsFromDisk()) startLocalBridgePoll();
+        else updateLocalBridgeHint(true);
       } catch (e) { showError(e); }
     })();
   </script>
