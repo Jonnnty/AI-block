@@ -1315,7 +1315,36 @@
 
     function pathTubeRadius() { return frustumLineRefSize() * 3; }
     function pathSphereRadius() { return frustumLineRefSize() * 5; }
-    function pathCpRadius() { return pathSphereRadius() * 0.75; }
+    function pathCpRadius() { return pathSphereRadius() * 0.72; }
+
+    function createPathCpMarkerGroup(r, selected) {
+      const group = new THREE.Group();
+      const coreColor = selected ? 0xffea00 : 0xff2060;
+      const lineColor = selected ? 0xffffff : 0xffc0d8;
+      const mkMat = (color, opts = {}) => new THREE.MeshBasicMaterial({
+        color,
+        depthTest: false,
+        depthWrite: false,
+        transparent: opts.transparent || false,
+        opacity: opts.opacity ?? 1,
+        wireframe: opts.wireframe || false,
+        side: opts.side,
+      });
+      const core = new THREE.Mesh(new THREE.SphereGeometry(r * 0.46, 12, 12), mkMat(coreColor));
+      const wire = new THREE.Mesh(
+        new THREE.SphereGeometry(r * 0.92, 10, 10),
+        mkMat(lineColor, { wireframe: true, transparent: true, opacity: selected ? 1 : 0.92 }),
+      );
+      const ringMat = mkMat(0xffffff, { transparent: true, opacity: selected ? 0.95 : 0.78, side: THREE.DoubleSide });
+      for (const rot of [[0, 0, 0], [Math.PI / 2, 0, 0], [0, Math.PI / 2, 0]]) {
+        const ring = new THREE.Mesh(new THREE.RingGeometry(r * 0.68, r * 0.86, 22), ringMat.clone());
+        ring.rotation.set(rot[0], rot[1], rot[2]);
+        group.add(ring);
+      }
+      group.add(wire);
+      group.add(core);
+      return group;
+    }
 
     function createEmptyCameraPath(name) {
       const path = {
@@ -2639,28 +2668,10 @@
         (seg.points || []).forEach((pt, pi) => {
           const selected = si === selectedCpSegIdx && pi === selectedCpPointIdx;
           const r = pathCpRadius();
-          const group = new THREE.Group();
+          const group = createPathCpMarkerGroup(r, selected);
           group.position.set(pt.x, pt.y, pt.z);
           group.userData.cpSegIdx = si;
           group.userData.cpPointIdx = pi;
-          const halo = new THREE.Mesh(
-            new THREE.SphereGeometry(r * 1.18, 10, 10),
-            new THREE.MeshBasicMaterial({
-              color: 0x111111,
-              depthTest: false,
-              depthWrite: false,
-            }),
-          );
-          const core = new THREE.Mesh(
-            new THREE.SphereGeometry(r, 10, 10),
-            new THREE.MeshBasicMaterial({
-              color: selected ? 0xffea00 : 0xff0066,
-              depthTest: false,
-              depthWrite: false,
-            }),
-          );
-          group.add(halo);
-          group.add(core);
           pathRoot.add(group);
           cpMeshes.push(group);
         });
