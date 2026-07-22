@@ -384,7 +384,7 @@
         <label>播放 FPS <span class="val" id="pathFpsVal">12</span>
           <input type="range" id="pathFps" min="6" max="30" step="1" value="12" />
         </label>
-        <p class="hint" id="rigCameraHint">与模型相同的世界坐标；移动/旋转选中模型时，相机与轨迹会一起变换</p>
+        <p class="hint" id="rigCameraHint">相机与轨迹使用世界坐标，与模型独立；移动/旋转模型不影响相机与轨迹</p>
         <h2 style="margin-top:4px">机位</h2>
         <div id="rigPoseControls" class="rig-pose-controls">
         <div class="row gizmo-row">
@@ -598,8 +598,6 @@
     let cameraMarkers = [];
     /** 渲染相机姿态（与模型 placements 同结构的 ScenePose，source of truth） */
     let renderCameraPose = null;
-    /** Gizmo 拖动起始快照，用于对全场景（含相机）施加同一变换增量 */
-    let placementDragSnapshot = null;
     /** @type {Array<{points:Array<{x:number,y:number,z:number,t:number}>}>} */
     let cameraPathSegments = [];
     /** @type {Array<{id:string,name:string,markers:typeof cameraMarkers,segments:typeof cameraPathSegments,framesPerSeg:number,fps:number}>} */
@@ -644,7 +642,6 @@
     const _tmpVec = new THREE.Vector3();
     const _tmpQuat = new THREE.Quaternion();
     const _tmpMat4 = new THREE.Matrix4();
-    const _tmpMat4B = new THREE.Matrix4();
 
     const RIG_EULER_ORDER = 'ZXY';
     const PLACEMENT_EULER_ORDER = 'XYZ';
@@ -657,14 +654,6 @@
 
     function placementToPose(p) {
       return createScenePose(p.x, p.y, p.z, p.yaw_deg, 0, 0, p.scale);
-    }
-
-    function writePoseToPlacement(p, pose) {
-      p.x = pose.x;
-      p.y = pose.y;
-      p.z = pose.z;
-      p.yaw_deg = pose.yaw_deg;
-      p.scale = pose.scale;
     }
 
     function normalizeMarkerPose(m) {
@@ -695,19 +684,6 @@
       return out.compose(_tmpVecA.set(pose.x, pose.y, pose.z), _tmpQuatA, _tmpVecB.set(s, s, s));
     }
 
-    function poseFromMatrix(matrix, out) {
-      matrix.decompose(_tmpVecA, _tmpQuatA, _tmpVecB);
-      _tmpEuler.setFromQuaternion(_tmpQuatA, RIG_EULER_ORDER);
-      out.x = _tmpVecA.x;
-      out.y = _tmpVecA.y;
-      out.z = _tmpVecA.z;
-      out.yaw_deg = THREE.MathUtils.radToDeg(_tmpEuler.z);
-      out.pitch_deg = THREE.MathUtils.radToDeg(_tmpEuler.x);
-      out.roll_deg = THREE.MathUtils.radToDeg(_tmpEuler.y);
-      out.scale = _tmpVecB.x;
-      return out;
-    }
-
     function placementWorldMatrix(p, out = _tmpMat4) {
       return poseWorldMatrix(placementToPose(p), out);
     }
@@ -728,62 +704,6 @@
 
     function poseQuatInto(pose, outQuat) {
       return poseToQuaternion(normalizeMarkerPose(pose), outQuat);
-    }
-
-    function applyRigidDeltaToPose(pose, deltaM) {
-      poseWorldMatrix(pose, _tmpMat4);
-      _tmpMat4.premultiply(deltaM);
-      poseFromMatrix(_tmpMat4, pose);
-    }
-
-    function applyRigidDeltaToPoint(pt, deltaM) {
-      _tmpVecA.set(pt.x, pt.y, pt.z).applyMatrix4(deltaM);
-      pt.x = _tmpVecA.x;
-      pt.y = _tmpVecA.y;
-      pt.z = _tmpVecA.z;
-    }
-
-    function snapshotPlacement(p) {
-      return { x: p.x, y: p.y, z: p.z, yaw_deg: p.yaw_deg, scale: p.scale };
-    }
-
-    function placementDeltaMatrix(oldSnap, p, out = _tmpMat4) {
-      placementWorldMatrix(
-        { x: oldSnap.x, y: oldSnap.y, z: oldSnap.z, yaw_deg: oldSnap.yaw_deg, scale: oldSnap.scale, name: '', sceneIdx: null, center: [0, 0, 0] },
-        _tmpMat4B,
-      );
-      placementWorldMatrix(p, _tmpMat4);
-      _tmpMat4B.invert();
-      return out.copy(_tmpMat4).multiply(_tmpMat4B);
-    }
-
-    /** 模型 Gizmo/滑块变换时，对其它模型、渲染相机、轨迹施加同一刚性增量（相机与模型同一套矩阵） */
-    function applySceneTransformDelta(oldSnap, driverPlacement) {
-      if (!oldSnap || !driverPlacement) return;
-      placementDeltaMatrix(oldSnap, driverPlacement, _tmpMat4);
-      for (const other of placements) {
-        if (other === driverPlacement) continue;
-        const pose = placementToPose(other);
-        applyRigidDeltaToPose(pose, _tmpMat4);
-        writePoseToPlacement(other, pose);
-        syncPlacementTransform(other);
-      }
-      if (renderCameraPose) {
-        applyRigidDeltaToPose(renderCameraPose, _tmpMat4);
-        if (rigOpen) syncRigFromPose();
-      }
-      for (const m of cameraMarkers) {
-        applyRigidDeltaToPose(m, _tmpMat4);
-      }
-      for (const seg of cameraPathSegments) {
-        for (const pt of seg.points || []) {
-          applyRigidDeltaToPoint(pt, _tmpMat4);
-        }
-      }
-      if (selected >= 0) updateSelSliders();
-      refreshPathVisuals();
-      if (rigOpen) el('rigPreviewStatus').textContent = '需重新渲染';
-      viewer && viewer.forceRenderNextFrame();
     }
 
     function syncRigFromPose(pose = renderCameraPose) {
@@ -3020,7 +2940,7 @@
     }
 
     function syncPlacementTransform(p) {
-      if (!viewer && viewer.splatMesh || p.sceneIdx == null) return;
+      if (!viewer || !viewer.splatMesh || p.sceneIdx == null) return;
       const scene = viewer.splatMesh.getScene(p.sceneIdx);
       scene.position.set(p.x, p.y, p.z);
       scene.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
@@ -3184,11 +3104,7 @@
       applyGizmoForSelection();
       transformControls.addEventListener('dragging-changed', (e) => {
         if (viewer.controls) viewer.controls.enabled = !e.value;
-        if (e.value && selected >= 0 && transformControls.object === pivot) {
-          placementDragSnapshot = snapshotPlacement(placements[selected]);
-        }
         if (!e.value) {
-          placementDragSnapshot = null;
           syncActivePathFromState();
           renderPathGroupList();
           if (pathSlideActive && cameraMarkers.length >= 2 && !isPathSlideBlocked()) {
@@ -3234,17 +3150,12 @@
         if (selected < 0) return;
         const p = placements[selected];
         if (!p) return;
-        const oldSnap = placementDragSnapshot;
         p.x = pivot.position.x;
         p.y = pivot.position.y;
         p.z = pivot.position.z;
         const euler = new THREE.Euler().setFromQuaternion(pivot.quaternion, 'XYZ');
         p.yaw_deg = THREE.MathUtils.radToDeg(euler.z);
         syncPlacementTransform(p);
-        if (oldSnap) {
-          applySceneTransformDelta(oldSnap, p);
-          placementDragSnapshot = snapshotPlacement(p);
-        }
         updateSelSliders();
       });
     }
@@ -3373,14 +3284,12 @@
     function onSelSliderChange() {
       if (selected < 0) return;
       const p = placements[selected];
-      const oldSnap = snapshotPlacement(p);
       p.x = parseFloat(el('selX').value);
       p.y = parseFloat(el('selY').value);
       p.z = parseFloat(el('selZ').value);
       p.scale = parseFloat(el('selScale').value);
       p.yaw_deg = parseFloat(el('selYaw').value);
       syncPlacementTransform(p);
-      applySceneTransformDelta(oldSnap, p);
       updateSelSliders();
       syncingFromGizmo = true;
       pivot.position.set(p.x, p.y, p.z);
