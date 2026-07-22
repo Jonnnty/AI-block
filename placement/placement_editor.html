@@ -30,6 +30,13 @@
       display: flex; flex-direction: column; gap: 10px;
       padding-bottom: 12px; border-bottom: 1px solid #2e2e2e; margin-bottom: 10px;
     }
+    #panel:not(.has-active-scene) .panel-chrome {
+      border-bottom: none; margin-bottom: 0; padding-bottom: 0;
+    }
+    #panelWorkspace {
+      display: flex; flex-direction: column; gap: 0; min-height: 0;
+    }
+    #panelWorkspace[hidden] { display: none !important; }
     .panel-global {
       padding: 10px 10px 11px;
       background: linear-gradient(180deg, #2a2a2a 0%, #242424 100%);
@@ -353,6 +360,10 @@
             <button type="button" id="importSceneJsonBtn" class="scene-action-btn scene-action-btn-import">导入场景 JSON</button>
           </div>
         </div>
+      </section>
+    </header>
+    <div id="panelWorkspace" hidden>
+      <section class="panel-global">
         <div class="panel-zone-label" style="margin-top:2px">
           <span>场景配置</span>
           <span class="panel-zone-hint">全局 · 随时可用</span>
@@ -372,7 +383,6 @@
           </button>
         </div>
       </section>
-    </header>
     <div id="loadProgressWrap" hidden>
       <div id="loadProgressBar"><div id="loadProgressFill"></div></div>
       <div id="loadProgressText"></div>
@@ -521,6 +531,7 @@
           <button type="button" id="renderPathVideoBtn" class="secondary">预览路径视频</button>
         </div>
       </section>
+    </div>
     </div>
     </div>
     <input type="file" id="importConfigFile" accept=".json,application/json" hidden />
@@ -1311,10 +1322,19 @@
       return scene ? scene.name : SCENE_PICKER_LABEL;
     }
 
+    function updatePanelWorkspaceVisibility() {
+      const hasScene = !!(activeSceneId && getSceneById(activeSceneId));
+      const workspace = el('panelWorkspace');
+      const panel = el('panel');
+      if (workspace) workspace.hidden = !hasScene;
+      if (panel) panel.classList.toggle('has-active-scene', hasScene);
+    }
+
     function setActiveSceneSelection(sceneId) {
       activeSceneId = sceneId || null;
       if (scenesStore) scenesStore.activeSceneId = activeSceneId;
       renderSceneManagerUI();
+      updatePanelWorkspaceVisibility();
     }
 
     function renderSceneManagerUI() {
@@ -4278,6 +4298,7 @@
         if (isSessionAborted(loadToken)) return;
         activeSceneId = null;
         renderSceneManagerUI();
+        updatePanelWorkspaceVisibility();
         const saveOk = await checkSaveApiHealth();
         if (saveOk === false) {
           status('就绪 · 保存接口版本过旧，请重启 serve_editor.py 后再点保存');
