@@ -189,6 +189,12 @@
     .drag-handle { cursor: grab; color: #666; font-size: 14px; line-height: 1; user-select: none; flex-shrink: 0; }
     .marker-row.drag-over { border-color: #6cf; }
     .marker-row.dragging { opacity: 0.55; }
+    .marker-row-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
+    .marker-update-btn {
+      padding: 2px 6px; font-size: 10px; line-height: 1.2; border-radius: 4px;
+      background: #333; border: 1px solid #555; color: #ccc; cursor: pointer;
+    }
+    .marker-update-btn:hover { background: #2d6cdf; border-color: #4a8af0; color: #fff; }
     .panel-nav {
       margin-bottom: 12px;
     }
@@ -2794,17 +2800,45 @@
           const from = markerDragFromIdx;
           if (from >= 0 && from !== i) reorderMarkers(from, i);
         });
+        const actions = document.createElement('div');
+        actions.className = 'marker-row-actions';
+        const upd = document.createElement('button');
+        upd.type = 'button';
+        upd.className = 'marker-update-btn';
+        upd.textContent = '更新';
+        upd.title = '将当前相机位姿写入此机位';
+        upd.onclick = (e) => {
+          e.stopPropagation();
+          if (selectedMarkerIdx !== i) {
+            selectMarker(i);
+            status(`已定位机位 #${i + 1} · 调整后点「更新」保存`);
+            return;
+          }
+          updateMarkerFromRig(i);
+        };
         const del = document.createElement('button');
         del.type = 'button'; del.className = 'icon-btn'; del.textContent = '×';
         del.onclick = (e) => { e.stopPropagation(); removeMarker(i); };
-        row.appendChild(del);
+        actions.appendChild(upd);
+        actions.appendChild(del);
+        row.appendChild(actions);
         row.onclick = (e) => {
-          if (e.target.closest('.drag-handle') || e.target.closest('.icon-btn')) return;
+          if (e.target.closest('.drag-handle') || e.target.closest('.marker-row-actions')) return;
           if (i === selectedMarkerIdx) selectMarker(-1);
           else selectMarker(i);
         };
         list.appendChild(row);
       });
+    }
+
+    function updateMarkerFromRig(idx) {
+      if (idx < 0 || !cameraMarkers[idx] || !rigOpen || !renderCameraPose) return;
+      Object.assign(cameraMarkers[idx], markerFromRig());
+      refreshPathVisuals();
+      syncActivePathFromState();
+      el('rigPreviewStatus').textContent = '需重新渲染';
+      status(`已更新机位 #${idx + 1}`);
+      viewer && viewer.forceRenderNextFrame();
     }
 
     function selectMarker(idx) {
@@ -2814,7 +2848,7 @@
       selectedCpPointIdx = -1;
       selected = -1;
       placementGizmoMode = null;
-      rigGizmoMode = null;
+      markerGizmoMode = null;
       updatePlacementGizmoUI();
       updateRigGizmoUI();
       el('gizmoMoveRig').classList.remove('active');
@@ -2822,10 +2856,13 @@
       renderMarkerList();
       renderList();
       updateKeypointEditUI();
-      if (idx >= 0 && markerGizmoMode) applyMarkerToRig(cameraMarkers[idx]);
+      if (idx >= 0) {
+        applyMarkerToRig(cameraMarkers[idx]);
+        updateRigSliders();
+        stopPathSlidePreview();
+      }
       attachGizmo();
       if (idx < 0 && cameraMarkers.length >= 2) resumePathSlideIfPlaying();
-      else stopPathSlidePreview();
     }
 
     function updateKeypointEditUI() {
@@ -3328,18 +3365,16 @@
         status('轨迹弯折 · Q 拖动');
         return;
       }
-      if (selectedMarkerIdx >= 0 && mode === 'translate') {
-        markerGizmoMode = markerGizmoMode === 'translate' ? null : 'translate';
-        rigGizmoMode = null;
-        el('gizmoMoveRig').classList.toggle('active', markerGizmoMode === 'translate');
-        el('gizmoRotateRig').classList.remove('active');
-        if (markerGizmoMode && selectedMarkerIdx >= 0) {
-          applyMarkerToRig(cameraMarkers[selectedMarkerIdx]);
-        }
+      if (selectedMarkerIdx >= 0) {
+        rigGizmoMode = rigGizmoMode === mode ? null : mode;
+        markerGizmoMode = null;
+        el('gizmoMoveRig').classList.toggle('active', rigGizmoMode === 'translate');
+        el('gizmoRotateRig').classList.toggle('active', rigGizmoMode === 'rotate');
         attachGizmo();
-        if (markerGizmoMode) stopPathSlidePreview();
-        else if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
-        status(markerGizmoMode ? '机位编辑（预览暂停）' : 'Gizmo 已关闭');
+        stopPathSlidePreview();
+        status(rigGizmoMode
+          ? (rigGizmoMode === 'translate' ? '机位移动 · 调整后点「更新」保存' : '机位旋转 · 调整后点「更新」保存')
+          : 'Gizmo 已关闭');
         return;
       }
       rigGizmoMode = rigGizmoMode === mode ? null : mode;
@@ -3586,10 +3621,6 @@
       renderCameraPose.y = parseFloat(el('rigY').value);
       renderCameraPose.z = parseFloat(el('rigZ').value);
       syncRigFromPose();
-      if (markerGizmoMode && selectedMarkerIdx >= 0) {
-        Object.assign(cameraMarkers[selectedMarkerIdx], markerFromRig());
-        refreshPathVisuals();
-      }
       el('rigPreviewStatus').textContent = '需重新渲染';
       viewer.forceRenderNextFrame();
     }
@@ -3600,10 +3631,6 @@
       renderCameraPose.pitch_deg = parseFloat(el('rigPitch').value);
       renderCameraPose.roll_deg = parseFloat(el('rigRoll').value);
       syncRigFromPose();
-      if (markerGizmoMode && selectedMarkerIdx >= 0) {
-        Object.assign(cameraMarkers[selectedMarkerIdx], markerFromRig());
-        refreshPathVisuals();
-      }
       el('rigPreviewStatus').textContent = '需重新渲染';
       viewer.forceRenderNextFrame();
     }
@@ -3923,6 +3950,7 @@
         }
         if (obj && obj.userData && obj.userData.markerIdx != null) {
           const i = obj.userData.markerIdx;
+          if (selectedMarkerIdx === i) return;
           const p = obj.position;
           cameraMarkers[i].x = p.x;
           cameraMarkers[i].y = p.y;
