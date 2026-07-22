@@ -10,6 +10,7 @@ echo   请用此地址打开（不要用 github.io）
 echo   Ctrl+C 停止
 echo ========================================
 echo.
+python -u extract_scenes_from_edge.py 2>nul
 start "" "http://127.0.0.1:8080/placement_editor.html"
 python -u serve_editor.py
 pause

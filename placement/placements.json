@@ -1,21 +1,685 @@
 {
-  "version": 2,
-  "defaults": {
-    "scale": 0.12,
-    "z": 0.0006
-  },
-  "view": {
-    "background": "cream"
-  },
-  "placements": [],
-  "cameraPaths": [],
-  "activePathId": null,
-  "renderSettings": {
-    "fov": 50,
-    "near": 0.01,
-    "far": 8,
-    "width": 1920,
-    "height": 1080,
-    "showFrustum": true
-  }
+  "version": 3,
+  "activeSceneId": "scene-1",
+  "scenes": [
+    {
+      "id": "scene-1",
+      "name": "scene1",
+      "createdAt": "2026-07-22T03:32:31.120Z",
+      "updatedAt": "2026-07-22T13:32:36.028Z",
+      "config": {
+        "version": 2,
+        "defaults": {
+          "scale": 0.18,
+          "z": 0.0006
+        },
+        "view": {
+          "background": "cream",
+          "rigOpen": true
+        },
+        "placements": [
+          {
+            "asset": "map1.ply",
+            "x": 0,
+            "y": 0,
+            "z": 0.0006,
+            "scale": 1.2,
+            "yaw_deg": 0,
+            "center": [
+              -0.002559779798079157,
+              -0.0014803953268011146,
+              -0.00657888175919652
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/map1.ply"
+          },
+          {
+            "asset": "two_story_teahouse.ply",
+            "x": 0.22549466727935336,
+            "y": 0,
+            "z": 0.019738149249641925,
+            "scale": 0.18,
+            "yaw_deg": -13.42515832472924,
+            "center": [
+              0.013944246825847738,
+              0.05409826606429455,
+              -0.5013818740844727
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/two_story_teahouse.ply"
+          },
+          {
+            "asset": "vendor_cart.ply",
+            "x": 0.07,
+            "y": 0,
+            "z": 0.032150919161313574,
+            "scale": 0.05,
+            "yaw_deg": 104,
+            "center": [
+              0.0028105475194026767,
+              0.0801308213236424,
+              -0.47113505005836487
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/vendor_cart.ply"
+          },
+          {
+            "asset": "wooden_pagoda.ply",
+            "x": -0.916305410222888,
+            "y": 0,
+            "z": 0.0006,
+            "scale": 0.4,
+            "yaw_deg": 0,
+            "center": [
+              -0.0008498893106391238,
+              0.00013432860173568395,
+              -0.49944502115249634
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/wooden_pagoda.ply"
+          },
+          {
+            "asset": "three_story_house.ply",
+            "x": 0.6692147941104192,
+            "y": 0.3027441536432163,
+            "z": 0.029933574633913343,
+            "scale": 0.18,
+            "yaw_deg": -81.11691803603323,
+            "center": [
+              -0.01545533324550436,
+              0.0718055306631693,
+              -0.5020318627357483
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/three_story_house.ply"
+          },
+          {
+            "asset": "two_story_house_sketch.ply",
+            "x": 0.6631692586103485,
+            "y": 0.1471556642520142,
+            "z": 0.02621534309277269,
+            "scale": 0.18,
+            "yaw_deg": -82.7829191929958,
+            "center": [
+              0.018482703247885684,
+              0.03868324589118641,
+              -0.5008294582366943
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/two_story_house_sketch.ply"
+          },
+          {
+            "asset": "temple_hall_illustration.ply",
+            "x": 0.4154291331259675,
+            "y": 0.4002647856815198,
+            "z": 0.003,
+            "scale": 0.275,
+            "yaw_deg": 0,
+            "center": [
+              -0.0008118833921499701,
+              0.015056343747379682,
+              -0.3799337148666382
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/temple_hall_illustration.ply"
+          },
+          {
+            "asset": "thatched_compound.ply",
+            "x": -0.72874619278081,
+            "y": 0.3655282832677824,
+            "z": 0.023642215388894883,
+            "scale": 0.295,
+            "yaw_deg": 0,
+            "center": [
+              0.043452893498716796,
+              -0.05217099785661244,
+              -0.20262232422828674
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/thatched_compound.ply"
+          },
+          {
+            "asset": "thatched_house_model.ply",
+            "x": -0.45,
+            "y": 0.425,
+            "z": 0.029860047616006243,
+            "scale": 0.18,
+            "yaw_deg": -2,
+            "center": [
+              -0.004151407180898746,
+              0.012669043977214713,
+              -0.33145973086357117
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/thatched_house_model.ply"
+          },
+          {
+            "asset": "street2.ply",
+            "x": 1.0459094476530055,
+            "y": 0.1561838836823113,
+            "z": 0.027228082014253942,
+            "scale": 0.315,
+            "yaw_deg": -86.99999999999999,
+            "center": [
+              0.00027117151343180034,
+              0.05953518704026045,
+              -0.21497109532356262
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/street2.ply"
+          },
+          {
+            "asset": "street1.ply",
+            "x": 1.0631263182430388,
+            "y": -0.22496632647721615,
+            "z": 0.025089829423026427,
+            "scale": 0.315,
+            "yaw_deg": -89,
+            "center": [
+              0.007153386127578118,
+              0.06836945156457482,
+              -0.22129681706428528
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/street1.ply"
+          },
+          {
+            "asset": "tea_stall.ply",
+            "x": 0.68,
+            "y": -0.45,
+            "z": 0.01890744496778923,
+            "scale": 0.115,
+            "yaw_deg": -62.999999999999986,
+            "center": [
+              -0.09641517097031843,
+              -0.002732929491873736,
+              -0.49748849868774414
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/tea_stall.ply"
+          },
+          {
+            "asset": "teahouse_illustration.ply",
+            "x": -0.046701795615238566,
+            "y": 0.10443158919075798,
+            "z": 0.014720351169527603,
+            "scale": 0.18,
+            "yaw_deg": -26.999999999999996,
+            "center": [
+              0.0036385660447612136,
+              0.04656943860311829,
+              -0.500204861164093
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/teahouse_illustration.ply"
+          },
+          {
+            "asset": "siheyuan_courtyard.ply",
+            "x": 0,
+            "y": -0.39,
+            "z": 0.01964194445288461,
+            "scale": 0.37,
+            "yaw_deg": 0,
+            "center": [
+              -0.03694583515369187,
+              0.049715611164446,
+              -0.17024937272071838
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/siheyuan_courtyard.ply"
+          },
+          {
+            "asset": "stage_pavilion.ply",
+            "x": 0.5425331628545863,
+            "y": -0.3028394139823659,
+            "z": 0.022129603210275222,
+            "scale": 0.22,
+            "yaw_deg": -36.65699010402858,
+            "center": [
+              0.0008976091753491025,
+              -0.0002605476338075148,
+              -0.46500512957572937
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/stage_pavilion.ply"
+          },
+          {
+            "asset": "stone_aqueduct.ply",
+            "x": -0.27148296331467814,
+            "y": 0.1775889003481148,
+            "z": 0.02209815910695434,
+            "scale": 0.295,
+            "yaw_deg": -50.50548108775975,
+            "center": [
+              0.06335908316074913,
+              -0.0005187584301326764,
+              -0.09987273812294006
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/stone_aqueduct.ply"
+          },
+          {
+            "asset": "stone_arch_bridge.ply",
+            "x": 0.21392912512854081,
+            "y": -0.20680713830640293,
+            "z": 0.0006,
+            "scale": 0.36,
+            "yaw_deg": -3.6792035780446044,
+            "center": [
+              0.0026287767671743113,
+              -0.000683392750654451,
+              -0.11667972803115845
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/stone_arch_bridge.ply"
+          },
+          {
+            "asset": "shop_lanterns.ply",
+            "x": 0.23806439652745293,
+            "y": 0.19140930601479345,
+            "z": 0.0364773446267006,
+            "scale": 0.19,
+            "yaw_deg": 93.59480775176428,
+            "center": [
+              0.009404929634126823,
+              0.06843655774548259,
+              -0.46626758575439453
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/shop_lanterns.ply"
+          },
+          {
+            "asset": "siheyuan_aerial.ply",
+            "x": -0.355,
+            "y": -0.35,
+            "z": 0.0006,
+            "scale": 0.465,
+            "yaw_deg": -179,
+            "center": [
+              -0.0013922753605584148,
+              0.11416487543465337,
+              -0.1558072566986084
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/siheyuan_aerial.ply"
+          },
+          {
+            "asset": "multi_tier_pavilion_sketch.ply",
+            "x": 0.6972743837558599,
+            "y": 0.010616553964168274,
+            "z": 0.022618641405380457,
+            "scale": 0.18,
+            "yaw_deg": -179,
+            "center": [
+              0.006406432861099095,
+              -0.0009481381621777354,
+              -0.4991460144519806
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/multi_tier_pavilion_sketch.ply"
+          },
+          {
+            "asset": "drum_tower.ply",
+            "x": 0.9064550586296704,
+            "y": 0.431804805773767,
+            "z": 0.02867338042112062,
+            "scale": 0.21,
+            "yaw_deg": 0,
+            "center": [
+              0.0033230679154510794,
+              0.011722014379742286,
+              -0.49916037917137146
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/drum_tower.ply"
+          },
+          {
+            "asset": "bell_tower.ply",
+            "x": 0.9112414256321053,
+            "y": -0.4595603972145539,
+            "z": 0.024973928420482443,
+            "scale": 0.22,
+            "yaw_deg": 0,
+            "center": [
+              0.0019251577141565451,
+              0.008379221270540244,
+              -0.498754620552063
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/bell_tower.ply"
+          },
+          {
+            "asset": "narrow_house.ply",
+            "x": 0.36263758706731564,
+            "y": -0.10787664330258068,
+            "z": 0.02253379978965143,
+            "scale": 0.17,
+            "yaw_deg": 0,
+            "center": [
+              0.004019779626551341,
+              -0.04465655430639286,
+              -0.4981324076652527
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/narrow_house.ply"
+          },
+          {
+            "asset": "pavilion_front_sketch.ply",
+            "x": 0.7484946059592502,
+            "y": -0.2808637193991059,
+            "z": 0.0006,
+            "scale": 0.225,
+            "yaw_deg": 0,
+            "center": [
+              0.006182552422998714,
+              0.05833354203864947,
+              -0.44749051332473755
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/pavilion_front_sketch.ply"
+          },
+          {
+            "asset": "iron_pagoda.ply",
+            "x": -0.2032882450746015,
+            "y": 0.3945895746226308,
+            "z": 0.00882110874922688,
+            "scale": 0.44,
+            "yaw_deg": 0,
+            "center": [
+              0.0005118473237474286,
+              0.00047548311590929845,
+              -0.4997921288013458
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/iron_pagoda.ply"
+          },
+          {
+            "asset": "mud_hut_model.ply",
+            "x": -0.6431958597207923,
+            "y": 0,
+            "z": 0.0006,
+            "scale": 0.21,
+            "yaw_deg": 0,
+            "center": [
+              0.015060167381676232,
+              -0.0015401698794306779,
+              -0.344563364982605
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/mud_hut_model.ply"
+          },
+          {
+            "asset": "cottage.ply",
+            "x": 1.1002064698235838,
+            "y": -0.46050351753599994,
+            "z": 0.0006,
+            "scale": 0.18,
+            "yaw_deg": 0,
+            "center": [
+              0.008951869671601534,
+              -0.0029309232397909052,
+              -0.33323943614959717
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/cottage.ply"
+          },
+          {
+            "asset": "farm_plot.ply",
+            "x": -0.8548993217696317,
+            "y": -0.3670871626195825,
+            "z": 0.02122029543006039,
+            "scale": 0.37,
+            "yaw_deg": 0,
+            "center": [
+              -0.003596988059078923,
+              0.009517906321978532,
+              -0.029048144817352295
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/farm_plot.ply"
+          },
+          {
+            "asset": "willow_tree.ply",
+            "x": 0.2950904224407163,
+            "y": -0.4502230450506898,
+            "z": -0.01318665748321977,
+            "scale": 0.18,
+            "yaw_deg": 0,
+            "center": [
+              0.006483180962733476,
+              0.021621077170653157,
+              -0.48505470156669617
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/willow_tree.ply"
+          },
+          {
+            "asset": "ink_cedar_tree.ply",
+            "x": 0.5692884724464362,
+            "y": 0,
+            "z": 0.0006,
+            "scale": 0.18,
+            "yaw_deg": 0,
+            "center": [
+              0.03889111762706282,
+              -0.008450774560742115,
+              -0.4982255697250366
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/ink_cedar_tree.ply"
+          },
+          {
+            "asset": "boat2.ply",
+            "x": 0.47,
+            "y": -0.45,
+            "z": 0.028815684358942134,
+            "scale": 0.155,
+            "yaw_deg": 0,
+            "center": [
+              -0.0010690178121620568,
+              0.03052376929266522,
+              -0.12576818466186523
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/boat2.ply"
+          }
+        ],
+        "cameraPaths": [
+          {
+            "id": "path-1",
+            "name": "轨迹 1",
+            "markers": [
+              {
+                "x": -1.6081261138256226,
+                "y": -0.06823203015863677,
+                "z": 0.3778606087413164,
+                "yaw_deg": -84.31399480528741,
+                "pitch_deg": 73.6932635057736,
+                "roll_deg": -5.555144821304768,
+                "scale": 1
+              },
+              {
+                "x": -0.702925740262478,
+                "y": -0.17993413878237227,
+                "z": 0.1116357350339678,
+                "yaw_deg": -19.839938013899474,
+                "pitch_deg": 88.34053323891577,
+                "roll_deg": -69.81483135171031,
+                "scale": 1
+              }
+            ],
+            "segments": [
+              {
+                "points": [
+                  {
+                    "x": -1.1809776951708906,
+                    "y": -0.129195727891464,
+                    "z": 0.23290460422477838,
+                    "t": 0.4786042621536757
+                  }
+                ]
+              }
+            ],
+            "framesPerSeg": 20,
+            "fps": 12
+          },
+          {
+            "id": "path-2",
+            "name": "轨迹 2",
+            "markers": [
+              {
+                "x": -1.0080255907674478,
+                "y": 0.21824387549718738,
+                "z": 0.08801170972801588,
+                "yaw_deg": 2.952986565155637,
+                "pitch_deg": 88.05435085702418,
+                "roll_deg": -100.26774884318985,
+                "scale": 1
+              },
+              {
+                "x": -0.09004176662614383,
+                "y": -0.1262213602292505,
+                "z": 0.0925873357623445,
+                "yaw_deg": -19.9892318461751,
+                "pitch_deg": 88.33893663916962,
+                "roll_deg": -69.66560019387799,
+                "scale": 1
+              }
+            ],
+            "segments": [
+              {
+                "points": [
+                  {
+                    "x": -0.6030536092799049,
+                    "y": 0.1612577763712597,
+                    "z": 0.10313908708570836,
+                    "t": 0.40718563086156684
+                  }
+                ]
+              }
+            ],
+            "framesPerSeg": 16,
+            "fps": 12
+          },
+          {
+            "id": "path-5",
+            "name": "轨迹 3",
+            "markers": [
+              {
+                "x": 0.734418877834816,
+                "y": -0.9039452505314002,
+                "z": 0.16542823327267453,
+                "yaw_deg": 22.03552105040794,
+                "pitch_deg": 77.05658673786188,
+                "roll_deg": 4.410139537437505,
+                "scale": 1
+              },
+              {
+                "x": 0.5332943862101454,
+                "y": -0.6477262059587536,
+                "z": 0.20078500338160463,
+                "yaw_deg": 65.93715837192256,
+                "pitch_deg": 85.67736236081241,
+                "roll_deg": -33.900165361113935,
+                "scale": 1
+              }
+            ],
+            "segments": [
+              {
+                "points": [
+                  {
+                    "x": 0.6486315234068127,
+                    "y": -0.7534165618449703,
+                    "z": 0.18620033571167097,
+                    "t": 0.5268470040324091
+                  }
+                ]
+              }
+            ],
+            "framesPerSeg": 16,
+            "fps": 12
+          }
+        ],
+        "activePathId": "path-5",
+        "renderSettings": {
+          "fov": 20,
+          "near": 0.01,
+          "far": 3,
+          "width": 1920,
+          "height": 1080,
+          "showFrustum": true
+        },
+        "renderCamera": {
+          "x": 0.5938770282586933,
+          "y": -0.6988915293789596,
+          "z": 0.1937244799114051,
+          "yaw_deg": 45.34503076226228,
+          "pitch_deg": 84.01452534528188,
+          "roll_deg": -14.643268961017407
+        }
+      }
+    }
+  ]
 }
