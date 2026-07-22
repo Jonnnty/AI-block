@@ -116,15 +116,7 @@
     }
     .local-bridge-hint button:hover { filter: brightness(1.08); }
     .model-load-debug {
-      margin-top: 8px; padding: 8px 9px;
-      background: #241818; border: 1px solid #7a4040; border-radius: 7px;
-      font-size: 10px; font-family: ui-monospace, Consolas, monospace;
-      color: #ffb4b4; line-height: 1.45; max-height: 200px; overflow-y: auto;
-      white-space: pre-wrap; word-break: break-all;
-    }
-    .model-load-debug-title {
-      font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
-      color: #ff8888; margin-bottom: 6px; font-family: system-ui, sans-serif;
+      display: none !important;
     }
     .scene-row.missing .scene-missing-reason {
       display: block; margin-top: 2px; font-size: 9px; line-height: 1.35;
@@ -134,16 +126,16 @@
       display: block; margin-top: 2px; font-size: 9px; line-height: 1.35;
       color: #8fd4ff; opacity: 0.95; word-break: break-all;
     }
-    .local-bind-panel {
+    .local-access-banner {
       margin-top: 8px; padding: 10px;
-      background: #1a2430; border: 1px solid #3a5570; border-radius: 8px;
+      background: #1a2a20; border: 1px solid #3a7050; border-radius: 8px;
+      font-size: 11px; line-height: 1.5; color: #b8e6c8;
     }
-    .local-bind-panel h3 {
-      margin: 0 0 6px; font-size: 11px; font-weight: 600; color: #8fd4ff;
+    .local-access-banner p { margin: 0 0 8px; }
+    .local-access-banner button { width: 100%; font-size: 11px; padding: 6px 8px; }
+    .import-privacy-hint {
+      margin: 8px 0 0; font-size: 10px; line-height: 1.45; color: #8aa;
     }
-    .local-bind-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-    .local-bind-actions button { flex: 1 1 calc(50% - 6px); min-width: 120px; font-size: 11px; padding: 6px 8px; }
-    .local-bind-hint { margin: 8px 0 0; font-size: 10px; line-height: 1.45; color: #8aa; }
     .val { color: #aaa; font-size: 11px; }
     .val-editable { cursor: pointer; border-bottom: 1px dotted #666; }
     .val-editable:hover { color: #ddd; border-bottom-color: #6cf; }
@@ -564,27 +556,17 @@
     <div id="modelsPanel">
       <section>
         <h2>导入模型</h2>
-        <input type="file" id="pickFile" accept=".ply" multiple />
+        <input type="file" id="pickFile" accept=".ply" multiple hidden />
         <button type="button" id="importBtn" class="secondary">选择 PLY 文件</button>
-        <div id="localBindPanel" class="local-bind-panel" hidden>
-          <h3>本地文件来源（刷新后从磁盘读取，不占浏览器缓存）</h3>
-          <div class="local-bind-actions">
-            <button type="button" id="bindSelectedFileBtn" class="secondary">选中项 · 绑定文件</button>
-            <button type="button" id="bindSelectedDirBtn" class="secondary">选中项 · 绑定文件夹</button>
-            <button type="button" id="batchBindDirBtn" class="secondary">批量 · 文件夹按名匹配</button>
-            <button type="button" id="pickBoundFilesBtn" class="secondary">多选 PLY 并绑定</button>
-            <button type="button" id="restoreLocalPermBtn" class="secondary">恢复本地授权并刷新</button>
-          </div>
-          <p class="local-bind-hint">每个模型可绑定不同文件或文件夹；授权保存在浏览器，刷新后仍从 D 盘等本地路径读取。需 Chrome / Edge。</p>
+        <p class="import-privacy-hint">拖入或选择 PLY 时，浏览器会请求读取您电脑上的文件。文件<strong>不会上传到 GitHub</strong>，授权仅保存在本机浏览器；清除网站数据或长期未用后可能需再次确认。</p>
+        <div id="localAccessBanner" class="local-access-banner" hidden>
+          <p id="localAccessBannerText">部分模型需重新授权：浏览器仅在您的电脑上读取 PLY，不会上传至 GitHub 或任何服务器。</p>
+          <button type="button" id="localAccessBannerBtn">重新授权并加载</button>
         </div>
       </section>
       <section>
         <h2>已放置</h2>
         <div id="sceneList" class="scene-list"></div>
-        <div id="modelLoadDebug" class="model-load-debug" hidden>
-          <div class="model-load-debug-title">模型加载诊断 · 版本 20260723a</div>
-          <div id="modelLoadDebugBody"></div>
-        </div>
       </section>
       <section>
         <h2>默认参数</h2>
@@ -912,36 +894,19 @@
       return sceneId ? `${sceneId}::${assetName}` : assetName;
     }
 
-    /** 模型变红调试：页面内「模型加载诊断」面板 + 控制台 [模型加载] */
-    const MODEL_LOAD_BUILD = '20260723a';
-    const MODEL_LOAD_DEBUG = !new URLSearchParams(location.search).has('quietModels');
-    const modelLoadDiagEntries = [];
+    /** 模型加载追踪（控制台）；本地授权见 import-privacy-hint / localAccessBanner */
+    const MODEL_LOAD_BUILD = '20260723b';
+    const LOCAL_ACCESS_CONSENT_KEY = 'placement_editor_local_access_consent_v1';
     const lastResolveTraceByAsset = new Map();
-
-    const RESOLVE_SOURCE_LABELS = {
-      memory_cache_hit: '内存缓存',
-      fetch_ok: '本地磁盘',
-      http_fetch_ok: 'HTTP 下载',
-      idb_scoped_hit: 'IndexedDB(场景键)',
-      idb_legacy_hit: 'IndexedDB(旧键/文件名)',
-      local_file_handle: '本地文件(已授权)',
-      local_dir_handle: '本地文件夹(已授权)',
-      local_handle_permission: '本地授权待确认',
-      server_path_not_found: '本地路径未找到',
-      server_fetch_failed: '本地读取失败',
-      asset_not_found: '未找到',
-      session_aborted_before_fetch: '加载中断',
-      empty_asset_name: '文件名为空',
-    };
 
     const MISSING_REASON_LABELS = {
       need_local_server: '未连接本地服务，无法从 D 盘读 PLY',
       server_path_not_found: '未在 D:/Downloads/outputs 等目录找到 PLY',
       server_fetch_failed: '按 sourcePath 读文件失败',
-      asset_not_found: '未找到 PLY：请绑定本地文件/文件夹，或拖入文件',
+      asset_not_found: '未找到 PLY：请拖入同名文件以授权本地读取',
       session_aborted_before_fetch: '加载被中断',
       empty_asset_name: '资源名为空',
-      local_handle_permission: '本地授权已过期，请点「恢复本地授权并刷新」',
+      local_handle_permission: '需重新授权浏览器读取本地 PLY（不上传 GitHub）',
       unknown: '未知原因',
     };
 
@@ -956,93 +921,106 @@
       return `${(n / (1024 * 1024)).toFixed(1)}MB`;
     }
 
-    function formatResolveTraceLine(trace) {
-      if (!trace) return '（无记录）';
-      const src = RESOLVE_SOURCE_LABELS[trace.reason] || trace.reason || '未知';
-      const parts = [src];
-      if (trace.loadedFrom) parts.push(`来源=${trace.loadedFrom}`);
-      if (trace.bytes) parts.push(formatBytes(trace.bytes));
-      if (trace.idbScopedKey) parts.push(`场景键=${trace.idbScopedKey}`);
-      if (trace.idbLegacyKey) parts.push(`旧键=${trace.idbLegacyKey}`);
-      if (trace.idbScopedBytes != null) parts.push(`场景键缓存=${formatBytes(trace.idbScopedBytes)}`);
-      if (trace.idbLegacyBytes != null) parts.push(`旧键缓存=${formatBytes(trace.idbLegacyBytes)}`);
-      if (trace.localSourceLabel) parts.push(`本地=${trace.localSourceLabel}`);
-      if (trace.resolvedPath) parts.push(`路径=${trace.resolvedPath}`);
-      else if (trace.configSourcePath) parts.push(`配置路径=${trace.configSourcePath}`);
-      return parts.join(' · ');
+    function modelLoadLog(_title, _detail) { /* 诊断面板已移除 */ }
+
+    function modelLoadWarn(title, detail) {
+      if (typeof console !== 'undefined') console.warn(`[模型加载 ${MODEL_LOAD_BUILD}] ${title}`, detail);
     }
 
-    async function probeIdbAssetKeys(sceneId, assetName) {
-      const scopedKey = sceneAssetIdbKey(sceneId, assetName);
-      const legacyKey = assetName;
-      const scoped = scopedKey ? await idbGetAsset(scopedKey) : null;
-      const legacy = await idbGetAsset(legacyKey);
-      return {
-        scopedKey: scopedKey || null,
-        legacyKey,
-        scopedBytes: scoped ? scoped.byteLength : 0,
-        legacyBytes: legacy ? legacy.byteLength : 0,
-      };
-    }
-
-    async function renderAssetResolveReport(sceneId, assetNames, label = '加载来源报告') {
-      const lines = [`【${label}】sceneId=${sceneId || '(none)'} hostMode=${hostMode}`];
-      for (const name of assetNames) {
-        const trace = lastResolveTraceByAsset.get(resolveTraceKey(sceneId, name));
-        const probe = await probeIdbAssetKeys(sceneId, name);
-        const ok = trace && trace.reason && !['asset_not_found', 'server_fetch_failed', 'server_path_not_found', 'empty_asset_name'].includes(trace.reason);
-        lines.push(`${ok ? '✓' : '✗'} ${name}`);
-        lines.push(`  结果: ${formatResolveTraceLine(trace)}`);
-        lines.push(`  IDB探测: 场景键=${probe.scopedKey || '-'} (${formatBytes(probe.scopedBytes)}) · 旧键=${probe.legacyKey} (${formatBytes(probe.legacyBytes)})`);
+    async function ensureLocalAccessConsent() {
+      if (!supportsLocalFileAccess()) return true;
+      if (localStorage.getItem(LOCAL_ACCESS_CONSENT_KEY)) return true;
+      const ok = confirm(
+        '浏览器将请求读取您电脑上的 PLY 模型文件。\n\n'
+        + '· 文件仅在您的浏览器本地读取，不会上传到 GitHub 或任何服务器\n'
+        + '· 授权保存在本机浏览器，刷新后可继续从磁盘加载\n'
+        + '· 清除本网站数据、换浏览器或长期未用后，可能需要再次点击授权',
+      );
+      if (ok) {
+        try { localStorage.setItem(LOCAL_ACCESS_CONSENT_KEY, '1'); } catch (_) {}
       }
-      const body = lines.join('\n');
-      modelLoadLog(label, body);
-      console.log(`[模型来源 ${MODEL_LOAD_BUILD}]\n${body}`);
-      return body;
+      return ok;
+    }
+
+    function updateLocalAccessBanner(show) {
+      const box = el('localAccessBanner');
+      if (box) box.hidden = !show;
+    }
+
+    function sceneNeedsLocalPermissionRetry() {
+      for (const p of placements) {
+        if (!p.missing) continue;
+        const trace = lastResolveTraceByAsset.get(resolveTraceKey(activeSceneId, p.name));
+        if (trace && (trace.reason === 'local_handle_permission' || trace.localHandleBlocked)) return true;
+      }
+      return false;
+    }
+
+    async function restoreAllLocalPermissionsAndReload() {
+      if (!supportsLocalFileAccess() || !activeSceneId) return;
+      const prefix = sceneIdbPrefix(activeSceneId);
+      const keys = await idbListStoreKeys(ASSET_HANDLE_STORE);
+      const seen = new Set();
+      for (const key of keys) {
+        if (!key.startsWith(prefix)) continue;
+        const handle = await idbGetHandle(key);
+        if (!handle || seen.has(handle)) continue;
+        seen.add(handle);
+        await ensureReadPermission(handle);
+      }
+      updateLocalAccessBanner(false);
+      await loadSceneById(activeSceneId);
+      status('已重新授权，已从本地磁盘加载模型');
     }
 
     function formatMissingReason(trace) {
       if (!trace) return MISSING_REASON_LABELS.unknown;
       const label = MISSING_REASON_LABELS[trace.reason] || trace.reason || MISSING_REASON_LABELS.unknown;
       const parts = [label];
-      if (trace.resolvedPath) parts.push(`路径=${trace.resolvedPath}`);
-      else if (trace.configSourcePath) parts.push(`路径=${trace.configSourcePath}`);
-      if (trace.hostMode) parts.push(`模式=${trace.hostMode}`);
+      if (trace.localSourceLabel) parts.push(trace.localSourceLabel);
       return parts.join(' · ');
     }
 
-    function renderModelLoadDebugPanel() {
-      const wrap = el('modelLoadDebug');
-      const body = el('modelLoadDebugBody');
-      if (!wrap || !body) return;
-      if (!modelLoadDiagEntries.length) {
-        wrap.hidden = true;
-        body.textContent = '';
+    async function importFromDirectoryHandle(dirHandle) {
+      if (!activeSceneId) { status('请先选择或创建场景'); return; }
+      if (!(await ensureLocalAccessConsent())) return;
+      if (!(await ensureReadPermission(dirHandle))) {
+        status('未获得文件夹读取授权');
         return;
       }
-      wrap.hidden = false;
-      body.textContent = modelLoadDiagEntries.map((e) => {
-        const detail = e.detail == null ? '' : (typeof e.detail === 'string' ? e.detail : JSON.stringify(e.detail));
-        return `${e.title}${detail ? `\n  ${detail}` : ''}`;
-      }).join('\n\n');
+      let matched = 0;
+      for await (const entry of dirHandle.values()) {
+        if (entry.kind !== 'file' || !entry.name.toLowerCase().endsWith('.ply')) continue;
+        const missingIdx = findMissingPlacementIndex(entry.name);
+        const assetName = missingIdx >= 0 ? placements[missingIdx].name : uniquePlacementAssetName(entry.name);
+        await bindAssetDirectoryHandle(activeSceneId, assetName, dirHandle, entry.name);
+        const file = await entry.getFile();
+        if (missingIdx >= 0) {
+          placements[missingIdx].sourcePath = `local-dir:${dirHandle.name}/${entry.name}`;
+          if (await reloadPlacementAt(missingIdx)) matched++;
+        } else {
+          await addPlacementFromFile(file, sessionResetToken, { dirHandle, dirFileName: entry.name });
+        }
+      }
+      status(`已从文件夹 ${dirHandle.name} 加载 · 恢复 ${matched} 个`);
+      updateLocalAccessBanner(sceneNeedsLocalPermissionRetry());
     }
 
-    function modelLoadDiagPush(level, title, detail) {
-      modelLoadDiagEntries.push({ level, title, detail: detail ?? null });
-      if (modelLoadDiagEntries.length > 60) modelLoadDiagEntries.shift();
-      renderModelLoadDebugPanel();
-      const prefix = `[模型加载 ${MODEL_LOAD_BUILD}] ${title}`;
-      if (level === 'error') console.error(prefix, detail);
-      else if (level === 'warn') console.warn(prefix, detail);
-      else if (MODEL_LOAD_DEBUG) console.log(prefix, detail);
-    }
-
-    function modelLoadLog(title, detail) {
-      modelLoadDiagPush('log', title, detail);
-    }
-
-    function modelLoadWarn(title, detail) {
-      modelLoadDiagPush('warn', title, detail);
+    async function pickPlyFilesWithLocalAccess() {
+      if (!supportsLocalFileAccess()) {
+        el('pickFile').click();
+        return;
+      }
+      if (!(await ensureLocalAccessConsent())) return;
+      const handles = await window.showOpenFilePicker({
+        multiple: true,
+        types: [{ description: 'PLY', accept: { 'application/octet-stream': ['.ply'] } }],
+      });
+      for (const handle of handles) {
+        const file = await handle.getFile();
+        await addPlacementFromFile(file, sessionResetToken, { fileHandle: handle });
+      }
+      updateLocalAccessBanner(sceneNeedsLocalPermissionRetry());
     }
 
     async function idbListStoreKeys(storeName) {
@@ -1065,45 +1043,6 @@
         });
       } finally {
         db.close();
-      }
-    }
-
-    async function dumpModelCacheState(sceneId, label) {
-      try {
-        const fileKeys = [...fileCache.keys()];
-        const assetKeys = await idbListStoreKeys(ASSET_STORE);
-        const metaKeys = await idbListStoreKeys(ASSET_META_STORE);
-        const scenePrefix = sceneId ? `s:${sceneId}:` : null;
-        modelLoadLog(`${label} · 环境`, {
-          hostMode,
-          sceneId,
-          activeSceneId,
-          protocol: location.protocol,
-          href: location.href,
-        });
-        modelLoadLog(`${label} · 内存 fileCache`, {
-          count: fileKeys.length,
-          keys: fileKeys.slice(0, 30),
-        });
-        modelLoadLog(`${label} · IndexedDB files`, {
-          total: assetKeys.length,
-          sceneScoped: scenePrefix ? assetKeys.filter((k) => k.startsWith(scenePrefix)) : [],
-          legacyByFilename: assetKeys.filter((k) => !k.startsWith('s:')),
-          allKeysSample: assetKeys.slice(0, 40),
-        });
-        const idbSizes = [];
-        for (const key of assetKeys.slice(0, 50)) {
-          const ab = await idbGetAsset(key);
-          idbSizes.push(`${key}=${formatBytes(ab ? ab.byteLength : 0)}`);
-        }
-        if (idbSizes.length) modelLoadLog(`${label} · IndexedDB 各键大小`, idbSizes.join('\n'));
-        modelLoadLog(`${label} · IndexedDB meta`, {
-          total: metaKeys.length,
-          sceneScoped: scenePrefix ? metaKeys.filter((k) => k.startsWith(scenePrefix)) : [],
-          legacySourcePath: metaKeys.filter((k) => k.startsWith('sourcePath:')),
-        });
-      } catch (e) {
-        modelLoadWarn(`${label} · 缓存快照失败`, e);
       }
     }
 
@@ -1549,7 +1488,7 @@
       if (p.sourcePath) return `缺少 PLY：${p.sourcePath}`;
       return canLoadAssetsFromDisk()
         ? '缺少 PLY · 请确认文件仍在原路径'
-        : '缺少 PLY · 请绑定本地文件/文件夹，或拖入同名文件';
+        : '缺少 PLY · 请拖入同名 PLY 以授权浏览器从本地读取';
     }
 
     async function migrateScenesSourcePaths(store) {
@@ -2640,15 +2579,6 @@
 
       const loadToken = ++sessionResetToken;
       status(`正在加载「${scene.name}」…`);
-      modelLoadDiagEntries.length = 0;
-      modelLoadLog('loadSceneById 开始', {
-        build: MODEL_LOAD_BUILD,
-        sceneId,
-        sceneName: scene.name,
-        loadToken,
-        hostMode,
-      });
-      await dumpModelCacheState(sceneId, '加载前');
 
       try {
         fileCache.clear();
@@ -2660,19 +2590,13 @@
         if (viewer) viewer.forceRenderNextFrame();
 
         const parsedCfg = parseSavedConfig(scene.config);
-        modelLoadLog('scene config placements', (parsedCfg.placements || []).map((p) => ({
-          asset: p.asset,
-          sourcePath: p.sourcePath || null,
-        })));
         await applyConfigToEditor(parsedCfg, loadToken, { skipInitialClear: true, sceneId });
         if (isSessionAborted(loadToken)) {
           modelLoadWarn('loadSceneById 中断：session aborted', { sceneId, loadToken, sessionResetToken });
           return;
         }
-        await dumpModelCacheState(sceneId, '加载后');
-        const assetNames = (parsedCfg.placements || []).map((p) => p.asset).filter(Boolean);
-        await renderAssetResolveReport(sceneId, assetNames, '每个模型加载来源');
         await refreshPlacementLocalLabels();
+        updateLocalAccessBanner(sceneNeedsLocalPermissionRetry());
         renderList();
         await persistScenesStore().catch((e) => console.warn('场景索引保存失败', e));
         await persistSceneSourcePathsOnly().catch((e) => console.warn('场景资源持久化失败', e));
@@ -4927,7 +4851,11 @@
         if (activeSceneId) {
           if (opts.fileHandle) {
             await bindAssetFileHandle(activeSceneId, assetName, opts.fileHandle, opts.fileHandle.name);
-          } else {
+            sourcePath = `local-file:${opts.fileHandle.name}`;
+          } else if (opts.dirHandle && opts.dirFileName) {
+            await bindAssetDirectoryHandle(activeSceneId, assetName, opts.dirHandle, opts.dirFileName);
+            sourcePath = `local-dir:${opts.dirHandle.name}/${opts.dirFileName}`;
+          } else if (!supportsLocalFileAccess()) {
             idbPutSceneAsset(activeSceneId, assetName, ab, sourcePath).catch((e) => console.warn('模型缓存写入失败', e));
           }
         }
@@ -5118,103 +5046,6 @@
       for (const p of placements) {
         p.localSourceLabel = await getLocalSourceLabel(activeSceneId, p.name);
       }
-    }
-
-    function updateLocalBindPanel() {
-      const panel = el('localBindPanel');
-      if (panel) panel.hidden = !supportsLocalFileAccess();
-    }
-
-    async function bindSelectedAssetFile() {
-      if (!supportsLocalFileAccess()) { status('本地绑定需 Chrome / Edge'); return; }
-      if (!activeSceneId) { status('请先选择场景'); return; }
-      if (selected < 0) { status('请先在列表选中模型'); return; }
-      const p = placements[selected];
-      const [handle] = await window.showOpenFilePicker({
-        multiple: false,
-        types: [{ description: 'PLY', accept: { 'application/octet-stream': ['.ply'] } }],
-      });
-      await bindAssetFileHandle(activeSceneId, p.name, handle, handle.name);
-      p.localSourceLabel = handle.name;
-      p.sourcePath = `local-file:${handle.name}`;
-      if (await reloadPlacementAt(selected)) status(`已绑定文件 · ${p.name} ← ${handle.name}`);
-      else status(`已绑定 ${handle.name}，读取失败时请点「恢复本地授权并刷新」`);
-    }
-
-    async function bindSelectedAssetDirectory() {
-      if (!supportsLocalFileAccess()) { status('本地绑定需 Chrome / Edge'); return; }
-      if (!activeSceneId) { status('请先选择场景'); return; }
-      if (selected < 0) { status('请先在列表选中模型'); return; }
-      const p = placements[selected];
-      const dirHandle = await window.showDirectoryPicker();
-      await dirHandle.getFileHandle(p.name);
-      await bindAssetDirectoryHandle(activeSceneId, p.name, dirHandle, p.name);
-      p.localSourceLabel = `${dirHandle.name}/${p.name}`;
-      p.sourcePath = `local-dir:${dirHandle.name}/${p.name}`;
-      if (await reloadPlacementAt(selected)) status(`已绑定文件夹 · ${p.name} ← ${p.localSourceLabel}`);
-      else status(`已绑定文件夹 ${dirHandle.name}，读取失败时请点「恢复本地授权并刷新」`);
-    }
-
-    async function batchBindDirectoryForMissing() {
-      if (!supportsLocalFileAccess()) { status('本地绑定需 Chrome / Edge'); return; }
-      if (!activeSceneId) { status('请先选择场景'); return; }
-      const missing = placements.map((p, i) => ({ p, i })).filter(({ p }) => p.missing);
-      if (!missing.length) { status('没有缺少 PLY 的模型'); return; }
-      const dirHandle = await window.showDirectoryPicker();
-      if (!(await ensureReadPermission(dirHandle))) { status('未获得文件夹读取授权'); return; }
-      let matched = 0;
-      for (const { p, i } of missing) {
-        try {
-          await dirHandle.getFileHandle(p.name);
-          await bindAssetDirectoryHandle(activeSceneId, p.name, dirHandle, p.name, `${dirHandle.name}/${p.name}`);
-          p.sourcePath = `local-dir:${dirHandle.name}/${p.name}`;
-          p.localSourceLabel = `${dirHandle.name}/${p.name}`;
-          if (await reloadPlacementAt(i)) matched++;
-        } catch (_) {}
-      }
-      status(`文件夹 ${dirHandle.name} · 匹配并恢复 ${matched}/${missing.length} 个`);
-    }
-
-    async function pickAndBindMultipleFiles() {
-      if (!supportsLocalFileAccess()) { status('本地绑定需 Chrome / Edge'); return; }
-      if (!activeSceneId) { status('请先选择场景'); return; }
-      const handles = await window.showOpenFilePicker({
-        multiple: true,
-        types: [{ description: 'PLY', accept: { 'application/octet-stream': ['.ply'] } }],
-      });
-      let restored = 0;
-      let added = 0;
-      for (const handle of handles) {
-        const file = await handle.getFile();
-        const { assetName, missingIdx } = resolveImportAssetName(file);
-        await bindAssetFileHandle(activeSceneId, assetName, handle, handle.name);
-        if (missingIdx >= 0) {
-          placements[missingIdx].sourcePath = `local-file:${handle.name}`;
-          placements[missingIdx].localSourceLabel = handle.name;
-          if (await reloadPlacementAt(missingIdx)) restored++;
-        } else {
-          await addPlacementFromFile(file, sessionResetToken, { fileHandle: handle });
-          added++;
-        }
-      }
-      status(`已绑定 ${handles.length} 个文件 · 恢复 ${restored} · 新增 ${added}`);
-    }
-
-    async function restoreAllLocalPermissionsAndReload() {
-      if (!supportsLocalFileAccess()) { status('本地绑定需 Chrome / Edge'); return; }
-      if (!activeSceneId) { status('请先选择场景'); return; }
-      const prefix = sceneIdbPrefix(activeSceneId);
-      const keys = await idbListStoreKeys(ASSET_HANDLE_STORE);
-      const seen = new Set();
-      for (const key of keys) {
-        if (!key.startsWith(prefix)) continue;
-        const handle = await idbGetHandle(key);
-        if (!handle || seen.has(handle)) continue;
-        seen.add(handle);
-        await ensureReadPermission(handle);
-      }
-      await loadSceneById(activeSceneId);
-      status('已恢复本地授权并重新从磁盘加载');
     }
 
     function renderList() {
@@ -5480,7 +5311,7 @@
           sceneId: activeSceneId,
           hostMode,
         });
-        status(`已加载 ${loadedCount} 个模型 · ${missing.length} 个缺少 PLY · 见下方「模型加载诊断」`);
+        status(`已加载 ${loadedCount} 个模型 · ${missing.length} 个缺少 PLY · 请拖入文件或点「重新授权并加载」`);
       } else {
         status(`已恢复 ${placements.length} 个模型`);
       }
@@ -5495,8 +5326,45 @@
       view.addEventListener('drop', async (e) => {
         prevent(e);
         view.classList.remove('drag-over');
+        if (!(await ensureLocalAccessConsent())) return;
+
+        const items = [...(e.dataTransfer && e.dataTransfer.items || [])];
+        const plyEntries = [];
+        let dirHandle = null;
+
+        if (supportsLocalFileAccess()) {
+          for (const item of items) {
+            if (item.kind !== 'file' || typeof item.getAsFileSystemHandle !== 'function') continue;
+            try {
+              const handle = await item.getAsFileSystemHandle();
+              if (handle.kind === 'directory') {
+                dirHandle = handle;
+                break;
+              }
+              if (handle.kind === 'file' && handle.name.toLowerCase().endsWith('.ply')) {
+                plyEntries.push({ file: await handle.getFile(), fileHandle: handle });
+              }
+            } catch (_) {}
+          }
+        }
+
+        if (dirHandle) {
+          try { await importFromDirectoryHandle(dirHandle); } catch (err) { showError(err); }
+          return;
+        }
+
+        if (plyEntries.length) {
+          for (const entry of plyEntries) {
+            try {
+              await addPlacementFromFile(entry.file, sessionResetToken, { fileHandle: entry.fileHandle });
+            } catch (err) { status(`失败: ${err.message}`); }
+          }
+          updateLocalAccessBanner(sceneNeedsLocalPermissionRetry());
+          return;
+        }
+
         const files = [...(e.dataTransfer && e.dataTransfer.files || [])].filter((f) => f.name.toLowerCase().endsWith('.ply'));
-        if (!files.length) { status('请拖入 .ply 模型文件'); return; }
+        if (!files.length) { status('请拖入 .ply 模型文件或文件夹'); return; }
         for (const f of files) {
           try { await addPlacementFromFile(f); } catch (err) { status(`失败: ${err.message}`); }
         }
@@ -5509,7 +5377,8 @@
       status(`错误: ${e.message}`);
     }
 
-    el('importBtn').onclick = () => el('pickFile').click();
+    el('importBtn').onclick = () => pickPlyFilesWithLocalAccess().catch(showError);
+    el('localAccessBannerBtn').onclick = () => restoreAllLocalPermissionsAndReload().catch(showError);
     el('pickFile').onchange = async () => {
       const files = [...(el('pickFile').files || [])];
       el('pickFile').value = '';
@@ -5517,18 +5386,6 @@
         try { await addPlacementFromFile(f); } catch (e) { showError(e); }
       }
     };
-    updateLocalBindPanel();
-    const bindBtnMap = [
-      ['bindSelectedFileBtn', bindSelectedAssetFile],
-      ['bindSelectedDirBtn', bindSelectedAssetDirectory],
-      ['batchBindDirBtn', batchBindDirectoryForMissing],
-      ['pickBoundFilesBtn', pickAndBindMultipleFiles],
-      ['restoreLocalPermBtn', restoreAllLocalPermissionsAndReload],
-    ];
-    for (const [id, fn] of bindBtnMap) {
-      const btn = el(id);
-      if (btn) btn.onclick = () => fn().catch(showError);
-    }
     el('viewBgSelect').onchange = (e) => applyViewBackground(e.target.value);
     function setSliderValueUnbounded(slider, v) {
       if (Number.isNaN(v)) return;
