@@ -2295,7 +2295,7 @@
       }
       await loadSceneById(scene.id);
       if (hostMode === 'static') {
-        await persistSceneSourcePaths().catch((e) => console.warn('模型缓存写入失败', e));
+        await persistSceneSourcePaths().catch((e) => console.warn('路径索引写入失败', e));
       }
       status(`已导入「${scene.name}」· 已保存到浏览器 · ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
     }
