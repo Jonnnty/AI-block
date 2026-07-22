@@ -109,6 +109,12 @@
     .local-bridge-hint.connected {
       background: rgba(40, 120, 60, 0.15); border-color: rgba(60, 160, 90, 0.45); color: #8fdfaa;
     }
+    .local-bridge-hint button {
+      display: block; width: 100%; margin-top: 8px; padding: 8px 10px;
+      border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;
+      background: linear-gradient(180deg, #3a7de6 0%, #2d6cdf 100%); color: #fff;
+    }
+    .local-bridge-hint button:hover { filter: brightness(1.08); }
     .model-load-debug {
       margin-top: 8px; padding: 8px 9px;
       background: #241818; border: 1px solid #7a4040; border-radius: 7px;
@@ -478,7 +484,8 @@
     <header class="panel-chrome">
       <div class="status" id="status">初始化…</div>
       <div id="localBridgeHint" class="local-bridge-hint" hidden>
-        模型在 D 盘，需本机服务读取。请双击运行 <strong>placement/start_editor.bat</strong>，保持黑窗口不关；连接成功后会自动加载 scene1。
+        <div id="localBridgeHintText">GitHub 在线版无法读取 D 盘（HTTPS 限制）。本地服务已检测到，请用本地地址打开。</div>
+        <button type="button" id="openLocalEditorBtn">打开本地编辑器（自动导出 scene1 配置）</button>
       </div>
       <section class="panel-global">
         <div class="panel-zone-label">
@@ -550,7 +557,7 @@
         <h2>已放置</h2>
         <div id="sceneList" class="scene-list"></div>
         <div id="modelLoadDebug" class="model-load-debug" hidden>
-          <div class="model-load-debug-title">模型加载诊断 · 版本 20260722g</div>
+          <div class="model-load-debug-title">模型加载诊断 · 版本 20260722i</div>
           <div id="modelLoadDebugBody"></div>
         </div>
       </section>
@@ -733,7 +740,7 @@
     }
 
     /** 模型变红调试：页面内「模型加载诊断」面板 + 控制台 [模型加载] */
-    const MODEL_LOAD_BUILD = '20260722h';
+    const MODEL_LOAD_BUILD = '20260722i';
     const MODEL_LOAD_DEBUG = !new URLSearchParams(location.search).has('quietModels');
     const modelLoadDiagEntries = [];
     const lastResolveTraceByAsset = new Map();
@@ -1917,10 +1924,36 @@
       return '在线版·未连接本地服务';
     }
 
+    const LOCAL_EDITOR_URL = 'http://127.0.0.1:8080/placement_editor.html';
+
+    function isRemoteGithubEditor() {
+      return location.protocol === 'https:' && /github\.io/i.test(location.hostname);
+    }
+
+    function downloadPlacementsJsonForLocal() {
+      if (!scenesStore) scenesStore = emptyScenesStore();
+      scenesStore.activeSceneId = activeSceneId;
+      const body = JSON.stringify(scenesStore, null, 2);
+      const blob = new Blob([body], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'placements.json';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }
+
+    function openLocalEditor() {
+      if (scenesStore && scenesStore.scenes && scenesStore.scenes.length) {
+        downloadPlacementsJsonForLocal();
+      }
+      window.location.href = LOCAL_EDITOR_URL;
+    }
+
     let localBridgePollTimer = null;
 
     function updateLocalBridgeHint(connected) {
       const box = el('localBridgeHint');
+      const text = el('localBridgeHintText');
       if (!box) return;
       if (connected || (hostMode === 'server' && !localServerBridge)) {
         box.hidden = true;
@@ -1928,7 +1961,11 @@
       }
       box.hidden = false;
       box.classList.remove('connected');
-      box.textContent = '模型在 D 盘，需本机服务读取。请双击运行 placement/start_editor.bat，保持黑窗口不关；连接成功后会自动加载。';
+      if (text) {
+        text.textContent = isRemoteGithubEditor()
+          ? 'GitHub 在线版无法读取 D 盘（浏览器 HTTPS 安全限制）。请点下方按钮切换到本地编辑器；start_editor.bat 需保持运行。'
+          : '模型在 D 盘，需本机服务。请运行 placement/start_editor.bat 后点下方按钮。';
+      }
     }
 
     function stopLocalBridgePoll() {
@@ -1967,6 +2004,10 @@
 
     function startLocalBridgePoll() {
       if (localBridgePollTimer || canLoadAssetsFromDisk()) return;
+      if (isRemoteGithubEditor()) {
+        updateLocalBridgeHint(false);
+        return;
+      }
       updateLocalBridgeHint(false);
       localBridgePollTimer = setInterval(() => {
         tryConnectLocalBridge(true).catch(() => {});
@@ -5207,6 +5248,17 @@
         }
         if (!canLoadAssetsFromDisk()) startLocalBridgePoll();
         else updateLocalBridgeHint(true);
+
+        const openLocalBtn = el('openLocalEditorBtn');
+        if (openLocalBtn) openLocalBtn.onclick = () => openLocalEditor();
+
+        if (hostMode === 'server' && !localServerBridge && scenesStore.scenes.length) {
+          const last = scenesStore.activeSceneId || (scenesStore.scenes[0] && scenesStore.scenes[0].id);
+          if (last && !activeSceneId) {
+            status('正在加载场景…');
+            await loadSceneById(last);
+          }
+        }
       } catch (e) { showError(e); }
     })();
   </script>

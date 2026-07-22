@@ -21,6 +21,20 @@ if not OUTPUTS_50.is_dir():
     OUTPUTS_50 = ROOT / "outputs_50pct"
 
 
+def sync_placements_from_downloads() -> bool:
+    """If user exported from GitHub Pages, pick up Downloads/placements.json."""
+    downloads = Path.home() / "Downloads" / "placements.json"
+    if not downloads.is_file():
+        return False
+    try:
+        if not PLACEMENTS.exists() or downloads.stat().st_mtime > PLACEMENTS.stat().st_mtime:
+            PLACEMENTS.write_bytes(downloads.read_bytes())
+            print(f"[sync] 已从 Downloads 同步 placements.json → {PLACEMENTS}")
+            return True
+    except OSError as e:
+        print(f"[sync] placements.json 同步失败: {e}")
+    return False
+
 def guess_asset_path(asset_name: str) -> Path | None:
     name = Path(asset_name).name
     if not name or name != asset_name or ".." in asset_name:
@@ -96,6 +110,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             return
         if path == "/api/placements":
+            sync_placements_from_downloads()
             if PLACEMENTS.exists():
                 self._json(200, json.loads(PLACEMENTS.read_text(encoding="utf-8")))
             else:
