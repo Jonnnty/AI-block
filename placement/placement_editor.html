@@ -111,6 +111,67 @@
     .path-transport { margin-top: 6px; }
     .path-transport button { flex: 1; font-size: 12px; padding: 6px 8px; }
     .path-transport button.active { background: #2d6cdf; }
+    .path-pin-block {
+      margin-top: 8px; padding: 10px 10px 8px;
+      background: rgba(255, 214, 80, 0.08); border: 1px solid rgba(255, 200, 60, 0.35);
+      border-radius: 8px;
+    }
+    .path-pin-head {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px;
+    }
+    .path-pin-label { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: #e8d878; }
+    .path-pin-row { display: flex; align-items: center; gap: 8px; }
+    .path-pin-track-wrap {
+      flex: 1; position: relative; height: 30px; display: flex; align-items: flex-end; min-width: 0;
+    }
+    .path-pin-track {
+      position: relative; width: 100%; height: 10px; border-radius: 5px;
+      background: #2a2618; border: 1px solid #4a4428; overflow: visible;
+    }
+    .path-pin-fill {
+      position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+      background: linear-gradient(90deg, #b8860b, #ffd54f 55%, #ffe082);
+      border-radius: 5px 0 0 5px; pointer-events: none;
+    }
+    .path-pin-ticks {
+      position: absolute; inset: 0; pointer-events: none; border-radius: 5px;
+      background: repeating-linear-gradient(
+        90deg,
+        transparent 0,
+        transparent calc(10% - 1px),
+        rgba(0, 0, 0, 0.28) calc(10% - 1px),
+        rgba(0, 0, 0, 0.28) 10%
+      );
+    }
+    .path-pin-input {
+      position: absolute; inset: -8px 0 0; width: 100%; height: calc(100% + 16px);
+      opacity: 0; cursor: pointer; margin: 0; -webkit-appearance: none; appearance: none;
+    }
+    .path-pin-thumb {
+      position: absolute; bottom: calc(100% + 1px); left: 0; transform: translateX(-50%);
+      width: 0; height: 0; pointer-events: none;
+      border-left: 7px solid transparent; border-right: 7px solid transparent;
+      border-top: 11px solid #ffd54f; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
+    }
+    .path-pin-thumb::after {
+      content: ''; position: absolute; left: -3px; top: -11px; width: 6px; height: 6px;
+      background: #fff8dc; border-radius: 1px;
+    }
+    .path-transport-toggle {
+      width: 32px; height: 32px; flex-shrink: 0; padding: 0; border-radius: 6px;
+      background: #333; border: 1px solid #555; color: #eee; font-size: 13px; line-height: 1;
+    }
+    .path-transport-toggle:hover:not(:disabled) { background: #3a3a3a; border-color: #666; }
+    .path-transport-toggle.playing { background: #2d6cdf; border-color: #4a8af0; color: #fff; }
+    .path-transport-toggle:disabled { opacity: 0.35; cursor: not-allowed; }
+    .rig-frustum-toggle {
+      width: 100%; padding: 8px 10px; border-radius: 6px; font-size: 12px; font-weight: 500;
+      background: #252525; border: 1px solid #444; color: #777;
+    }
+    .rig-frustum-toggle.active {
+      background: rgba(45, 108, 223, 0.18); border-color: #2d6cdf; color: #8ec0ff;
+    }
+    .rig-frustum-toggle:hover { filter: brightness(1.08); }
     .render-actions { display: flex; flex-direction: column; gap: 6px; }
     .rig-path-controls {
       display: flex; flex-direction: column; gap: 8px; margin-top: 6px;
@@ -203,7 +264,13 @@
       display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px;
     }
     .pose-seq-header h2 { margin: 0; }
-    .pose-add-btn { flex-shrink: 0; padding: 6px 10px; font-size: 11px; white-space: nowrap; }
+    .pose-add-btn {
+      flex-shrink: 0; padding: 8px 14px; font-size: 12px; white-space: nowrap; border-radius: 8px;
+      background: linear-gradient(180deg, #ffd54f 0%, #e6a817 100%); color: #1a1408;
+      border: 1px solid #c99410; font-weight: 700;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.28) inset, 0 2px 8px rgba(230, 168, 23, 0.35);
+    }
+    .pose-add-btn:hover { filter: brightness(1.06); }
     .curve-edit-bar {
       display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px;
       border-radius: 8px; background: rgba(255, 235, 120, 0.14); border: 1px solid rgba(255, 214, 80, 0.45);
@@ -497,7 +564,7 @@
         <h2>渲染摄像机</h2>
         <button type="button" id="toggleRigBtn" class="secondary">打开渲染摄像机</button>
       </section>
-      <section id="rigPanel" hidden><!-- ui: camera-panel-v3 -->
+      <section id="rigPanel" hidden><!-- ui: camera-panel-v4 -->
         <h2>轨迹组</h2>
         <div id="pathGroupList" class="marker-list"></div>
         <div class="row">
@@ -506,13 +573,27 @@
         </div>
         <div class="pose-seq-header">
           <h2>机位序列</h2>
-          <button type="button" id="addMarkerBtn" class="secondary pose-add-btn">＋ 当前机位</button>
-        </div>
-        <div class="row path-transport" id="pathTransportRow" hidden>
-          <button type="button" id="pathPlayBtn" class="secondary" title="沿轨迹播放">▶ 播放</button>
-          <button type="button" id="pathPauseBtn" class="secondary" title="暂停后可移动机位">⏸ 暂停</button>
+          <button type="button" id="addMarkerBtn" class="pose-add-btn">＋ 当前机位</button>
         </div>
         <div id="markerList" class="marker-list"></div>
+        <div id="pathPinSliderWrap" class="path-pin-block" hidden>
+          <div class="path-pin-head">
+            <span class="path-pin-label">路径位置</span>
+            <span class="val" id="pathPinTVal">0%</span>
+          </div>
+          <div class="path-pin-row">
+            <div class="path-pin-track-wrap">
+              <div class="path-pin-track">
+                <div class="path-pin-fill" id="pathPinFill"></div>
+                <div class="path-pin-ticks" aria-hidden="true"></div>
+                <input type="range" id="pathPinT" class="path-pin-input" min="0" max="100" step="0.1" value="0" />
+                <div class="path-pin-thumb" id="pathPinThumb"></div>
+              </div>
+            </div>
+            <button type="button" id="pathTransportToggleBtn" class="path-transport-toggle" title="播放" disabled>▶</button>
+          </div>
+          <p class="hint" style="margin-top:8px">暂停后拖路径位置条移动机位；点击轨迹添加弯折点</p>
+        </div>
         <div id="keypointEditRow" class="curve-edit-bar" hidden>
           <span class="curve-dot"></span>
           <span class="curve-edit-label">轨迹弯折</span>
@@ -523,12 +604,6 @@
         </div>
         <p id="pathSlideStatus" class="hint" style="color:#2a8f6a;font-weight:600" hidden>路径预览：待机</p>
         <div id="pathPinSection" class="rig-path-controls">
-          <div id="pathPinSliderWrap" hidden>
-            <label>路径位置 <span class="val" id="pathPinTVal">0%</span>
-              <input type="range" id="pathPinT" min="0" max="100" step="0.1" value="0" />
-            </label>
-            <p class="hint">暂停后拖路径位置条移动机位；点击轨迹添加弯折点</p>
-          </div>
           <div class="row gizmo-row" id="rigGizmoRow">
             <button type="button" id="gizmoMoveRig" class="secondary">移动 Q</button>
             <button type="button" id="gizmoRotateRig" class="secondary">旋转 W</button>
@@ -581,7 +656,8 @@
           <label>远平面 <span class="val" id="rigFarVal">8</span>
             <input type="range" id="rigFar" min="0.5" max="50" step="0.1" value="8" />
           </label>
-          <label><input type="checkbox" id="showFrustum" checked /> 显示四棱锥</label>
+          <button type="button" id="showFrustumBtn" class="rig-frustum-toggle active">显示四棱锥</button>
+          <input type="checkbox" id="showFrustum" checked hidden />
         </section>
       </section>
     </div>
@@ -1486,6 +1562,7 @@
       if (rs.width != null) el('renderWidth').value = rs.width;
       if (rs.height != null) el('renderHeight').value = rs.height;
       if (rs.showFrustum != null) el('showFrustum').checked = rs.showFrustum;
+      syncShowFrustumUI();
       syncRenderCameraParams();
     }
 
@@ -2211,10 +2288,34 @@
       return (segIdx + localT) / segs;
     }
 
+    function syncPathPinUI() {
+      const pct = pathPinT * 100;
+      el('pathPinT').value = pct;
+      el('pathPinTVal').textContent = `${pct.toFixed(1)}%`;
+      const fill = el('pathPinFill');
+      const thumb = el('pathPinThumb');
+      if (fill) fill.style.width = `${pct}%`;
+      if (thumb) thumb.style.left = `${pct}%`;
+    }
+
+    function syncShowFrustumUI() {
+      const on = el('showFrustum').checked;
+      el('showFrustumBtn').classList.toggle('active', on);
+    }
+
+    function applyShowFrustum(show) {
+      el('showFrustum').checked = show;
+      syncShowFrustumUI();
+      if (cameraHelper) {
+        cameraHelper.visible = rigOpen && show;
+        if (show) styleCameraHelperOnTop();
+      }
+      viewer && viewer.forceRenderNextFrame();
+    }
+
     function applyPathPinAtGlobalT(globalT) {
       pathPinT = Math.max(0, Math.min(1, globalT));
-      el('pathPinT').value = pathPinT * 100;
-      el('pathPinTVal').textContent = `${(pathPinT * 100).toFixed(1)}%`;
+      syncPathPinUI();
       applyPathPinPosition();
     }
 
@@ -2239,23 +2340,20 @@
         }
       }
       pathPinT = bestT;
-      el('pathPinT').value = pathPinT * 100;
-      el('pathPinTVal').textContent = `${(pathPinT * 100).toFixed(1)}%`;
+      syncPathPinUI();
     }
 
     function updatePathTransportUI() {
       const hasPath = cameraMarkers.length >= 2;
-      el('pathTransportRow').hidden = !hasPath;
       el('pathPinSliderWrap').hidden = !hasPath;
       el('renderExportSequenceBtn').disabled = !hasPath;
       el('renderPathVideoBtn').disabled = !hasPath;
-      if (el('pathPlayBtn')) {
-        el('pathPlayBtn').disabled = !hasPath || pathSlidePlaying;
-        el('pathPlayBtn').classList.toggle('active', pathSlidePlaying);
-      }
-      if (el('pathPauseBtn')) {
-        el('pathPauseBtn').disabled = !hasPath || !pathSlidePlaying;
-        el('pathPauseBtn').classList.toggle('active', hasPath && !pathSlidePlaying);
+      const toggleBtn = el('pathTransportToggleBtn');
+      if (toggleBtn) {
+        toggleBtn.disabled = !hasPath;
+        toggleBtn.textContent = pathSlidePlaying ? '⏸' : '▶';
+        toggleBtn.title = pathSlidePlaying ? '暂停' : '播放';
+        toggleBtn.classList.toggle('playing', pathSlidePlaying);
       }
       if (!hasPath) {
         pathSlidePlaying = false;
@@ -2355,8 +2453,7 @@
       pathSlidePhase += dt * PATH_SLIDE_SPEED;
       const t = (Math.sin(pathSlidePhase) + 1) * 0.5;
       pathPinT = t;
-      el('pathPinT').value = t * 100;
-      el('pathPinTVal').textContent = `${(t * 100).toFixed(1)}%`;
+      syncPathPinUI();
       const sample = samplePathAt(t);
       if (!sample) return;
       applySamplePoseToRig(sample);
@@ -2790,7 +2887,7 @@
     function onPathPinTChange() {
       if (pathSlidePlaying) pausePathSlide();
       pathPinT = Math.max(0, Math.min(1, parseFloat(el('pathPinT').value) / 100));
-      el('pathPinTVal').textContent = `${(pathPinT * 100).toFixed(1)}%`;
+      syncPathPinUI();
       applyPathPinPosition();
     }
 
@@ -4624,8 +4721,10 @@
       syncActivePathFromState();
     };
     el('pathPinT').oninput = onPathPinTChange;
-    el('pathPlayBtn').onclick = () => playPathSlide();
-    el('pathPauseBtn').onclick = () => pausePathSlide();
+    el('pathTransportToggleBtn').onclick = () => {
+      if (pathSlidePlaying) pausePathSlide();
+      else playPathSlide();
+    };
     el('renderPreviewBtn').onclick = () => onRenderPreviewClick().catch(showError);
     el('renderExportSingleBtn').onclick = () => gaussianRenderFromRig().catch(showError);
     el('renderExportSequenceBtn').onclick = () => exportPathSequencePngs().catch(showError);
@@ -4636,14 +4735,8 @@
     for (const id of ['rigFov', 'rigNear', 'rigFar']) el(id).oninput = syncRenderCameraParams;
     el('renderWidth').onchange = syncRenderCameraParams;
     el('renderHeight').onchange = syncRenderCameraParams;
-    el('showFrustum').onchange = (e) => {
-      const show = e.target.checked;
-      if (cameraHelper) {
-        cameraHelper.visible = rigOpen && show;
-        if (show) styleCameraHelperOnTop();
-      }
-      viewer && viewer.forceRenderNextFrame();
-    };
+    el('showFrustumBtn').onclick = () => applyShowFrustum(!el('showFrustum').checked);
+    syncShowFrustumUI();
 
     const rigPreviewCanvas = el('rigPreviewCanvas');
     rigPreviewCanvas.width = RIG_PREVIEW_W;
@@ -4681,6 +4774,8 @@
 
     setupEditableVals();
     updatePathTransportUI();
+    syncPathPinUI();
+    syncShowFrustumUI();
 
     (async () => {
       const loadToken = sessionResetToken;
