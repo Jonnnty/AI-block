@@ -660,7 +660,6 @@
     let scenesStore = null;
     let activeSceneId = null;
     let nextSceneId = 2;
-    let sceneLoadBusy = false;
 
     let viewer = null;
     let sharedRenderer = null;
@@ -1472,9 +1471,11 @@
       }
     }
 
-    async function applyConfigToEditor(cfg, loadToken = sessionResetToken) {
-      await clearAllPlacementsFromViewer();
-      resetCameraEditorState();
+    async function applyConfigToEditor(cfg, loadToken = sessionResetToken, opts = {}) {
+      if (!opts.skipInitialClear) {
+        await clearAllPlacementsFromViewer();
+        resetCameraEditorState();
+      }
       applyConfigMeta(cfg);
       await preloadAssetsForConfig(cfg, loadToken);
       if (isSessionAborted(loadToken)) return;
@@ -1488,30 +1489,38 @@
     }
 
     async function loadSceneById(sceneId) {
-      if (!sceneId || sceneLoadBusy) return;
+      if (!sceneId) return;
       const scene = getSceneById(sceneId);
       if (!scene) return;
-      if (sceneId === activeSceneId && placements.length) return;
 
       setActiveSceneSelection(sceneId);
       setScenePickerOpen(false);
 
-      sceneLoadBusy = true;
       const loadToken = ++sessionResetToken;
+      status(`正在加载「${scene.name}」…`);
+
       try {
-        status(`正在加载「${scene.name}」…`);
-        await applyConfigToEditor(parseSavedConfig(scene.config), loadToken);
+        await clearAllPlacementsFromViewer();
+        if (isSessionAborted(loadToken)) return;
+        resetCameraEditorState();
+        selectPlacement(-1);
+        renderList();
+        if (viewer) viewer.forceRenderNextFrame();
+
+        await applyConfigToEditor(parseSavedConfig(scene.config), loadToken, { skipInitialClear: true });
         if (isSessionAborted(loadToken)) return;
         await persistScenesStore().catch((e) => console.warn('场景索引保存失败', e));
+        if (hostMode === 'static') {
+          await idbPutAllFromCache().catch((e) => console.warn('模型缓存写入失败', e));
+        }
         const parsed = parseSavedConfig(scene.config);
         const modelCount = _n(parsed.placements && parsed.placements.length, 0);
         const pathCount = _n(parsed.cameraPaths && parsed.cameraPaths.length, 0);
         status(`已加载「${scene.name}」· ${modelCount} 模型 · ${pathCount} 轨迹`);
       } catch (e) {
-        showError(e);
+        if (!isSessionAborted(loadToken)) showError(e);
       } finally {
-        sceneLoadBusy = false;
-        renderSceneManagerUI();
+        if (!isSessionAborted(loadToken)) renderSceneManagerUI();
       }
     }
 
@@ -1549,7 +1558,7 @@
     async function deleteSceneById(sceneId) {
       const scene = getSceneById(sceneId);
       if (!scene) return;
-      if (!confirm(`确定删除场景「${scene.name}」？\n\n将永久删除该场景的配置，且无法撤销。`)) return;
+      if (!confirm(`确定删除场景「${scene.name}」？\n\n将从浏览器中永久删除该场景；本地 JSON 文件不受影响。`)) return;
       scenesStore.scenes = scenesStore.scenes.filter((s) => s.id !== sceneId);
       if (activeSceneId === sceneId) {
         setActiveSceneSelection(null);
@@ -1606,7 +1615,10 @@
         await persistScenesStore();
         renderSceneManagerUI();
         if (lastId) await loadSceneById(lastId);
-        status(`已导入 ${data.scenes.length} 个场景`);
+        if (hostMode === 'static') {
+          await idbPutAllFromCache().catch((e) => console.warn('模型缓存写入失败', e));
+        }
+        status(`已导入 ${data.scenes.length} 个场景 · 已保存到浏览器`);
         return;
       }
 
@@ -1621,13 +1633,17 @@
       scenesStore.scenes.push(scene);
       await persistScenesStore();
       setActiveSceneSelection(scene.id);
+      const importToken = sessionResetToken;
       try {
-        await preloadAssetsForConfig(cfg, sessionResetToken);
+        await preloadAssetsForConfig(cfg, importToken);
       } catch (e) {
         console.warn('导入时预加载模型缓存失败', e);
       }
       await loadSceneById(scene.id);
-      status(`已导入「${scene.name}」· ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
+      if (hostMode === 'static') {
+        await idbPutAllFromCache().catch((e) => console.warn('模型缓存写入失败', e));
+      }
+      status(`已导入「${scene.name}」· 已保存到浏览器 · ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
     }
 
     function placementsFromConfig(cfg) {
