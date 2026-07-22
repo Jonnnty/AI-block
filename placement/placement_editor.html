@@ -963,7 +963,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260724d';
+    const MODEL_LOAD_BUILD = '20260724e';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -1581,7 +1581,9 @@
     let selectedMarkerIdx = -1;
     let selectedCpSegIdx = -1;
     let selectedCpPointIdx = -1;
-    /** @type {null | 'translate'} */
+    /** @type {{segIdx:number,pointIdx:number}|null} */
+    let pendingPathCp = null;
+    /** @type {null | 'translate' | 'rotate'} */
     let markerGizmoMode = null;
     let pathRoot = null;
     /** @type {THREE.Mesh[]} */
@@ -1627,6 +1629,49 @@
 
     function placementToPose(p) {
       return createScenePose(p.x, p.y, p.z, p.yaw_deg, 0, 0, p.scale);
+    }
+
+    function normalizePathCpPoint(pt) {
+      return {
+        x: _n(pt.x, 0),
+        y: _n(pt.y, 0),
+        z: _n(pt.z, 0),
+        t: _n(pt.t, 0.5),
+        yaw_deg: _n(pt.yaw_deg, 0),
+        pitch_deg: _n(pt.pitch_deg, 0),
+        roll_deg: _n(pt.roll_deg, 0),
+      };
+    }
+
+    function applyPathCpRotation(group, pt) {
+      group.rotation.set(
+        pt.pitch_deg * Math.PI / 180,
+        pt.roll_deg * Math.PI / 180,
+        pt.yaw_deg * Math.PI / 180,
+        RIG_EULER_ORDER,
+      );
+    }
+
+    function syncPathCpRotationFromMesh(segIdx, pointIdx, obj) {
+      const pt = cameraPathSegments[segIdx] && cameraPathSegments[segIdx].points && cameraPathSegments[segIdx].points[pointIdx];
+      if (!pt || !obj) return;
+      const e = new THREE.Euler().setFromQuaternion(obj.quaternion, RIG_EULER_ORDER);
+      pt.yaw_deg = THREE.MathUtils.radToDeg(e.z);
+      pt.pitch_deg = THREE.MathUtils.radToDeg(e.x);
+      pt.roll_deg = THREE.MathUtils.radToDeg(e.y);
+    }
+
+    function abandonPendingPathCp() {
+      if (!pendingPathCp) return;
+      const { segIdx, pointIdx } = pendingPathCp;
+      pendingPathCp = null;
+      const seg = cameraPathSegments[segIdx];
+      if (seg && seg.points && pointIdx >= 0 && pointIdx < seg.points.length) {
+        seg.points.splice(pointIdx, 1);
+        rebuildCpVisuals();
+        updatePathLine();
+        el('rigPreviewStatus').textContent = '需重新渲染';
+      }
     }
 
     function normalizeMarkerPose(m) {
@@ -1748,7 +1793,7 @@
         return {
           markers: markers.map((m) => normalizeMarkerPose(m)),
           segments: segments.map((s) => ({
-            points: (s.points || []).map(({ space, ...pt }) => pt),
+            points: (s.points || []).map((pt) => normalizePathCpPoint(pt)),
           })),
         };
       }
@@ -1757,7 +1802,7 @@
         return {
           markers: markers.map((m) => normalizeMarkerPose(m)),
           segments: segments.map((s) => ({
-            points: (s.points || []).map(({ space, ...pt }) => pt),
+            points: (s.points || []).map((pt) => normalizePathCpPoint(pt)),
           })),
         };
       }
@@ -1765,12 +1810,9 @@
         markers: markers.map((m) => markerAnchorLocalToWorld(m, anchor)),
         segments: segments.map((s) => ({
           points: (s.points || []).map((pt) => {
-            if (pt.space !== 'anchor') {
-              const { space, ...rest } = pt;
-              return rest;
-            }
+            if (pt.space !== 'anchor') return normalizePathCpPoint(pt);
             _tmpVecA.set(pt.x, pt.y, pt.z).applyMatrix4(placementWorldMatrix(anchor, _tmpMat4));
-            return { x: _tmpVecA.x, y: _tmpVecA.y, z: _tmpVecA.z, t: pt.t };
+            return normalizePathCpPoint({ ...pt, x: _tmpVecA.x, y: _tmpVecA.y, z: _tmpVecA.z });
           }),
         })),
       };
@@ -1865,7 +1907,7 @@
       if (!path) return;
       path.markers = cameraMarkers.map((m) => ({ ...normalizeMarkerPose(m) }));
       path.segments = cameraPathSegments.map((s) => ({
-        points: (s.points || []).map((pt) => ({ x: pt.x, y: pt.y, z: pt.z, t: pt.t })),
+        points: (s.points || []).map((pt) => normalizePathCpPoint(pt)),
       }));
       path.framesPerSeg = pathFramesPerSeg;
       path.fps = pathFps;
@@ -1882,7 +1924,7 @@
         const normalized = normalizeCameraPathToWorld(
           path.markers.map((m) => ({ ...m })),
           path.segments.map((s) => ({
-            points: (s.points || []).map((pt) => ({ x: pt.x, y: pt.y, z: pt.z, t: pt.t, space: pt.space })),
+            points: (s.points || []).map((pt) => normalizePathCpPoint(pt)),
           })),
         );
         cameraMarkers = normalized.markers;
@@ -1897,6 +1939,7 @@
       selectedMarkerIdx = -1;
       selectedCpSegIdx = -1;
       selectedCpPointIdx = -1;
+      pendingPathCp = null;
     }
 
     function selectCameraPath(id) {
@@ -2778,7 +2821,7 @@
           name: p.name || '轨迹',
           markers: (p.markers || []).map((m) => normalizeMarkerPose(m)),
           segments: (p.segments || []).map((s) => ({
-            points: (s.points || []).map((pt) => ({ x: pt.x, y: pt.y, z: pt.z, t: pt.t })),
+            points: (s.points || []).map((pt) => normalizePathCpPoint(pt)),
           })),
           framesPerSeg: _n(p.framesPerSeg, 16),
           fps: _n(p.fps, 12),
@@ -3105,7 +3148,7 @@
       for (let i = 0; i < cameraMarkers.length - 1; i++) {
         const prev = cameraPathSegments[i];
         newSegs.push({
-          points: prev && prev.points ? prev.points.map((p) => ({ x: p.x, y: p.y, z: p.z, t: p.t })) : [],
+          points: prev && prev.points ? prev.points.map((p) => normalizePathCpPoint(p)) : [],
         });
       }
       cameraPathSegments = newSegs;
@@ -3146,13 +3189,15 @@
       ensurePathSegments();
 
       sampleSegmentLocal(segIdx, t, _tmpVec);
+      abandonPendingPathCp();
       const pi = addPathControlPoint(segIdx, _tmpVec.x, _tmpVec.y, _tmpVec.z, t);
       if (pi < 0) {
         status('此处已有控制点');
         return true;
       }
       selectPathCp(segIdx, pi);
-      status('轨迹弯折 · Q 拖动');
+      pendingPathCp = { segIdx, pointIdx: selectedCpPointIdx };
+      status('轨迹弯折 · Q 移动 · W 旋转 · 完成后点「完成」');
       return true;
     }
 
@@ -3274,6 +3319,7 @@
           const r = pathCpRadius();
           const group = createPathCpMarkerGroup(r, selected);
           group.position.set(pt.x, pt.y, pt.z);
+          applyPathCpRotation(group, pt);
           group.userData.cpSegIdx = si;
           group.userData.cpPointIdx = pi;
           pathRoot.add(group);
@@ -3289,7 +3335,7 @@
       if (!seg) return -1;
       if (!seg.points) seg.points = [];
       if (seg.points.some((p) => Math.abs(p.t - t) < 0.025)) return -1;
-      seg.points.push({ x, y, z, t });
+      seg.points.push({ x, y, z, t, yaw_deg: 0, pitch_deg: 0, roll_deg: 0 });
       seg.points.sort((a, b) => a.t - b.t);
       rebuildCpVisuals();
       updatePathLine();
@@ -3303,8 +3349,10 @@
       seg.points.splice(pointIdx, 1);
       selectedCpSegIdx = -1;
       selectedCpPointIdx = -1;
+      pendingPathCp = null;
       markerGizmoMode = null;
       el('gizmoMoveRig').classList.remove('active');
+      el('gizmoRotateRig').classList.remove('active');
       rebuildCpVisuals();
       updatePathLine();
       el('rigPreviewStatus').textContent = '需重新渲染';
@@ -3599,17 +3647,17 @@
     }
 
     function selectMarker(idx) {
+      if (idx >= 0) abandonPendingPathCp();
       selectedMarkerIdx = idx;
       if (idx >= 0 && pathSlidePlaying) pausePathSlide();
       selectedCpSegIdx = -1;
       selectedCpPointIdx = -1;
+      pendingPathCp = null;
       selected = -1;
       placementGizmoMode = null;
       markerGizmoMode = null;
       updatePlacementGizmoUI();
       updateRigGizmoUI();
-      el('gizmoMoveRig').classList.remove('active');
-      el('gizmoRotateRig').classList.remove('active');
       renderMarkerList();
       renderList();
       updateKeypointEditUI();
@@ -3630,7 +3678,7 @@
       if (poseCtrls) poseCtrls.classList.toggle('dimmed', editing);
       if (editing) {
         setRigControlsEnabled(false);
-        el('gizmoRotateRig').classList.remove('active');
+        updateRigGizmoUI();
       } else if (rigOpen) {
         setRigControlsEnabled(true);
       }
@@ -3638,22 +3686,22 @@
 
     function confirmPathKeypoint() {
       if (selectedCpPointIdx < 0) return;
+      const isNew = !!pendingPathCp;
       if (selectedCpSegIdx >= 0) {
         syncKeypointOrderAfterDrag(selectedCpSegIdx, selectedCpPointIdx);
       }
+      pendingPathCp = null;
       markerGizmoMode = null;
       rigGizmoMode = null;
       selectedCpSegIdx = -1;
       selectedCpPointIdx = -1;
       updateRigGizmoUI();
-      el('gizmoMoveRig').classList.remove('active');
-      el('gizmoRotateRig').classList.remove('active');
       transformControls && transformControls.detach();
       rebuildCpVisuals();
       updateKeypointEditUI();
       attachGizmo();
       if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
-      status('弯折已调整');
+      status(isNew ? '弯折点已添加' : '弯折点已更新');
       syncActivePathFromState();
       viewer && viewer.forceRenderNextFrame();
     }
@@ -3662,6 +3710,7 @@
       if (selectedCpPointIdx < 0) return;
       const si = selectedCpSegIdx;
       const pi = selectedCpPointIdx;
+      pendingPathCp = null;
       removePathControlPoint(si, pi);
       updateKeypointEditUI();
       status('已删除');
@@ -3669,34 +3718,36 @@
 
     function selectPathCp(segIdx, pointIdx = -1) {
       if (segIdx < 0) {
+        abandonPendingPathCp();
         selectedCpSegIdx = -1;
         selectedCpPointIdx = -1;
+        pendingPathCp = null;
         markerGizmoMode = null;
         rigGizmoMode = null;
         updateRigGizmoUI();
-        el('gizmoMoveRig').classList.remove('active');
-        el('gizmoRotateRig').classList.remove('active');
         rebuildCpVisuals();
         updateKeypointEditUI();
         attachGizmo();
         if (cameraMarkers.length >= 2) resumePathSlideIfPlaying();
         return;
       }
+      if (pendingPathCp && (pendingPathCp.segIdx !== segIdx || pendingPathCp.pointIdx !== pointIdx)) {
+        abandonPendingPathCp();
+      }
       selectedCpSegIdx = segIdx;
       selectedCpPointIdx = pointIdx;
+      pendingPathCp = null;
       selectedMarkerIdx = -1;
       selected = -1;
       rigGizmoMode = null;
       markerGizmoMode = 'translate';
-      el('gizmoMoveRig').classList.add('active');
       updateRigGizmoUI();
-      el('gizmoRotateRig').classList.remove('active');
       rebuildCpVisuals();
       updateKeypointEditUI();
       renderMarkerList();
       attachGizmo();
       stopPathSlidePreview();
-      status('轨迹弯折 · Q 拖动');
+      status('轨迹弯折 · Q 移动 · W 旋转 · 完成后点「完成」');
     }
 
     function addCameraMarker() {
@@ -4105,8 +4156,14 @@
     }
 
     function updateRigGizmoUI() {
-      el('gizmoMoveRig').classList.toggle('active', rigGizmoMode === 'translate');
-      el('gizmoRotateRig').classList.toggle('active', rigGizmoMode === 'rotate');
+      const cpEditing = selectedCpPointIdx >= 0 && markerGizmoMode;
+      if (cpEditing) {
+        el('gizmoMoveRig').classList.toggle('active', markerGizmoMode === 'translate');
+        el('gizmoRotateRig').classList.toggle('active', markerGizmoMode === 'rotate');
+      } else {
+        el('gizmoMoveRig').classList.toggle('active', rigGizmoMode === 'translate');
+        el('gizmoRotateRig').classList.toggle('active', rigGizmoMode === 'rotate');
+      }
     }
 
     function togglePlacementGizmo(mode) {
@@ -4120,18 +4177,12 @@
     function toggleRigGizmo(mode) {
       if (!rigOpen) return;
       if (selectedCpSegIdx >= 0 && selectedCpPointIdx >= 0) {
-        if (mode !== 'translate') return;
-        if (markerGizmoMode) {
-          confirmPathKeypoint();
-          return;
-        }
-        markerGizmoMode = 'translate';
+        markerGizmoMode = mode;
         rigGizmoMode = null;
-        el('gizmoMoveRig').classList.add('active');
-        el('gizmoRotateRig').classList.remove('active');
+        updateRigGizmoUI();
         attachGizmo();
         stopPathSlidePreview();
-        status('轨迹弯折 · Q 拖动');
+        status(markerGizmoMode === 'translate' ? '轨迹弯折 · 移动' : '轨迹弯折 · 旋转');
         return;
       }
       if (selectedMarkerIdx >= 0) {
@@ -4196,6 +4247,7 @@
     }
 
     function closeRigCamera() {
+      abandonPendingPathCp();
       rigOpen = false;
       rigPreviewFloatDismissed = false;
       rigGizmoMode = null;
@@ -4203,6 +4255,7 @@
       selectedMarkerIdx = -1;
       selectedCpSegIdx = -1;
       selectedCpPointIdx = -1;
+      pendingPathCp = null;
       updateRigGizmoUI();
       el('rigPanel').hidden = true;
       el('rigPreviewFloat').hidden = true;
@@ -4738,11 +4791,16 @@
         if (obj && obj.userData && obj.userData.cpPointIdx != null) {
           const i = obj.userData.cpSegIdx;
           const j = obj.userData.cpPointIdx;
-          const p = obj.position;
-          cameraPathSegments[i].points[j].x = p.x;
-          cameraPathSegments[i].points[j].y = p.y;
-          cameraPathSegments[i].points[j].z = p.z;
-          syncKeypointOrderAfterDrag(i, j, obj);
+          const pt = cameraPathSegments[i].points[j];
+          if (markerGizmoMode === 'rotate') {
+            syncPathCpRotationFromMesh(i, j, obj);
+          } else {
+            const p = obj.position;
+            pt.x = p.x;
+            pt.y = p.y;
+            pt.z = p.z;
+            syncKeypointOrderAfterDrag(i, j, obj);
+          }
           updatePathLine();
           el('rigPreviewStatus').textContent = '需重新渲染';
           viewer.forceRenderNextFrame();
@@ -4790,7 +4848,7 @@
       if (selectedCpSegIdx >= 0 && selectedCpPointIdx >= 0 && markerGizmoMode) {
         const cpMesh = findCpMesh(selectedCpSegIdx, selectedCpPointIdx);
         if (cpMesh) {
-          transformControls.setMode('translate');
+          transformControls.setMode(markerGizmoMode);
           transformControls.attach(cpMesh);
           return;
         }
@@ -5502,6 +5560,7 @@
           if (e.key === 'Enter') { confirmPathKeypoint(); return; }
           if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelectedPathKeypoint(); return; }
           if (e.key === 'q' || e.key === 'Q') toggleRigGizmo('translate');
+          if (e.key === 'w' || e.key === 'W') toggleRigGizmo('rotate');
         } else if (selectedMarkerIdx >= 0 || selectedCpSegIdx >= 0) {
           if (e.key === 'q' || e.key === 'Q') toggleRigGizmo('translate');
         } else {
