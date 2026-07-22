@@ -554,8 +554,113 @@
     const ASSET_STORE = 'files';
     const ASSET_META_STORE = 'meta';
 
-    function sourcePathMetaKey(name) {
+    function sceneAssetIdbKey(sceneId, assetName) {
+      if (!sceneId || !assetName) return null;
+      return `s:${sceneId}:a:${assetName}`;
+    }
+
+    function sceneSourcePathIdbKey(sceneId, assetName) {
+      if (!sceneId || !assetName) return null;
+      return `s:${sceneId}:p:${assetName}`;
+    }
+
+    function sceneIdbPrefix(sceneId) {
+      return sceneId ? `s:${sceneId}:` : null;
+    }
+
+    function legacySourcePathMetaKey(name) {
       return `sourcePath:${name}`;
+    }
+
+    function fileCacheKey(sceneId, assetName) {
+      return sceneId ? `${sceneId}::${assetName}` : assetName;
+    }
+
+    async function idbDeleteEntry(storeName, key) {
+      if (!key) return;
+      const db = await openAssetDb();
+      try {
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(storeName, 'readwrite');
+          tx.objectStore(storeName).delete(key);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error || new Error('缓存删除失败'));
+        });
+      } finally {
+        db.close();
+      }
+    }
+
+    async function idbDeleteByPrefix(storeName, prefix) {
+      if (!prefix) return;
+      const db = await openAssetDb();
+      try {
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(storeName, 'readwrite');
+          const store = tx.objectStore(storeName);
+          const req = store.openCursor();
+          req.onsuccess = () => {
+            const cursor = req.result;
+            if (cursor) {
+              if (String(cursor.key).startsWith(prefix)) cursor.delete();
+              cursor.continue();
+            }
+          };
+          req.onerror = () => reject(req.error || new Error('缓存扫描失败'));
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error || new Error('缓存删除失败'));
+        });
+      } finally {
+        db.close();
+      }
+    }
+
+    async function idbGetSceneAsset(sceneId, assetName) {
+      const key = sceneAssetIdbKey(sceneId, assetName);
+      if (key) {
+        const scoped = await idbGetAsset(key);
+        if (scoped) return scoped;
+      }
+      return idbGetAsset(assetName);
+    }
+
+    async function idbGetSceneSourcePath(sceneId, assetName) {
+      const key = sceneSourcePathIdbKey(sceneId, assetName);
+      if (key) {
+        const scoped = await idbGetMeta(key);
+        if (scoped) return scoped;
+      }
+      return idbGetMeta(legacySourcePathMetaKey(assetName));
+    }
+
+    async function idbPutSceneAsset(sceneId, assetName, arrayBuffer, sourcePath) {
+      const key = sceneAssetIdbKey(sceneId, assetName);
+      if (!key) return;
+      await idbPutAsset(key, arrayBuffer);
+      if (sourcePath) {
+        await idbPutMeta(sceneSourcePathIdbKey(sceneId, assetName), String(sourcePath).replace(/\\/g, '/'));
+      }
+    }
+
+    async function idbDeleteSceneAsset(sceneId, assetName) {
+      if (!sceneId || !assetName) return;
+      await idbDeleteEntry(ASSET_STORE, sceneAssetIdbKey(sceneId, assetName));
+      await idbDeleteEntry(ASSET_META_STORE, sceneSourcePathIdbKey(sceneId, assetName));
+    }
+
+    async function idbClearSceneAssets(sceneId) {
+      const prefix = sceneIdbPrefix(sceneId);
+      if (!prefix) return;
+      await idbDeleteByPrefix(ASSET_STORE, prefix);
+      await idbDeleteByPrefix(ASSET_META_STORE, prefix);
+    }
+
+    function purgeFileCacheForScene(sceneId) {
+      if (!sceneId) return;
+      const prefix = `${sceneId}::`;
+      for (const key of [...fileCache.keys()]) {
+        if (key.startsWith(prefix)) fileCache.delete(key);
+      }
     }
 
     function openAssetDb() {
@@ -627,18 +732,18 @@
       }
     }
 
-    async function idbPutAssetWithMeta(name, arrayBuffer, sourcePath) {
-      await idbPutAsset(name, arrayBuffer);
-      if (sourcePath) {
-        await idbPutMeta(sourcePathMetaKey(name), String(sourcePath).replace(/\\/g, '/'));
-      }
+    async function idbPutAssetWithMeta(sceneId, name, arrayBuffer, sourcePath) {
+      if (sceneId) await idbPutSceneAsset(sceneId, name, arrayBuffer, sourcePath);
+      else await idbPutAsset(name, arrayBuffer);
     }
 
     async function idbPutAllFromCache() {
+      if (!activeSceneId) return;
       const jobs = [];
-      for (const [name, ab] of fileCache) jobs.push(idbPutAsset(name, ab));
       for (const p of placements) {
-        if (p.sourcePath) jobs.push(idbPutMeta(sourcePathMetaKey(p.name), p.sourcePath));
+        const ab = fileCache.get(fileCacheKey(activeSceneId, p.name));
+        if (ab) jobs.push(idbPutSceneAsset(activeSceneId, p.name, ab, p.sourcePath || null));
+        else if (p.sourcePath) jobs.push(idbPutMeta(sceneSourcePathIdbKey(activeSceneId, p.name), p.sourcePath));
       }
       await Promise.all(jobs);
     }
@@ -657,12 +762,12 @@
       }
     }
 
-    async function preloadAssetsForConfig(cfg, loadToken = sessionResetToken) {
+    async function preloadAssetsForConfig(cfg, loadToken = sessionResetToken, sceneId = activeSceneId) {
       for (const item of placementsFromConfig(cfg)) {
         if (isSessionAborted(loadToken)) return;
         if (!item.asset) continue;
-        const sourcePath = item.sourcePath || await idbGetMeta(sourcePathMetaKey(item.asset));
-        await resolveAssetBuffer(item.asset, sourcePath, loadToken);
+        const sourcePath = item.sourcePath || await idbGetSceneSourcePath(sceneId, item.asset);
+        await resolveAssetBuffer(item.asset, sourcePath, loadToken, sceneId);
       }
     }
 
@@ -702,21 +807,26 @@
       }
     }
 
-    async function resolveAssetBuffer(name, sourcePath, loadToken = sessionResetToken) {
+    async function resolveAssetBuffer(name, sourcePath, loadToken = sessionResetToken, sceneId = activeSceneId) {
       if (!name) return null;
-      if (fileCache.has(name)) return fileCache.get(name);
-      const cached = await idbGetAsset(name);
+      const cacheKey = fileCacheKey(sceneId, name);
+      if (fileCache.has(cacheKey)) return fileCache.get(cacheKey);
+      let cached = await idbGetSceneAsset(sceneId, name);
       if (cached) {
-        fileCache.set(name, cached);
+        fileCache.set(cacheKey, cached);
         return cached;
       }
-      const path = sourcePath || await idbGetMeta(sourcePathMetaKey(name));
+      const path = sourcePath || await idbGetSceneSourcePath(sceneId, name);
       if (path) {
         if (isSessionAborted(loadToken)) return null;
         const ab = await fetchAssetByPath(path, loadToken);
         if (ab) {
-          fileCache.set(name, ab);
-          idbPutAssetWithMeta(name, ab, path).catch((e) => console.warn('模型缓存写入失败', e));
+          fileCache.set(cacheKey, ab);
+          if (sceneId) {
+            idbPutSceneAsset(sceneId, name, ab, path).catch((e) => console.warn('模型缓存写入失败', e));
+          } else {
+            idbPutAsset(name, ab).catch((e) => console.warn('模型缓存写入失败', e));
+          }
           return ab;
         }
       }
@@ -755,12 +865,12 @@
         let sceneChanged = false;
         for (const p of parsed.placements || []) {
           if (!p.asset || p.sourcePath) continue;
-          let path = await idbGetMeta(sourcePathMetaKey(p.asset));
+          let path = await idbGetSceneSourcePath(scene.id, p.asset);
           if (!path) path = await guessAssetPathFromServer(p.asset);
           if (path) {
             p.sourcePath = path;
             sceneChanged = true;
-            await idbPutMeta(sourcePathMetaKey(p.asset), path);
+            await idbPutMeta(sceneSourcePathIdbKey(scene.id, p.asset), path);
           }
         }
         if (sceneChanged) {
@@ -1648,7 +1758,7 @@
         resetCameraEditorState();
       }
       applyConfigMeta(cfg);
-      await preloadAssetsForConfig(cfg, loadToken);
+      await preloadAssetsForConfig(cfg, loadToken, opts.sceneId || activeSceneId);
       if (isSessionAborted(loadToken)) return;
       const savedPlacements = placementsFromConfig(cfg);
       if (savedPlacements.length) await restorePlacements(savedPlacements, loadToken);
@@ -1671,6 +1781,7 @@
       status(`正在加载「${scene.name}」…`);
 
       try {
+        fileCache.clear();
         await clearAllPlacementsFromViewer();
         if (isSessionAborted(loadToken)) return;
         resetCameraEditorState();
@@ -1678,7 +1789,7 @@
         renderList();
         if (viewer) viewer.forceRenderNextFrame();
 
-        await applyConfigToEditor(parseSavedConfig(scene.config), loadToken, { skipInitialClear: true });
+        await applyConfigToEditor(parseSavedConfig(scene.config), loadToken, { skipInitialClear: true, sceneId });
         if (isSessionAborted(loadToken)) return;
         await persistScenesStore().catch((e) => console.warn('场景索引保存失败', e));
         if (hostMode === 'static') {
@@ -1731,6 +1842,7 @@
       if (!scene) return;
       if (!confirm(`确定删除场景「${scene.name}」？\n\n将从浏览器中永久删除该场景；本地 JSON 文件不受影响。`)) return;
       scenesStore.scenes = scenesStore.scenes.filter((s) => s.id !== sceneId);
+      await idbClearSceneAssets(sceneId);
       if (activeSceneId === sceneId) {
         setActiveSceneSelection(null);
         sessionResetToken++;
@@ -3890,12 +4002,14 @@
       if (!sourcePath) sourcePath = await guessAssetPathFromServer(file.name);
       status(`加载 ${assetName}…`);
       setLoadProgress(20, `解析 ${assetName}…`);
-      let ab = fileCache.get(assetName);
+      let ab = fileCache.get(fileCacheKey(activeSceneId, assetName));
       if (!ab) {
         ab = await file.arrayBuffer();
         if (isSessionAborted(loadToken)) return;
-        fileCache.set(assetName, ab);
-        idbPutAssetWithMeta(assetName, ab, sourcePath).catch((e) => console.warn('模型缓存写入失败', e));
+        fileCache.set(fileCacheKey(activeSceneId, assetName), ab);
+        if (activeSceneId) {
+          idbPutSceneAsset(activeSceneId, assetName, ab, sourcePath).catch((e) => console.warn('模型缓存写入失败', e));
+        }
       }
       const bounds = computePlyBounds(ab);
       const anchor = placementAnchorFromBounds(bounds);
@@ -3985,7 +4099,7 @@
       syncingFromGizmo = false;
     }
 
-    function removePlacement(idx) {
+    async function removePlacement(idx) {
       const p = placements[idx];
       if (!p) return;
       if (p.sceneIdx != null && viewer) {
@@ -3995,9 +4109,20 @@
         }
         viewer.forceRenderNextFrame();
       }
+      const removedName = p.name;
       placements.splice(idx, 1);
       if (selected === idx) selectPlacement(-1);
       else if (selected > idx) selected--;
+      if (activeSceneId) {
+        fileCache.delete(fileCacheKey(activeSceneId, removedName));
+        await idbDeleteSceneAsset(activeSceneId, removedName);
+        const scene = getSceneById(activeSceneId);
+        if (scene) {
+          scene.config = configToJson();
+          scene.updatedAt = new Date().toISOString();
+          await persistScenesStore();
+        }
+      }
       renderList();
       status(`已删除，剩余 ${placements.length} 个`);
     }
@@ -4014,7 +4139,7 @@
         row.innerHTML = `<span class="scene-name">${p.name}</span>`;
         const del = document.createElement('button');
         del.type = 'button'; del.className = 'icon-btn'; del.textContent = '×';
-        del.onclick = (e) => { e.stopPropagation(); removePlacement(i); };
+        del.onclick = (e) => { e.stopPropagation(); removePlacement(i).catch(showError); };
         row.appendChild(del);
         row.onclick = () => selectPlacement(i);
         list.appendChild(row);
@@ -4142,6 +4267,8 @@
         if (scene) {
           scene.config = emptyConfigJson();
           scene.updatedAt = new Date().toISOString();
+          await idbClearSceneAssets(activeSceneId);
+          purgeFileCacheForScene(activeSceneId);
           await persistScenesStore();
           renderSceneManagerUI();
         }
@@ -4189,13 +4316,14 @@
         if (isSessionAborted(loadToken)) return;
         const name = item.asset;
         if (!name) continue;
-        let ab = fileCache.get(name);
+        const cacheKey = fileCacheKey(activeSceneId, name);
+        let ab = fileCache.get(cacheKey);
         if (!ab) {
-          ab = await resolveAssetBuffer(name, item.sourcePath || null, loadToken);
+          ab = await resolveAssetBuffer(name, item.sourcePath || null, loadToken, activeSceneId);
         }
         if (!ab) {
           missing.push(name);
-          const storedPath = item.sourcePath || await idbGetMeta(sourcePathMetaKey(name));
+          const storedPath = item.sourcePath || await idbGetSceneSourcePath(activeSceneId, name);
           placements.push({
             name,
             sourcePath: storedPath || null,
@@ -4213,7 +4341,7 @@
         const file = new File([ab], name);
         const p = {
           name,
-          sourcePath: item.sourcePath || await idbGetMeta(sourcePathMetaKey(name)) || null,
+          sourcePath: item.sourcePath || await idbGetSceneSourcePath(activeSceneId, name) || null,
           x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
           scale: _n(item.scale, defaultScale),
           yaw_deg: _n(item.yaw_deg, 0),
