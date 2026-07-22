@@ -13,6 +13,28 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent
 PLACEMENTS = ROOT / "placements.json"
+OUTPUTS = Path(r"D:\Downloads\outputs")
+if not OUTPUTS.is_dir():
+    OUTPUTS = ROOT / "outputs"
+OUTPUTS_50 = Path(r"D:\Downloads\outputs_50pct")
+if not OUTPUTS_50.is_dir():
+    OUTPUTS_50 = ROOT / "outputs_50pct"
+
+
+def guess_asset_path(asset_name: str) -> Path | None:
+    name = Path(asset_name).name
+    if not name or name != asset_name or ".." in asset_name:
+        return None
+    for candidate in (
+        OUTPUTS_50 / name,
+        ROOT / "outputs_50pct" / name,
+        OUTPUTS / name,
+        ROOT / "outputs" / name,
+        ROOT / name,
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def resolve_asset_file(path_str: str) -> Path | None:
@@ -29,21 +51,6 @@ def resolve_asset_file(path_str: str) -> Path | None:
     if not p.is_file() or p.suffix.lower() != ".ply":
         return None
     return p
-
-
-def pick_folder_dialog() -> str | None:
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        path = filedialog.askdirectory(title="选择模型文件夹")
-        root.destroy()
-        return path or None
-    except Exception:
-        return None
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
@@ -104,6 +111,15 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if path == "/api/asset/guess":
+            qs = parse_qs(urlparse(self.path).query)
+            asset_name = unquote(qs.get("asset", [""])[0])
+            asset_path = guess_asset_path(asset_name)
+            if not asset_path:
+                self._json(404, {"error": f"asset not found: {asset_name}"})
+                return
+            self._json(200, {"path": str(asset_path).replace("\\", "/")})
+            return
         return super().do_GET()
 
     def do_POST(self) -> None:
@@ -140,13 +156,6 @@ class Handler(SimpleHTTPRequestHandler):
                 count = len(payload.get("placements", []))
                 version = 2
             self._json(200, {"ok": True, "count": count, "configVersion": version})
-            return
-        if path == "/api/pick-folder":
-            folder = pick_folder_dialog()
-            if not folder:
-                self._json(400, {"error": "未选择文件夹"})
-                return
-            self._json(200, {"path": folder.replace("\\", "/")})
             return
         if path == "/api/merge":
             data = self._read_json() if self.headers.get("Content-Length") else {}
