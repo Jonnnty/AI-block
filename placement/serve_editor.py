@@ -65,8 +65,15 @@ class Handler(SimpleHTTPRequestHandler):
         print(f"[{self.log_date_time_string()}] {fmt % args}")
 
     def end_headers(self) -> None:
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self.end_headers()
 
     def _json(self, code: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -181,9 +188,19 @@ def main() -> None:
     port = int(os.environ.get("PORT", "8080"))
     host = os.environ.get("HOST", "127.0.0.1")
     httpd = ReusableThreadingHTTPServer((host, port), Handler)
-    print(f"场景编辑器: http://{host}:{port}/placement_editor.html")
+    url = f"http://{host}:{port}/placement_editor.html"
+    print(f"场景编辑器: {url}")
     print("  拖入 PLY 模型开始摆放")
     print("  Ctrl+C to stop")
+    import threading
+    import time
+    import webbrowser
+
+    def _open_browser() -> None:
+        time.sleep(0.6)
+        webbrowser.open(url)
+
+    threading.Thread(target=_open_browser, daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

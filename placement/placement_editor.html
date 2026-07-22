@@ -500,7 +500,7 @@
         <div class="config-toolbar">
           <button type="button" id="saveBtn" class="cfg-btn cfg-btn-primary" title="保存到浏览器或 placements.json">
             <span class="cfg-btn-label">保存</span>
-            <span class="cfg-btn-sub">当前场景 · 配置 + 路径索引</span>
+            <span class="cfg-btn-sub">当前场景 · 配置 + 本地路径索引</span>
           </button>
           <button type="button" id="exportJsonBtn" class="cfg-btn cfg-btn-ghost" title="下载当前场景 JSON 配置">
             <span class="cfg-btn-label">导出 JSON</span>
@@ -539,7 +539,7 @@
         <h2>已放置</h2>
         <div id="sceneList" class="scene-list"></div>
         <div id="modelLoadDebug" class="model-load-debug" hidden>
-          <div class="model-load-debug-title">模型加载诊断 · 版本 20260722f</div>
+          <div class="model-load-debug-title">模型加载诊断 · 版本 20260722g</div>
           <div id="modelLoadDebugBody"></div>
         </div>
       </section>
@@ -722,14 +722,14 @@
     }
 
     /** 模型变红调试：页面内「模型加载诊断」面板 + 控制台 [模型加载] */
-    const MODEL_LOAD_BUILD = '20260722f';
+    const MODEL_LOAD_BUILD = '20260722g';
     const MODEL_LOAD_DEBUG = !new URLSearchParams(location.search).has('quietModels');
     const modelLoadDiagEntries = [];
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
-      asset_not_found: '未找到模型：路径不可用且浏览器无历史缓存',
-      server_path_not_found: '未找到 sourcePath',
+      need_local_server: '未连接本地服务，无法从 D 盘读 PLY',
+      server_path_not_found: '未在 D:/Downloads/outputs 等目录找到 PLY',
       server_fetch_failed: '按 sourcePath 读文件失败',
       session_aborted_before_fetch: '加载被中断',
       empty_asset_name: '资源名为空',
@@ -902,11 +902,8 @@
       await idbPutMeta(sceneSourcePathIdbKey(sceneId, assetName), String(sourcePath).replace(/\\/g, '/'));
     }
 
-    async function idbPutSceneAsset(sceneId, assetName, arrayBuffer, sourcePath) {
+    async function idbPutSceneAsset(sceneId, assetName, _arrayBuffer, sourcePath) {
       if (sourcePath) await idbPutSceneSourcePath(sceneId, assetName, sourcePath);
-      if (arrayBuffer && sceneAssetIdbKey(sceneId, assetName)) {
-        await idbPutAsset(sceneAssetIdbKey(sceneId, assetName), arrayBuffer);
-      }
     }
 
     async function idbDeleteSceneAsset(sceneId, assetName) {
@@ -999,37 +996,33 @@
       }
     }
 
-    async function idbPutAssetWithMeta(sceneId, name, arrayBuffer, sourcePath) {
-      if (sceneId) await idbPutSceneAsset(sceneId, name, arrayBuffer, sourcePath);
-      else await idbPutAsset(name, arrayBuffer);
+    async function idbPutAssetWithMeta(sceneId, name, _arrayBuffer, sourcePath) {
+      if (sceneId) await idbPutSceneAsset(sceneId, name, null, sourcePath);
+      else if (sourcePath) await idbPutMeta(legacySourcePathMetaKey(name), sourcePath);
     }
 
-    async function persistSceneAssetsAfterLoad() {
+    async function persistSceneSourcePathsOnly() {
       if (!activeSceneId) return;
       const jobs = [];
       for (const p of placements) {
-        if (p.missing) continue;
-        if (p.sourcePath) jobs.push(idbPutSceneSourcePath(activeSceneId, p.name, p.sourcePath));
-        if (hostMode === 'static') {
-          const ab = fileCache.get(fileCacheKey(activeSceneId, p.name));
-          if (ab) jobs.push(idbPutSceneAsset(activeSceneId, p.name, ab, p.sourcePath || null));
-        }
+        if (p.missing || !p.sourcePath) continue;
+        jobs.push(idbPutSceneSourcePath(activeSceneId, p.name, p.sourcePath));
       }
       await Promise.all(jobs);
     }
 
-    async function migrateLegacySceneAssets(sceneId, cfg, loadToken = sessionResetToken) {
-      if (!sceneId || !cfg) return;
-      for (const item of placementsFromConfig(cfg)) {
-        if (isSessionAborted(loadToken)) return;
-        if (!item.asset) continue;
-        const scopedKey = sceneAssetIdbKey(sceneId, item.asset);
-        if (scopedKey && await idbGetAsset(scopedKey)) continue;
-        const legacy = await idbGetAsset(item.asset);
-        if (!legacy) continue;
-        const sourcePath = item.sourcePath || await idbGetSceneSourcePath(sceneId, item.asset);
-        await idbPutSceneAsset(sceneId, item.asset, legacy, sourcePath || null);
-        fileCache.set(fileCacheKey(sceneId, item.asset), legacy);
+    const BINARY_CACHE_PURGE_KEY = 'placement_editor_binary_cache_purged_v3';
+
+    async function purgeLegacyBinaryCacheOnce() {
+      if (localStorage.getItem(BINARY_CACHE_PURGE_KEY)) return 0;
+      try {
+        const keys = await idbListStoreKeys(ASSET_STORE);
+        await idbClearAll();
+        localStorage.setItem(BINARY_CACHE_PURGE_KEY, String(Date.now()));
+        return keys.length;
+      } catch (e) {
+        console.warn('清除浏览器 PLY 缓存失败', e);
+        return 0;
       }
     }
 
@@ -1097,15 +1090,16 @@
     }
 
     async function resolveSourcePathForAsset(name, sourcePath, sceneId = activeSceneId) {
+      if (sourcePath && isLocalFilesystemPath(sourcePath)) return sourcePath;
+      if (canLoadAssetsFromDisk()) {
+        const guessed = await guessAssetPathFromServer(name);
+        if (guessed) return guessed;
+      }
       if (sourcePath) return sourcePath;
-      const fromIdb = await idbGetSceneSourcePath(sceneId, name);
-      if (fromIdb) return fromIdb;
-      if (hostMode === 'server') return await guessAssetPathFromServer(name);
-      return null;
+      return await idbGetSceneSourcePath(sceneId, name);
     }
 
     async function preloadAssetsForConfig(cfg, loadToken = sessionResetToken, sceneId = activeSceneId) {
-      await migrateLegacySceneAssets(sceneId, cfg, loadToken);
       const items = placementsFromConfig(cfg);
       modelLoadLog('preloadAssetsForConfig 开始', {
         sceneId,
@@ -1131,10 +1125,10 @@
     }
 
     async function guessAssetPathFromServer(assetName) {
-      if (hostMode !== 'server' || !assetName) return null;
+      if (!assetName || !canLoadAssetsFromDisk()) return null;
       try {
         const res = await fetchWithTimeout(
-          apiUrl(`api/asset/guess?asset=${encodeURIComponent(assetName)}`),
+          assetApiUrl(`api/asset/guess?asset=${encodeURIComponent(assetName)}`),
           { cache: 'no-store' },
         );
         if (!res.ok) return null;
@@ -1146,10 +1140,10 @@
     }
 
     async function fetchAssetByPath(pathStr, loadToken = sessionResetToken) {
-      if (!pathStr || hostMode !== 'server') return null;
+      if (!pathStr || !canLoadAssetsFromDisk()) return null;
       try {
         const res = await fetchWithTimeout(
-          apiUrl(`api/asset/file?path=${encodeURIComponent(pathStr)}`),
+          assetApiUrl(`api/asset/file?path=${encodeURIComponent(pathStr)}`),
           { cache: 'no-store' },
         );
         if (isSessionAborted(loadToken)) return null;
@@ -1161,7 +1155,7 @@
     }
 
     async function resolveAssetBuffer(name, sourcePath, loadToken = sessionResetToken, sceneId = activeSceneId) {
-      const trace = { name, sceneId, hostMode, configSourcePath: sourcePath || null, reason: null };
+      const trace = { name, sceneId, hostMode, localServerBridge, configSourcePath: sourcePath || null, reason: null };
       const finish = (reason, ab, extra) => {
         trace.reason = reason;
         if (extra) Object.assign(trace, extra);
@@ -1176,39 +1170,29 @@
 
       if (isSessionAborted(loadToken)) return finish('session_aborted_before_fetch', null);
 
+      if (!canLoadAssetsFromDisk()) {
+        modelLoadWarn('resolve 失败', { ...trace, reason: 'need_local_server' });
+        return finish('need_local_server', null);
+      }
+
       const pathHint = await resolveSourcePathForAsset(name, sourcePath, sceneId);
-
-      if (hostMode === 'server') {
-        if (pathHint) {
-          trace.resolvedPath = pathHint;
-          const ab = await fetchAssetByPath(pathHint, loadToken);
-          if (ab) {
-            fileCache.set(cacheKey, ab);
-            if (sceneId) idbPutSceneSourcePath(sceneId, name, pathHint).catch((e) => console.warn('路径索引写入失败', e));
-            return finish('fetch_ok', ab, { resolvedPath: pathHint });
-          }
-          trace.reason = 'server_fetch_failed';
-        }
-      } else {
-        const httpResult = await fetchAssetStatic(name, pathHint, loadToken);
-        if (httpResult) {
-          fileCache.set(cacheKey, httpResult.ab);
-          if (sceneId) idbPutSceneSourcePath(sceneId, name, httpResult.resolvedPath).catch((e) => console.warn('路径索引写入失败', e));
-          return finish('http_fetch_ok', httpResult.ab, { resolvedPath: httpResult.resolvedPath });
-        }
+      trace.resolvedPath = pathHint || null;
+      if (!pathHint) {
+        modelLoadWarn('resolve 失败', { ...trace, reason: 'server_path_not_found' });
+        return finish('server_path_not_found', null);
       }
 
-      const cached = await idbGetSceneAsset(sceneId, name);
-      if (cached) {
-        fileCache.set(cacheKey, cached);
-        return finish('idb_cache_hit', cached);
+      const ab = await fetchAssetByPath(pathHint, loadToken);
+      if (!ab) {
+        modelLoadWarn('resolve 失败', { ...trace, reason: 'server_fetch_failed' });
+        return finish('server_fetch_failed', null, { resolvedPath: pathHint });
       }
 
-      const reason = hostMode === 'server'
-        ? (pathHint ? 'server_fetch_failed' : 'server_path_not_found')
-        : 'asset_not_found';
-      modelLoadWarn('resolve 失败', { ...trace, reason, resolvedPath: pathHint || null });
-      return finish(reason, null, { resolvedPath: pathHint || null });
+      fileCache.set(cacheKey, ab);
+      if (sceneId && isLocalFilesystemPath(pathHint)) {
+        idbPutSceneSourcePath(sceneId, name, pathHint).catch((e) => console.warn('路径索引写入失败', e));
+      }
+      return finish('fetch_ok', ab, { resolvedPath: pathHint });
     }
 
     function uniquePlacementAssetName(baseName) {
@@ -1226,16 +1210,16 @@
     }
 
     function missingAssetRecoveryHint() {
-      return hostMode === 'server'
-        ? '确认 PLY 仍在 sourcePath 路径后重新加载'
-        : '重新导入 PLY 并保存，或确认 outputs 目录可访问';
+      return canLoadAssetsFromDisk()
+        ? '确认 PLY 仍在 D:/Downloads/outputs 等目录'
+        : '后台运行 start_editor.bat 后刷新页面';
     }
 
     function missingPlacementHint(p) {
       if (!p || !p.missing) return '';
       if (p.missingReason) return p.missingReason;
       if (p.sourcePath) return `缺少 PLY：${p.sourcePath}`;
-      return '缺少 PLY · 重新导入并保存';
+      return canLoadAssetsFromDisk() ? '缺少 PLY · 请确认文件仍在原路径' : '需后台运行 start_editor.bat';
     }
 
     async function migrateScenesSourcePaths(store) {
@@ -1245,11 +1229,13 @@
         const parsed = parseSavedConfig(scene.config);
         let sceneChanged = false;
         for (const p of parsed.placements || []) {
-          if (!p.asset || p.sourcePath) continue;
-          let path = await idbGetSceneSourcePath(scene.id, p.asset);
-          if (!path && hostMode === 'server') path = await guessAssetPathFromServer(p.asset);
-          if (!path && hostMode === 'static') path = `outputs_50pct/${p.asset}`;
-          if (path) {
+          if (!p.asset) continue;
+          let path = p.sourcePath || await idbGetSceneSourcePath(scene.id, p.asset);
+          if (canLoadAssetsFromDisk() && (!path || !isLocalFilesystemPath(path))) {
+            const guessed = await guessAssetPathFromServer(p.asset);
+            if (guessed) path = guessed;
+          }
+          if (path && path !== p.sourcePath) {
             p.sourcePath = path;
             sceneChanged = true;
             await idbPutMeta(sceneSourcePathIdbKey(scene.id, p.asset), path);
@@ -1281,6 +1267,8 @@
 
     /** @type {'server' | 'static'} */
     let hostMode = 'static';
+    /** 在线版通过 CORS 桥接本机 serve_editor.py，例如 http://127.0.0.1:8080/ */
+    let localServerBridge = null;
     const PLY_ALPHA = 1;
     const VIEW_OFFSET = { x: 0.14, y: 0, z: 0 };
     const DEFAULT_Z_FALLBACK = 0.0006;
@@ -1860,28 +1848,62 @@
       }
     }
 
+    function canLoadAssetsFromDisk() {
+      return hostMode === 'server' || !!localServerBridge;
+    }
+
+    function assetApiUrl(relPath) {
+      const p = String(relPath || '').replace(/^\//, '');
+      if (localServerBridge) return `${localServerBridge}${p}`;
+      return apiUrl(p);
+    }
+
+    async function detectLocalEditorBridge() {
+      for (const port of [8080, 8765]) {
+        try {
+          const base = `http://127.0.0.1:${port}/`;
+          const res = await fetchWithTimeout(`${base}api/health`, { cache: 'no-store', mode: 'cors' });
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (data && data.ok) return base;
+        } catch (_) {}
+      }
+      return null;
+    }
+
     async function detectHostMode() {
-      if (location.protocol === 'file:') return 'static';
+      localServerBridge = null;
+      if (location.protocol === 'file:') {
+        localServerBridge = await detectLocalEditorBridge();
+        return localServerBridge ? 'server' : 'static';
+      }
       try {
         const res = await fetchWithTimeout(apiUrl('api/health'), { cache: 'no-store' });
-        if (!res.ok) return 'static';
-        const data = await res.json();
-        if (data && data.ok && data.configVersion >= 2) return 'server';
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.ok && data.configVersion >= 2) return 'server';
+        }
       } catch (_) {}
+      localServerBridge = await detectLocalEditorBridge();
+      if (localServerBridge) return 'server';
       return 'static';
     }
 
     function updateHostModeUI() {
       const saveBtn = el('saveBtn');
-      if (hostMode === 'server') {
+      if (hostMode === 'server' && !localServerBridge) {
         if (saveBtn) saveBtn.title = '保存场景配置与 sourcePath 到 placements.json';
+      } else if (localServerBridge) {
+        if (saveBtn) saveBtn.title = '保存场景配置；模型从本地 D 盘路径加载，不占用浏览器空间';
       } else {
-        if (saveBtn) saveBtn.title = '保存场景到浏览器（配置 + 已加载模型）';
+        if (saveBtn) saveBtn.title = '保存场景配置到浏览器；需后台运行 serve_editor 才能加载 PLY';
       }
     }
 
     function hostModeLabel() {
-      return hostMode === 'server' ? '本地路径模式' : '在线版';
+      if (localServerBridge) return '在线版·已桥接本地 D 盘';
+      if (hostMode === 'server') return '本地路径模式';
+      return '在线版·未连接本地服务';
     }
 
     function emptyScenesStore() {
@@ -2227,7 +2249,7 @@
         }
         await dumpModelCacheState(sceneId, '加载后');
         await persistScenesStore().catch((e) => console.warn('场景索引保存失败', e));
-        await persistSceneAssetsAfterLoad().catch((e) => console.warn('场景资源持久化失败', e));
+        await persistSceneSourcePathsOnly().catch((e) => console.warn('场景资源持久化失败', e));
         const parsed = parseSavedConfig(scene.config);
         const modelCount = _n(parsed.placements && parsed.placements.length, 0);
         const pathCount = _n(parsed.cameraPaths && parsed.cameraPaths.length, 0);
@@ -2332,7 +2354,7 @@
         renderSceneManagerUI();
         if (lastId) await loadSceneById(lastId);
         if (hostMode === 'static') {
-          await persistSceneAssetsAfterLoad().catch((e) => console.warn('场景资源持久化失败', e));
+          await persistSceneSourcePathsOnly().catch((e) => console.warn('场景资源持久化失败', e));
         }
         status(`已导入 ${data.scenes.length} 个场景 · 已保存到浏览器`);
         return;
@@ -2357,7 +2379,7 @@
       }
       await loadSceneById(scene.id);
       if (hostMode === 'static') {
-        await persistSceneAssetsAfterLoad().catch((e) => console.warn('场景资源持久化失败', e));
+        await persistSceneSourcePathsOnly().catch((e) => console.warn('场景资源持久化失败', e));
       }
       status(`已导入「${scene.name}」· 已保存到浏览器 · ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
     }
@@ -4476,8 +4498,8 @@
         ab = await file.arrayBuffer();
         if (isSessionAborted(loadToken)) return;
         fileCache.set(fileCacheKey(activeSceneId, assetName), ab);
-        if (activeSceneId) {
-          idbPutSceneAsset(activeSceneId, assetName, hostMode === 'static' ? ab : null, sourcePath).catch((e) => console.warn('资源持久化失败', e));
+        if (activeSceneId && sourcePath) {
+          idbPutSceneSourcePath(activeSceneId, assetName, sourcePath).catch((e) => console.warn('路径索引写入失败', e));
         }
       }
       const bounds = computePlyBounds(ab);
@@ -4760,7 +4782,7 @@
       scene.config = data;
       scene.updatedAt = new Date().toISOString();
       status('正在保存…');
-      await persistSceneAssetsAfterLoad();
+      await persistSceneSourcePathsOnly();
       await persistScenesStore();
       renderSceneManagerUI();
       const camNote = data.cameraPaths.length ? `${data.cameraPaths.length} 条轨迹` : '无相机轨迹';
@@ -5089,9 +5111,13 @@
       try {
         status('正在检测运行环境…');
         hostMode = await detectHostMode();
-        modelLoadLog('init hostMode', { build: MODEL_LOAD_BUILD, hostMode, href: location.href });
+        const purgedKeys = await purgeLegacyBinaryCacheOnce();
+        modelLoadLog('init hostMode', { build: MODEL_LOAD_BUILD, hostMode, localServerBridge, purgedKeys, href: location.href });
         if (isSessionAborted(loadToken)) return;
         updateHostModeUI();
+        if (purgedKeys > 0) {
+          status(`已清除浏览器内 ${purgedKeys} 个 PLY 缓存，释放 D 盘空间…`);
+        }
         status('正在加载 3D 引擎…');
         await ensureViewer();
         if (isSessionAborted(loadToken)) return;
