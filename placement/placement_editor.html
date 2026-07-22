@@ -230,7 +230,11 @@
       border-color: #2d6cdf; background: #faf6f1;
       box-shadow: 0 0 0 2px rgba(45, 108, 223, 0.16);
     }
-    .scene-picker-chevron { font-size: 11px; color: #8a7f72; flex-shrink: 0; }
+    .scene-picker-chevron {
+      font-size: 11px; color: #8a7f72; flex-shrink: 0;
+      display: inline-block; transition: transform .15s ease;
+    }
+    .scene-picker.open .scene-picker-chevron { transform: rotate(180deg); }
     #scenePickerLabel.scene-picker-label-active { color: #1a1612; font-weight: 600; }
     .scene-picker-menu {
       position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
