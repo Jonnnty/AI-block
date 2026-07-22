@@ -500,7 +500,7 @@
         <div class="config-toolbar">
           <button type="button" id="saveBtn" class="cfg-btn cfg-btn-primary" title="保存到浏览器或 placements.json">
             <span class="cfg-btn-label">保存</span>
-            <span class="cfg-btn-sub">当前场景 · 配置 + 模型缓存</span>
+            <span class="cfg-btn-sub">当前场景 · 配置 + 路径索引</span>
           </button>
           <button type="button" id="exportJsonBtn" class="cfg-btn cfg-btn-ghost" title="下载当前场景 JSON 配置">
             <span class="cfg-btn-label">导出 JSON</span>
@@ -539,7 +539,7 @@
         <h2>已放置</h2>
         <div id="sceneList" class="scene-list"></div>
         <div id="modelLoadDebug" class="model-load-debug" hidden>
-          <div class="model-load-debug-title">模型加载诊断 · 版本 20260722c</div>
+          <div class="model-load-debug-title">模型加载诊断 · 版本 20260722d</div>
           <div id="modelLoadDebugBody"></div>
         </div>
       </section>
@@ -722,17 +722,18 @@
     }
 
     /** 模型变红调试：页面内「模型加载诊断」面板 + 控制台 [模型加载] */
-    const MODEL_LOAD_BUILD = '20260722c';
+    const MODEL_LOAD_BUILD = '20260722d';
     const MODEL_LOAD_DEBUG = !new URLSearchParams(location.search).has('quietModels');
     const modelLoadDiagEntries = [];
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
-      no_idb_cache_and_no_sourcePath_static_host: '浏览器 IndexedDB 无此模型；GitHub Pages 无法读本地磁盘',
-      no_idb_cache_and_no_sourcePath: '无 IndexedDB 缓存且无 sourcePath',
-      has_sourcePath_but_host_is_static_cannot_fetch_file: '配置有路径，但在线版(static)不能 fetch 本地文件',
-      server_fetch_failed: '本地 server 模式读文件失败',
-      session_aborted_before_fetch: '加载会话被中断',
+      no_idb_cache_and_no_sourcePath_static_host: 'GitHub Pages 在线版无法读本地路径；请用 serve_editor.py 打开',
+      no_idb_cache_and_no_sourcePath: '无 sourcePath 且 IndexedDB 无缓存',
+      has_sourcePath_but_host_is_static_cannot_fetch_file: '有本地路径，但 GitHub Pages 不能读磁盘',
+      server_fetch_failed: '本地 server 按 sourcePath 读文件失败',
+      server_path_not_found: '本地 server 未找到 sourcePath，且 IDB 无缓存',
+      session_aborted_before_fetch: '加载被中断',
       empty_asset_name: '资源名为空',
       unknown: '未知原因',
     };
@@ -1034,7 +1035,24 @@
       }
     }
 
+    async function migrateLegacySceneAssets(sceneId, cfg, loadToken = sessionResetToken) {
+      if (!sceneId || !cfg) return;
+      for (const item of placementsFromConfig(cfg)) {
+        if (isSessionAborted(loadToken)) return;
+        if (!item.asset) continue;
+        const scopedKey = sceneAssetIdbKey(sceneId, item.asset);
+        if (scopedKey && await idbGetAsset(scopedKey)) continue;
+        const legacy = await idbGetAsset(item.asset);
+        if (!legacy) continue;
+        const sourcePath = item.sourcePath || await idbGetSceneSourcePath(sceneId, item.asset);
+        await idbPutSceneAsset(sceneId, item.asset, legacy, sourcePath || null);
+        fileCache.set(fileCacheKey(sceneId, item.asset), legacy);
+        modelLoadLog('migrate legacy IDB → scene', { asset: item.asset, scopedKey });
+      }
+    }
+
     async function preloadAssetsForConfig(cfg, loadToken = sessionResetToken, sceneId = activeSceneId) {
+      await migrateLegacySceneAssets(sceneId, cfg, loadToken);
       const items = placementsFromConfig(cfg);
       modelLoadLog('preloadAssetsForConfig 开始', {
         sceneId,
@@ -1113,21 +1131,71 @@
         trace.steps.push({ msg, ...(extra || {}) });
         if (MODEL_LOAD_DEBUG) modelLoadLog(`resolve ${name}: ${msg}`, extra || null);
       };
+      const finish = (reason, ab) => {
+        trace.reason = reason;
+        lastResolveTraceByAsset.set(resolveTraceKey(sceneId, name), trace);
+        return ab;
+      };
+      const cacheFromBuffer = (ab, via, pathForMeta) => {
+        const cacheKey = fileCacheKey(sceneId, name);
+        fileCache.set(cacheKey, ab);
+        step(via, { bytes: ab.byteLength, path: pathForMeta || null });
+        if (sceneId) {
+          idbPutSceneAsset(sceneId, name, ab, pathForMeta || sourcePath || null).catch((e) => console.warn('模型缓存写入失败', e));
+        } else {
+          idbPutAsset(name, ab).catch((e) => console.warn('模型缓存写入失败', e));
+        }
+        return finish(via, ab);
+      };
 
       if (!name) {
-        trace.reason = 'empty_asset_name';
-        lastResolveTraceByAsset.set(resolveTraceKey(sceneId, name), trace);
-        modelLoadWarn('resolve 失败', trace);
-        return null;
+        modelLoadWarn('resolve 失败', { ...trace, reason: 'empty_asset_name' });
+        return finish('empty_asset_name', null);
       }
+
       const cacheKey = fileCacheKey(sceneId, name);
       if (fileCache.has(cacheKey)) {
         step('memory_cache_hit', { cacheKey });
-        trace.reason = 'memory_cache_hit';
-        lastResolveTraceByAsset.set(resolveTraceKey(sceneId, name), trace);
-        return fileCache.get(cacheKey);
+        return finish('memory_cache_hit', fileCache.get(cacheKey));
       }
       step('memory_cache_miss', { cacheKey });
+
+      // 本地 server：优先按 JSON/IDB 记录的 sourcePath 读磁盘；IDB 只是加速缓存
+      if (hostMode === 'server') {
+        let path = sourcePath || await idbGetSceneSourcePath(sceneId, name);
+        if (!path) path = await guessAssetPathFromServer(name);
+        step('source_path_lookup', {
+          configSourcePath: sourcePath || null,
+          effectivePath: path || null,
+          mode: 'server_path_first',
+        });
+        if (path) {
+          if (isSessionAborted(loadToken)) {
+            modelLoadWarn('resolve 失败', { ...trace, reason: 'session_aborted_before_fetch' });
+            return finish('session_aborted_before_fetch', null);
+          }
+          step('fetch_start', { path });
+          const ab = await fetchAssetByPath(path, loadToken);
+          if (ab) return cacheFromBuffer(ab, 'fetch_ok', path);
+          trace.reason = 'server_fetch_failed';
+          modelLoadWarn('resolve 失败', trace);
+        }
+      } else {
+        const pathFromConfig = sourcePath || await idbGetSceneSourcePath(sceneId, name);
+        step('source_path_lookup', {
+          configSourcePath: sourcePath || null,
+          effectivePath: pathFromConfig || null,
+          mode: 'static_idb_only',
+        });
+        if (pathFromConfig) {
+          modelLoadWarn('resolve 失败', {
+            ...trace,
+            reason: 'has_sourcePath_but_host_is_static_cannot_fetch_file',
+            path: pathFromConfig,
+          });
+          return finish('has_sourcePath_but_host_is_static_cannot_fetch_file', null);
+        }
+      }
 
       const scopedKey = sceneAssetIdbKey(sceneId, name);
       let scopedCached = scopedKey ? await idbGetAsset(scopedKey) : null;
@@ -1149,61 +1217,15 @@
       if (cached) {
         fileCache.set(cacheKey, cached);
         step('resolved_from_idb', { via: scopedCached ? 'scoped' : 'legacy' });
-        trace.reason = scopedCached ? 'idb_scoped_hit' : 'idb_legacy_hit';
-        lastResolveTraceByAsset.set(resolveTraceKey(sceneId, name), trace);
-        return cached;
+        return finish(scopedCached ? 'idb_scoped_hit' : 'idb_legacy_hit', cached);
       }
 
-      const pathFromIdb = await idbGetSceneSourcePath(sceneId, name);
-      const path = sourcePath || pathFromIdb;
-      step('source_path_lookup', {
-        configSourcePath: sourcePath || null,
-        idbSourcePath: pathFromIdb || null,
-        effectivePath: path || null,
-      });
-
-      if (!path) {
-        trace.reason = hostMode === 'static'
-          ? 'no_idb_cache_and_no_sourcePath_static_host'
-          : 'no_idb_cache_and_no_sourcePath';
-        lastResolveTraceByAsset.set(resolveTraceKey(sceneId, name), trace);
-        modelLoadWarn('resolve 失败', trace);
-        return null;
-      }
-
-      if (hostMode !== 'server') {
-        trace.reason = 'has_sourcePath_but_host_is_static_cannot_fetch_file';
-        lastResolveTraceByAsset.set(resolveTraceKey(sceneId, name), trace);
-        modelLoadWarn('resolve 失败', trace);
-        return null;
-      }
-
-      if (isSessionAborted(loadToken)) {
-        trace.reason = 'session_aborted_before_fetch';
-        lastResolveTraceByAsset.set(resolveTraceKey(sceneId, name), trace);
-        modelLoadWarn('resolve 失败', trace);
-        return null;
-      }
-
-      step('fetch_start', { path });
-      const ab = await fetchAssetByPath(path, loadToken);
-      if (ab) {
-        fileCache.set(cacheKey, ab);
-        if (sceneId) {
-          idbPutSceneAsset(sceneId, name, ab, path).catch((e) => console.warn('模型缓存写入失败', e));
-        } else {
-          idbPutAsset(name, ab).catch((e) => console.warn('模型缓存写入失败', e));
-        }
-        step('fetch_ok', { path, bytes: ab.byteLength });
-        trace.reason = 'fetch_ok';
-        lastResolveTraceByAsset.set(resolveTraceKey(sceneId, name), trace);
-        return ab;
-      }
-
-      trace.reason = 'server_fetch_failed';
-      lastResolveTraceByAsset.set(resolveTraceKey(sceneId, name), trace);
+      const reason = hostMode === 'server'
+        ? (trace.reason === 'server_fetch_failed' ? 'server_fetch_failed' : 'server_path_not_found')
+        : 'no_idb_cache_and_no_sourcePath_static_host';
+      trace.reason = reason;
       modelLoadWarn('resolve 失败', trace);
-      return null;
+      return finish(reason, null);
     }
 
     function uniquePlacementAssetName(baseName) {
@@ -1865,10 +1887,14 @@
     function updateHostModeUI() {
       const saveBtn = el('saveBtn');
       if (hostMode === 'server') {
-        if (saveBtn) saveBtn.title = '保存当前场景到 placements.json（含模型缓存索引）';
+        if (saveBtn) saveBtn.title = '保存当前场景到 placements.json（含 sourcePath 路径索引）';
       } else {
-        if (saveBtn) saveBtn.title = '保存当前场景到浏览器（含模型缓存，换机请用导出 JSON）';
+        if (saveBtn) saveBtn.title = 'GitHub Pages 在线版：无法读本地路径，需重新导入 PLY 并保存到浏览器';
       }
+    }
+
+    function hostModeLabel() {
+      return hostMode === 'server' ? '本地路径模式' : 'GitHub Pages 在线版';
     }
 
     function emptyScenesStore() {
@@ -5097,11 +5123,9 @@
         if (saveOk === false) {
           status('就绪 · 保存接口版本过旧，请重启 serve_editor.py 后再点保存');
         } else if (scenesStore.scenes.length) {
-          const modeNote = hostMode === 'static' ? ' · 已从浏览器读取' : '';
-          status(`就绪 v${MODEL_LOAD_BUILD}${modeNote} · ${scenesStore.scenes.length} 个场景 · 加载后红条见「模型加载诊断」`);
+          status(`就绪 v${MODEL_LOAD_BUILD} · ${hostModeLabel()} · ${scenesStore.scenes.length} 个场景`);
         } else {
-          const modeNote = hostMode === 'static' ? ' · 在线版' : '';
-          status(`就绪 v${MODEL_LOAD_BUILD}${modeNote} · 新建场景或导入 JSON 开始`);
+          status(`就绪 v${MODEL_LOAD_BUILD} · ${hostModeLabel()} · 新建或导入 JSON`);
         }
       } catch (e) { showError(e); }
     })();
