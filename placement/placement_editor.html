@@ -557,7 +557,7 @@
         <h2>已放置</h2>
         <div id="sceneList" class="scene-list"></div>
         <div id="modelLoadDebug" class="model-load-debug" hidden>
-          <div class="model-load-debug-title">模型加载诊断 · 版本 20260722i</div>
+          <div class="model-load-debug-title">模型加载诊断 · 版本 20260722l</div>
           <div id="modelLoadDebugBody"></div>
         </div>
       </section>
@@ -740,10 +740,23 @@
     }
 
     /** 模型变红调试：页面内「模型加载诊断」面板 + 控制台 [模型加载] */
-    const MODEL_LOAD_BUILD = '20260722k';
+    const MODEL_LOAD_BUILD = '20260722l';
     const MODEL_LOAD_DEBUG = !new URLSearchParams(location.search).has('quietModels');
     const modelLoadDiagEntries = [];
     const lastResolveTraceByAsset = new Map();
+
+    const RESOLVE_SOURCE_LABELS = {
+      memory_cache_hit: '内存缓存',
+      fetch_ok: '本地磁盘',
+      http_fetch_ok: 'HTTP 下载',
+      idb_scoped_hit: 'IndexedDB(场景键)',
+      idb_legacy_hit: 'IndexedDB(旧键/文件名)',
+      server_path_not_found: '本地路径未找到',
+      server_fetch_failed: '本地读取失败',
+      asset_not_found: '未找到',
+      session_aborted_before_fetch: '加载中断',
+      empty_asset_name: '文件名为空',
+    };
 
     const MISSING_REASON_LABELS = {
       need_local_server: '未连接本地服务，无法从 D 盘读 PLY',
@@ -757,6 +770,58 @@
 
     function resolveTraceKey(sceneId, name) {
       return `${sceneId || ''}::${name}`;
+    }
+
+    function formatBytes(n) {
+      if (!n || n <= 0) return '0B';
+      if (n < 1024) return `${n}B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+      return `${(n / (1024 * 1024)).toFixed(1)}MB`;
+    }
+
+    function formatResolveTraceLine(trace) {
+      if (!trace) return '（无记录）';
+      const src = RESOLVE_SOURCE_LABELS[trace.reason] || trace.reason || '未知';
+      const parts = [src];
+      if (trace.loadedFrom) parts.push(`来源=${trace.loadedFrom}`);
+      if (trace.bytes) parts.push(formatBytes(trace.bytes));
+      if (trace.idbScopedKey) parts.push(`场景键=${trace.idbScopedKey}`);
+      if (trace.idbLegacyKey) parts.push(`旧键=${trace.idbLegacyKey}`);
+      if (trace.idbScopedBytes != null) parts.push(`场景键缓存=${formatBytes(trace.idbScopedBytes)}`);
+      if (trace.idbLegacyBytes != null) parts.push(`旧键缓存=${formatBytes(trace.idbLegacyBytes)}`);
+      if (trace.httpUrls && trace.httpUrls.length) parts.push(`HTTP=${trace.httpUrls.join(' | ')}`);
+      if (trace.resolvedPath) parts.push(`路径=${trace.resolvedPath}`);
+      else if (trace.configSourcePath) parts.push(`配置路径=${trace.configSourcePath}`);
+      return parts.join(' · ');
+    }
+
+    async function probeIdbAssetKeys(sceneId, assetName) {
+      const scopedKey = sceneAssetIdbKey(sceneId, assetName);
+      const legacyKey = assetName;
+      const scoped = scopedKey ? await idbGetAsset(scopedKey) : null;
+      const legacy = await idbGetAsset(legacyKey);
+      return {
+        scopedKey: scopedKey || null,
+        legacyKey,
+        scopedBytes: scoped ? scoped.byteLength : 0,
+        legacyBytes: legacy ? legacy.byteLength : 0,
+      };
+    }
+
+    async function renderAssetResolveReport(sceneId, assetNames, label = '加载来源报告') {
+      const lines = [`【${label}】sceneId=${sceneId || '(none)'} hostMode=${hostMode}`];
+      for (const name of assetNames) {
+        const trace = lastResolveTraceByAsset.get(resolveTraceKey(sceneId, name));
+        const probe = await probeIdbAssetKeys(sceneId, name);
+        const ok = trace && trace.reason && !['asset_not_found', 'server_fetch_failed', 'server_path_not_found', 'empty_asset_name'].includes(trace.reason);
+        lines.push(`${ok ? '✓' : '✗'} ${name}`);
+        lines.push(`  结果: ${formatResolveTraceLine(trace)}`);
+        lines.push(`  IDB探测: 场景键=${probe.scopedKey || '-'} (${formatBytes(probe.scopedBytes)}) · 旧键=${probe.legacyKey} (${formatBytes(probe.legacyBytes)})`);
+      }
+      const body = lines.join('\n');
+      modelLoadLog(label, body);
+      console.log(`[模型来源 ${MODEL_LOAD_BUILD}]\n${body}`);
+      return body;
     }
 
     function formatMissingReason(trace) {
@@ -849,6 +914,12 @@
           legacyByFilename: assetKeys.filter((k) => !k.startsWith('s:')),
           allKeysSample: assetKeys.slice(0, 40),
         });
+        const idbSizes = [];
+        for (const key of assetKeys.slice(0, 50)) {
+          const ab = await idbGetAsset(key);
+          idbSizes.push(`${key}=${formatBytes(ab ? ab.byteLength : 0)}`);
+        }
+        if (idbSizes.length) modelLoadLog(`${label} · IndexedDB 各键大小`, idbSizes.join('\n'));
         modelLoadLog(`${label} · IndexedDB meta`, {
           total: metaKeys.length,
           sceneScoped: scenePrefix ? metaKeys.filter((k) => k.startsWith(scenePrefix)) : [],
@@ -1077,13 +1148,14 @@
       }
     }
 
-    async function fetchAssetStatic(name, sourcePath, loadToken = sessionResetToken) {
+    async function fetchAssetStatic(name, sourcePath, loadToken = sessionResetToken, trace = null) {
       const urls = [];
       const fromPath = sourcePath ? resolveHttpAssetUrl(sourcePath) : null;
       if (fromPath) urls.push(fromPath);
       for (const u of staticAssetUrlCandidates(name)) {
         if (!urls.includes(u)) urls.push(u);
       }
+      if (trace) trace.httpUrls = urls.slice();
       for (const url of urls) {
         const ab = await fetchAssetHttp(url, loadToken);
         if (ab) return { ab, resolvedPath: url };
@@ -1174,6 +1246,7 @@
       const trace = { name, sceneId, hostMode, localServerBridge, configSourcePath: sourcePath || null, reason: null };
       const finish = (reason, ab, extra) => {
         trace.reason = reason;
+        if (ab) trace.bytes = ab.byteLength;
         if (extra) Object.assign(trace, extra);
         lastResolveTraceByAsset.set(resolveTraceKey(sceneId, name), trace);
         return ab;
@@ -1182,7 +1255,10 @@
       if (!name) return finish('empty_asset_name', null);
 
       const cacheKey = fileCacheKey(sceneId, name);
-      if (fileCache.has(cacheKey)) return finish('memory_cache_hit', fileCache.get(cacheKey));
+      if (fileCache.has(cacheKey)) {
+        const ab = fileCache.get(cacheKey);
+        return finish('memory_cache_hit', ab, { loadedFrom: 'memory', bytes: ab.byteLength });
+      }
 
       if (isSessionAborted(loadToken)) return finish('session_aborted_before_fetch', null);
 
@@ -1194,30 +1270,47 @@
         if (ab) {
           fileCache.set(cacheKey, ab);
           if (sceneId) idbPutSceneSourcePath(sceneId, name, pathHint).catch((e) => console.warn('路径索引写入失败', e));
-          return finish('fetch_ok', ab, { resolvedPath: pathHint });
+          return finish('fetch_ok', ab, { loadedFrom: 'local-disk', resolvedPath: pathHint });
         }
       }
 
-      const httpResult = await fetchAssetStatic(name, pathHint, loadToken);
+      const httpResult = await fetchAssetStatic(name, pathHint, loadToken, trace);
       if (httpResult) {
         fileCache.set(cacheKey, httpResult.ab);
         if (sceneId) {
           idbPutSceneAsset(sceneId, name, httpResult.ab, httpResult.resolvedPath).catch((e) => console.warn('模型缓存写入失败', e));
         }
-        return finish('http_fetch_ok', httpResult.ab, { resolvedPath: httpResult.resolvedPath });
+        return finish('http_fetch_ok', httpResult.ab, { loadedFrom: 'http', resolvedPath: httpResult.resolvedPath });
       }
 
-      const cached = await idbGetSceneAsset(sceneId, name);
-      if (cached) {
-        fileCache.set(cacheKey, cached);
-        return finish('idb_cache_hit', cached);
+      const scopedKey = sceneAssetIdbKey(sceneId, name);
+      if (scopedKey) {
+        const scoped = await idbGetAsset(scopedKey);
+        trace.idbScopedKey = scopedKey;
+        trace.idbScopedBytes = scoped ? scoped.byteLength : 0;
+        if (scoped) {
+          fileCache.set(cacheKey, scoped);
+          return finish('idb_scoped_hit', scoped, { loadedFrom: 'idb-scoped', idbLegacyKey: name, idbLegacyBytes: 0 });
+        }
       }
 
+      const legacy = await idbGetAsset(name);
+      trace.idbLegacyKey = name;
+      trace.idbLegacyBytes = legacy ? legacy.byteLength : 0;
+      if (legacy) {
+        fileCache.set(cacheKey, legacy);
+        if (sceneId && scopedKey) {
+          idbPutAsset(scopedKey, legacy).catch((e) => console.warn('legacy→scoped 迁移失败', e));
+        }
+        return finish('idb_legacy_hit', legacy, { loadedFrom: 'idb-legacy', idbScopedKey: scopedKey || null, idbScopedBytes: 0 });
+      }
+
+      if (!trace.idbScopedBytes && scopedKey) trace.idbScopedBytes = 0;
       const reason = canLoadAssetsFromDisk() && pathHint && isLocalFilesystemPath(pathHint)
         ? 'server_fetch_failed'
         : (canLoadAssetsFromDisk() && !pathHint ? 'server_path_not_found' : 'asset_not_found');
       modelLoadWarn('resolve 失败', { ...trace, reason, resolvedPath: pathHint || null });
-      return finish(reason, null, { resolvedPath: pathHint || null });
+      return finish(reason, null, { resolvedPath: pathHint || null, loadedFrom: 'none' });
     }
 
     function findMissingPlacementIndex(fileName) {
@@ -2380,6 +2473,8 @@
           return;
         }
         await dumpModelCacheState(sceneId, '加载后');
+        const assetNames = (parsedCfg.placements || []).map((p) => p.asset).filter(Boolean);
+        await renderAssetResolveReport(sceneId, assetNames, '每个模型加载来源');
         await persistScenesStore().catch((e) => console.warn('场景索引保存失败', e));
         await persistSceneSourcePathsOnly().catch((e) => console.warn('场景资源持久化失败', e));
         const parsed = parseSavedConfig(scene.config);
