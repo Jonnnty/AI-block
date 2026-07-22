@@ -296,7 +296,7 @@
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
       "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
-      "@mkkellogg/gaussian-splats-3d": "./vendor/gaussian-splats-3d.module.js?v=20260721"
+      "@mkkellogg/gaussian-splats-3d": "./vendor/gaussian-splats-3d.module.js?v=20260722b"
     }
   }
   </script>
@@ -1308,6 +1308,12 @@
       return scene ? scene.name : SCENE_PICKER_LABEL;
     }
 
+    function setActiveSceneSelection(sceneId) {
+      activeSceneId = sceneId || null;
+      if (scenesStore) scenesStore.activeSceneId = activeSceneId;
+      renderSceneManagerUI();
+    }
+
     function renderSceneManagerUI() {
       const list = el('scenePickerList');
       const label = el('scenePickerLabel');
@@ -1354,7 +1360,10 @@
         row.appendChild(nameSpan);
         row.appendChild(rename);
         row.appendChild(del);
-        row.onclick = () => {
+        row.onmousedown = (e) => {
+          if (e.button !== 0) return;
+          if (e.target.closest('.scene-picker-rename, .scene-picker-del, .scene-rename-input')) return;
+          e.preventDefault();
           setScenePickerOpen(false);
           loadSceneById(scene.id).catch(showError);
         };
@@ -1483,23 +1492,26 @@
       const scene = getSceneById(sceneId);
       if (!scene) return;
       if (sceneId === activeSceneId && placements.length) return;
+
+      setActiveSceneSelection(sceneId);
+      setScenePickerOpen(false);
+
       sceneLoadBusy = true;
       const loadToken = ++sessionResetToken;
       try {
         status(`正在加载「${scene.name}」…`);
-        activeSceneId = sceneId;
-        if (scenesStore) scenesStore.activeSceneId = sceneId;
         await applyConfigToEditor(parseSavedConfig(scene.config), loadToken);
         if (isSessionAborted(loadToken)) return;
-        renderSceneManagerUI();
-        setScenePickerOpen(false);
         await persistScenesStore().catch((e) => console.warn('场景索引保存失败', e));
         const parsed = parseSavedConfig(scene.config);
         const modelCount = _n(parsed.placements && parsed.placements.length, 0);
         const pathCount = _n(parsed.cameraPaths && parsed.cameraPaths.length, 0);
         status(`已加载「${scene.name}」· ${modelCount} 模型 · ${pathCount} 轨迹`);
+      } catch (e) {
+        showError(e);
       } finally {
         sceneLoadBusy = false;
+        renderSceneManagerUI();
       }
     }
 
@@ -1530,9 +1542,7 @@
       if (activeSceneId && getSceneById(activeSceneId)) return getSceneById(activeSceneId);
       const scene = createSceneRecord(getNextSceneName());
       scenesStore.scenes.push(scene);
-      activeSceneId = scene.id;
-      scenesStore.activeSceneId = scene.id;
-      renderSceneManagerUI();
+      setActiveSceneSelection(scene.id);
       return scene;
     }
 
@@ -1542,8 +1552,7 @@
       if (!confirm(`确定删除场景「${scene.name}」？\n\n将永久删除该场景的配置，且无法撤销。`)) return;
       scenesStore.scenes = scenesStore.scenes.filter((s) => s.id !== sceneId);
       if (activeSceneId === sceneId) {
-        activeSceneId = null;
-        scenesStore.activeSceneId = null;
+        setActiveSceneSelection(null);
         sessionResetToken++;
         await clearAllPlacementsFromViewer();
         resetCameraEditorState();
@@ -1577,8 +1586,31 @@
 
     async function importConfigFromFile(file) {
       const text = await file.text();
-      const cfg = parseSavedConfig(JSON.parse(text));
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (_) {
+        throw new Error('JSON 文件格式无效');
+      }
       if (!scenesStore) scenesStore = emptyScenesStore();
+
+      if (data && typeof data === 'object' && data.version >= 3 && Array.isArray(data.scenes)) {
+        let lastId = null;
+        for (const src of data.scenes) {
+          const scene = createSceneRecord((src.name && String(src.name).trim()) || getNextSceneName());
+          scene.config = configFromParsed(parseSavedConfig(src.config || src));
+          scene.updatedAt = new Date().toISOString();
+          scenesStore.scenes.push(scene);
+          lastId = scene.id;
+        }
+        await persistScenesStore();
+        renderSceneManagerUI();
+        if (lastId) await loadSceneById(lastId);
+        status(`已导入 ${data.scenes.length} 个场景`);
+        return;
+      }
+
+      const cfg = parseSavedConfig(data);
       const baseName = file.name.replace(/\.json$/i, '') || '导入场景';
       let name = baseName;
       const used = new Set(scenesStore.scenes.map((s) => s.name.toLowerCase()));
@@ -1588,7 +1620,12 @@
       scene.updatedAt = new Date().toISOString();
       scenesStore.scenes.push(scene);
       await persistScenesStore();
-      await preloadAssetsForConfig(cfg, sessionResetToken);
+      setActiveSceneSelection(scene.id);
+      try {
+        await preloadAssetsForConfig(cfg, sessionResetToken);
+      } catch (e) {
+        console.warn('导入时预加载模型缓存失败', e);
+      }
       await loadSceneById(scene.id);
       status(`已导入「${scene.name}」· ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
     }
