@@ -9,10 +9,32 @@ import subprocess
 import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent
 PLACEMENTS = ROOT / "placements.json"
+OUTPUTS = Path(r"D:\Downloads\outputs")
+if not OUTPUTS.is_dir():
+    OUTPUTS = ROOT / "outputs"
+OUTPUTS_50 = Path(r"D:\Downloads\outputs_50pct")
+if not OUTPUTS_50.is_dir():
+    OUTPUTS_50 = ROOT / "outputs_50pct"
+
+
+def resolve_editor_asset(asset_name: str) -> Path | None:
+    name = Path(asset_name).name
+    if not name or name != asset_name or ".." in asset_name:
+        return None
+    for candidate in (
+        OUTPUTS_50 / name,
+        ROOT / "outputs_50pct" / name,
+        OUTPUTS / name,
+        ROOT / "outputs" / name,
+        ROOT / name,
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
@@ -58,6 +80,19 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/api/health":
             self._json(200, {"ok": True, "configVersion": 3})
+            return
+        if path.startswith("/api/asset/"):
+            raw_name = unquote(path[len("/api/asset/"):].lstrip("/"))
+            asset_path = resolve_editor_asset(raw_name)
+            if not asset_path:
+                self._json(404, {"error": f"asset not found: {raw_name}"})
+                return
+            data = asset_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
             return
         return super().do_GET()
 
