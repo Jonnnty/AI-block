@@ -524,7 +524,7 @@
         <div class="config-toolbar">
           <button type="button" id="saveBtn" class="cfg-btn cfg-btn-primary" title="保存到浏览器或 placements.json">
             <span class="cfg-btn-label">保存</span>
-            <span class="cfg-btn-sub">当前场景 · 配置 + 模型缓存</span>
+            <span class="cfg-btn-sub">当前场景 · 配置 + 本地文件引用</span>
           </button>
           <button type="button" id="exportJsonBtn" class="cfg-btn cfg-btn-ghost" title="下载当前场景 JSON 配置">
             <span class="cfg-btn-label">导出 JSON</span>
@@ -958,17 +958,18 @@
       return `sourcePath:${name}`;
     }
 
-    function preferLocalFileHandlesOnly() {
-      return supportsLocalFileAccess() && hostMode === 'static';
+    function blockBrowserAssetCache() {
+      return supportsLocalFileAccess();
+    }
+
+    async function assetHasLocalHandle(sceneId, assetName) {
+      if (!sceneId || !assetName) return false;
+      return !!(await idbGetHandle(sceneFileHandleKey(sceneId, assetName))
+        || await idbGetHandle(sceneDirHandleKey(sceneId, assetName)));
     }
 
     async function purgeIdbBinaryCacheForLocalAccess() {
       if (!supportsLocalFileAccess()) return 0;
-      const flagKey = 'placement_editor_binary_cache_purged_v4_fsa';
-      try {
-        if (localStorage.getItem(flagKey)) return 0;
-        localStorage.setItem(flagKey, '1');
-      } catch (_) {}
       const keys = await idbListStoreKeys(ASSET_STORE);
       for (const key of keys) await idbDeleteEntry(ASSET_STORE, key);
       return keys.length;
@@ -979,7 +980,7 @@
     }
 
     /** 模型加载追踪（控制台）；本地授权见 import-privacy-hint / localAccessBanner */
-    const MODEL_LOAD_BUILD = '20260723g';
+    const MODEL_LOAD_BUILD = '20260723h';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -1190,6 +1191,7 @@
     }
 
     async function idbPutSceneAsset(sceneId, assetName, arrayBuffer, sourcePath) {
+      if (blockBrowserAssetCache()) return;
       if (sourcePath) await idbPutSceneSourcePath(sceneId, assetName, sourcePath);
       if (arrayBuffer) {
         const key = sceneAssetIdbKey(sceneId, assetName) || assetName;
@@ -1235,6 +1237,7 @@
     }
 
     async function idbPutAsset(name, arrayBuffer) {
+      if (blockBrowserAssetCache()) return;
       const db = await openAssetDb();
       try {
         await new Promise((resolve, reject) => {
@@ -1249,6 +1252,7 @@
     }
 
     async function idbGetAsset(name) {
+      if (blockBrowserAssetCache()) return null;
       const db = await openAssetDb();
       try {
         return await new Promise((resolve, reject) => {
@@ -1348,6 +1352,7 @@
     }
 
     async function fetchAssetStatic(name, sourcePath, loadToken = sessionResetToken, trace = null) {
+      if (blockBrowserAssetCache()) return null;
       const urls = [];
       const fromPath = sourcePath ? resolveHttpAssetUrl(sourcePath) : null;
       if (fromPath) urls.push(fromPath);
@@ -1454,6 +1459,36 @@
       if (!name) return finish('empty_asset_name', null);
 
       const cacheKey = fileCacheKey(sceneId, name);
+
+      if (blockBrowserAssetCache()) {
+        const hasHandle = await assetHasLocalHandle(sceneId, name);
+        if (fileCache.has(cacheKey)) {
+          if (hasHandle) {
+            const ab = fileCache.get(cacheKey);
+            return finish('memory_cache_hit', ab, { loadedFrom: 'memory', bytes: ab.byteLength, hasHandle: true });
+          }
+          fileCache.delete(cacheKey);
+        }
+        if (isSessionAborted(loadToken)) return finish('session_aborted_before_fetch', null);
+        if (!hasHandle) {
+          modelLoadWarn('resolve 无本地句柄', { ...trace, reason: 'asset_not_found' });
+          return finish('asset_not_found', null, { loadedFrom: 'local-required', hasHandle: false });
+        }
+        const localAb = await readAssetFromBoundLocalSource(sceneId, name, trace);
+        if (localAb) {
+          fileCache.set(cacheKey, localAb);
+          const reason = trace.localSourceKind === 'dir' ? 'local_dir_handle' : 'local_file_handle';
+          return finish(reason, localAb, {
+            loadedFrom: trace.localSourceKind === 'dir' ? 'local-dir' : 'local-file',
+            localSourceLabel: trace.localSourceLabel || null,
+            hasHandle: true,
+          });
+        }
+        const reason = trace.localHandleBlocked ? 'local_handle_permission' : 'asset_not_found';
+        modelLoadWarn('resolve 本地读取失败', { ...trace, reason, hasHandle: true });
+        return finish(reason, null, { loadedFrom: 'local-denied', hasHandle: true });
+      }
+
       if (fileCache.has(cacheKey)) {
         const ab = fileCache.get(cacheKey);
         return finish('memory_cache_hit', ab, { loadedFrom: 'memory', bytes: ab.byteLength });
@@ -1488,51 +1523,39 @@
         return finish('local_handle_permission', null, { loadedFrom: 'local-denied' });
       }
 
-      if (preferLocalFileHandlesOnly()) {
-        const hasHandle = await idbGetHandle(sceneFileHandleKey(sceneId, name))
-          || await idbGetHandle(sceneDirHandleKey(sceneId, name));
-        const reason = hasHandle ? 'local_handle_permission' : 'asset_not_found';
-        modelLoadWarn('resolve 仅本地文件', { ...trace, reason, hasHandle: !!hasHandle });
-        return finish(reason, null, { loadedFrom: 'local-required', hasHandle: !!hasHandle });
-      }
-
       const httpResult = await fetchAssetStatic(name, pathHint, loadToken, trace);
       if (httpResult) {
         fileCache.set(cacheKey, httpResult.ab);
         const hasHandle = await idbGetHandle(sceneFileHandleKey(sceneId, name))
           || await idbGetHandle(sceneDirHandleKey(sceneId, name));
-        if (sceneId && !hasHandle && !supportsLocalFileAccess()) {
+        if (sceneId && !hasHandle) {
           idbPutSceneAsset(sceneId, name, httpResult.ab, httpResult.resolvedPath).catch((e) => console.warn('模型缓存写入失败', e));
         }
         return finish('http_fetch_ok', httpResult.ab, { loadedFrom: 'http', resolvedPath: httpResult.resolvedPath });
       }
 
-      if (!supportsLocalFileAccess()) {
-        const scopedKey = sceneAssetIdbKey(sceneId, name);
-        if (scopedKey) {
-          const scoped = await idbGetAsset(scopedKey);
-          trace.idbScopedKey = scopedKey;
-          trace.idbScopedBytes = scoped ? scoped.byteLength : 0;
-          if (scoped) {
-            fileCache.set(cacheKey, scoped);
-            return finish('idb_scoped_hit', scoped, { loadedFrom: 'idb-scoped', idbLegacyKey: name, idbLegacyBytes: 0 });
-          }
-        }
-
-        const legacy = await idbGetAsset(name);
-        trace.idbLegacyKey = name;
-        trace.idbLegacyBytes = legacy ? legacy.byteLength : 0;
-        if (legacy) {
-          fileCache.set(cacheKey, legacy);
-          const scopedKey = sceneAssetIdbKey(sceneId, name);
-          if (sceneId && scopedKey) {
-            idbPutAsset(scopedKey, legacy).catch((e) => console.warn('legacy→scoped 迁移失败', e));
-          }
-          return finish('idb_legacy_hit', legacy, { loadedFrom: 'idb-legacy', idbScopedKey: scopedKey || null, idbScopedBytes: 0 });
+      const scopedKey = sceneAssetIdbKey(sceneId, name);
+      if (scopedKey) {
+        const scoped = await idbGetAsset(scopedKey);
+        trace.idbScopedKey = scopedKey;
+        trace.idbScopedBytes = scoped ? scoped.byteLength : 0;
+        if (scoped) {
+          fileCache.set(cacheKey, scoped);
+          return finish('idb_scoped_hit', scoped, { loadedFrom: 'idb-scoped', idbLegacyKey: name, idbLegacyBytes: 0 });
         }
       }
 
-      const scopedKey = sceneAssetIdbKey(sceneId, name);
+      const legacy = await idbGetAsset(name);
+      trace.idbLegacyKey = name;
+      trace.idbLegacyBytes = legacy ? legacy.byteLength : 0;
+      if (legacy) {
+        fileCache.set(cacheKey, legacy);
+        if (sceneId && scopedKey) {
+          idbPutAsset(scopedKey, legacy).catch((e) => console.warn('legacy→scoped 迁移失败', e));
+        }
+        return finish('idb_legacy_hit', legacy, { loadedFrom: 'idb-legacy', idbScopedKey: scopedKey || null, idbScopedBytes: 0 });
+      }
+
       if (!trace.idbScopedBytes && scopedKey) trace.idbScopedBytes = 0;
       const reason = canLoadAssetsFromDisk() && pathHint && isLocalFilesystemPath(pathHint)
         ? 'server_fetch_failed'
@@ -4934,7 +4957,7 @@
 
     async function addPlacementFromFile(file, loadToken = sessionResetToken, opts = {}) {
       if (!sceneReady) throw new Error('场景尚未就绪');
-      if (preferLocalFileHandlesOnly() && !opts.fileHandle && !opts.dirHandle) {
+      if (blockBrowserAssetCache() && !opts.fileHandle && !opts.dirHandle) {
         throw new Error('请从文件管理器拖入文件或文件夹，以指向本地磁盘');
       }
       const localOpts = activeSceneId
@@ -4950,7 +4973,7 @@
         ab = await file.arrayBuffer();
         if (isSessionAborted(loadToken)) return;
         fileCache.set(fileCacheKey(activeSceneId, assetName), ab);
-        if (activeSceneId && !supportsLocalFileAccess() && !localOpts.fileHandle && !localOpts.dirHandle) {
+        if (activeSceneId && !blockBrowserAssetCache() && !localOpts.fileHandle && !localOpts.dirHandle) {
           idbPutSceneAsset(activeSceneId, assetName, ab, sourcePath).catch((e) => console.warn('模型缓存写入失败', e));
         }
       }
@@ -5358,7 +5381,14 @@
         const name = item.asset;
         if (!name) continue;
         const cacheKey = fileCacheKey(activeSceneId, name);
-        let ab = fileCache.get(cacheKey);
+        let ab = null;
+        if (fileCache.has(cacheKey)) {
+          if (!blockBrowserAssetCache() || await assetHasLocalHandle(activeSceneId, name)) {
+            ab = fileCache.get(cacheKey);
+          } else {
+            fileCache.delete(cacheKey);
+          }
+        }
         if (!ab) {
           ab = await resolveAssetBuffer(name, item.sourcePath || null, loadToken, activeSceneId);
         }
@@ -5510,7 +5540,7 @@
     el('importBtn').onclick = () => pickPlyFilesWithLocalAccess().catch(showError);
     el('localAccessBannerBtn').onclick = () => restoreAllLocalPermissionsAndReload().catch(showError);
     el('pickFile').onchange = async () => {
-      if (preferLocalFileHandlesOnly()) {
+      if (blockBrowserAssetCache()) {
         el('pickFile').value = '';
         status('请使用「选择 PLY 文件」按钮，以指向本地磁盘');
         return;
@@ -5720,7 +5750,7 @@
         if (isSessionAborted(loadToken)) return;
         updateHostModeUI();
         if (purgedKeys > 0) {
-          status(`已清除浏览器内 ${purgedKeys} 个 PLY 缓存，释放 D 盘空间…`);
+          status(`已清除浏览器内 ${purgedKeys} 个 PLY 缓存 · 仅使用本地文件授权加载`);
         }
         status('正在加载 3D 引擎…');
         await ensureViewer();
