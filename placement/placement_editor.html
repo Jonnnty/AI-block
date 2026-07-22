@@ -244,11 +244,10 @@
     }
     .icon-btn:hover { background: #333; color: #fff; }
     .icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-    .icon-btn.visibility-btn.is-off { opacity: 0.4; color: #777; position: relative; }
-    .icon-btn.visibility-btn.is-off::after {
-      content: ''; position: absolute; left: 4px; right: 4px; top: 50%;
-      height: 1px; background: currentColor; transform: rotate(-45deg); pointer-events: none;
+    .icon-btn.visibility-btn {
+      display: inline-flex; align-items: center; justify-content: center; line-height: 0;
     }
+    .icon-btn.visibility-btn svg { display: block; }
     #pickFile { display: none; }
     input[type=number] {
       background: #252525; border: 1px solid #444; color: #eee;
@@ -964,7 +963,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260724c';
+    const MODEL_LOAD_BUILD = '20260724d';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -1518,7 +1517,7 @@
       sharedMemoryForWorkers: false,
       gpuAcceleratedSort: false,
       dynamicScene: true,
-      enableOptionalEffects: false,
+      enableOptionalEffects: true,
       optimizeSplatData: false,
       sceneRevealMode: (GaussianSplats3D.SceneRevealMode && GaussianSplats3D.SceneRevealMode.Instant != null) ? GaussianSplats3D.SceneRevealMode.Instant : 2,
       renderMode: (GaussianSplats3D.RenderMode && GaussianSplats3D.RenderMode.Always != null) ? GaussianSplats3D.RenderMode.Always : 0,
@@ -4530,11 +4529,25 @@
       };
     }
 
+    function visibilityBtnHtml(visible) {
+      const svgAttrs = 'viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+      if (visible !== false) {
+        return `<svg ${svgAttrs}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+      }
+      return `<svg ${svgAttrs}><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+    }
+
     function applyPlacementVisibility(p) {
       if (!viewer || !viewer.splatMesh || p.sceneIdx == null || p.missing) return;
-      const scene = viewer.splatMesh.getScene(p.sceneIdx);
-      scene.visible = p.visible !== false;
-      viewer.splatMesh.updateTransforms();
+      const sm = viewer.splatMesh;
+      const scene = sm.getScene(p.sceneIdx);
+      const show = p.visible !== false;
+      scene.visible = show;
+      if (sm.enableOptionalEffects && sm.material && sm.material.uniforms && sm.material.uniforms.sceneVisibility) {
+        sm.material.uniforms.sceneVisibility.value[p.sceneIdx] = show ? 1 : 0;
+        sm.material.uniformsNeedUpdate = true;
+      }
+      sm.updateTransforms();
       viewer.forceRenderNextFrame();
     }
 
@@ -5021,8 +5034,8 @@
           : `<span class="scene-name">${p.name}</span>`;
         const vis = document.createElement('button');
         vis.type = 'button';
-        vis.className = 'icon-btn visibility-btn' + (p.visible === false ? ' is-off' : '');
-        vis.textContent = '👁';
+        vis.className = 'icon-btn visibility-btn';
+        vis.innerHTML = visibilityBtnHtml(p.visible);
         vis.title = p.visible === false ? '点击显示' : '点击隐藏';
         vis.disabled = !!p.missing;
         vis.onclick = (e) => { e.stopPropagation(); togglePlacementVisibility(i); };
@@ -5268,6 +5281,7 @@
         if (isSessionAborted(loadToken)) return;
         p.sceneIdx = sceneIdx;
         placements.push(p);
+        applyPlacementVisibility(p);
       }
       renderList();
       const loadedCount = placements.filter((p) => !p.missing).length;
