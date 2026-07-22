@@ -235,35 +235,17 @@
       transition: background .15s, border-color .15s, color .15s;
     }
     .scene-add-btn:hover { background: #333; border-color: #2d6cdf; color: #fff; }
-    .scene-active-bar {
-      display: flex; align-items: center; gap: 8px; padding: 7px 9px;
-      border-radius: 8px; background: #1e1e1e; border: 1px solid #333;
+    .scene-del-btn {
+      width: 36px; flex-shrink: 0; padding: 0; border-radius: 8px;
+      background: #2a2a2a; border: 1px solid #454545; color: #999;
+      font-size: 16px; line-height: 1; cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s, opacity .15s;
     }
-    .scene-active-bar[hidden] { display: none !important; }
-    .scene-active-name {
-      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      font-size: 12px; font-weight: 500; color: #ddd; cursor: text;
-      border-bottom: 1px dashed transparent;
-    }
-    .scene-active-name:hover { border-bottom-color: #666; color: #fff; }
-    .scene-active-meta {
-      flex-shrink: 0; font-size: 10px; color: #666; white-space: nowrap;
-    }
-    .scene-active-del {
-      width: 26px; height: 26px; padding: 0; flex-shrink: 0;
-      border-radius: 6px; background: transparent; border: 1px solid #444;
-      color: #999; font-size: 14px; line-height: 1; cursor: pointer;
-      transition: background .12s, border-color .12s, color .12s;
-    }
-    .scene-active-del:hover {
+    .scene-del-btn:hover:not(:disabled) {
       background: rgba(139, 46, 46, 0.22); border-color: #8b4040; color: #ffc0c0;
     }
-    .scene-rename-input {
-      flex: 1; min-width: 0; background: #111; border: 1px solid #2d6cdf; color: #eee;
-      padding: 3px 7px; border-radius: 6px; font-size: 12px;
-    }
+    .scene-del-btn:disabled { opacity: 0.32; cursor: not-allowed; }
     .scene-select option { color: #eee; }
-    .scene-select-placeholder { color: #888; }
   </style>
   <script type="importmap">
   {
@@ -313,12 +295,8 @@
             <select id="sceneSelect" class="scene-select" aria-label="选择场景">
               <option value="">新建或选择已保存场景</option>
             </select>
+            <button type="button" id="sceneDeleteBtn" class="scene-del-btn" title="删除当前场景" disabled>×</button>
             <button type="button" id="newSceneBtn" class="scene-add-btn" title="新建空白场景">＋</button>
-          </div>
-          <div id="sceneActiveBar" class="scene-active-bar" hidden>
-            <span id="sceneActiveName" class="scene-active-name" title="点击重命名">—</span>
-            <span id="sceneActiveMeta" class="scene-active-meta"></span>
-            <button type="button" id="sceneDeleteBtn" class="scene-active-del" title="删除当前场景">×</button>
           </div>
         </div>
         <div class="panel-zone-label" style="margin-top:2px">
@@ -1269,7 +1247,7 @@
 
     function renderSceneManagerUI() {
       const select = el('sceneSelect');
-      const activeBar = el('sceneActiveBar');
+      const delBtn = el('sceneDeleteBtn');
       if (!select || !scenesStore) return;
       const scenes = scenesStore.scenes || [];
       select.innerHTML = '';
@@ -1285,44 +1263,7 @@
         select.appendChild(opt);
       }
       select.value = activeSceneId || '';
-      if (activeBar) {
-        const scene = activeSceneId ? getSceneById(activeSceneId) : null;
-        activeBar.hidden = !scene;
-        if (scene) {
-          const nameEl = el('sceneActiveName');
-          const metaEl = el('sceneActiveMeta');
-          if (nameEl) nameEl.textContent = scene.name;
-          if (metaEl) metaEl.textContent = sceneSummary(scene.config);
-        }
-      }
-    }
-
-    function startSceneRename(sceneId, anchorEl) {
-      const scene = getSceneById(sceneId);
-      if (!scene || !(anchorEl && anchorEl.replaceWith)) return;
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.className = 'scene-rename-input';
-      input.value = scene.name;
-      input.onclick = (e) => e.stopPropagation();
-      const commit = async () => {
-        const v = input.value.trim();
-        if (v && v !== scene.name) {
-          scene.name = v;
-          scene.updatedAt = new Date().toISOString();
-          await persistScenesStore();
-          status(`已重命名为「${scene.name}」`);
-        }
-        renderSceneManagerUI();
-      };
-      input.onkeydown = (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); commit().catch(showError); }
-        if (e.key === 'Escape') renderSceneManagerUI();
-      };
-      input.onblur = () => commit().catch(showError);
-      anchorEl.replaceWith(input);
-      input.focus();
-      input.select();
+      if (delBtn) delBtn.disabled = !activeSceneId;
     }
 
     async function persistScenesStore() {
@@ -4045,10 +3986,6 @@
       loadSceneById(id).catch(showError);
     };
     el('newSceneBtn').onclick = () => createNewScene().catch(showError);
-    el('sceneActiveName').onclick = () => {
-      if (!activeSceneId) return;
-      startSceneRename(activeSceneId, el('sceneActiveName'));
-    };
     el('sceneDeleteBtn').onclick = () => {
       if (!activeSceneId) return;
       deleteSceneById(activeSceneId).catch(showError);
