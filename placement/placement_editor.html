@@ -954,7 +954,7 @@
     }
 
     /** 模型加载追踪（控制台）；本地授权见 import-privacy-hint / localAccessBanner */
-    const MODEL_LOAD_BUILD = '20260723c';
+    const MODEL_LOAD_BUILD = '20260723d';
     const LOCAL_ACCESS_CONSENT_KEY = 'placement_editor_local_access_consent_v1';
     let localAccessConsentPromise = null;
     const lastResolveTraceByAsset = new Map();
@@ -1071,10 +1071,11 @@
       return parts.join(' · ');
     }
 
-    async function importFromDirectoryHandle(dirHandle) {
+    async function importFromDirectoryHandle(dirHandle, bindLocalOverride) {
       if (!activeSceneId) { status('请先选择或创建场景'); return; }
-      const consent = await ensureLocalAccessConsent();
-      const bindLocal = consent === 'yes';
+      const bindLocal = bindLocalOverride !== undefined
+        ? bindLocalOverride
+        : (await ensureLocalAccessConsent()) === 'yes';
       if (!(await ensureReadPermission(dirHandle))) {
         status('未获得文件夹读取授权');
         return;
@@ -5423,10 +5424,11 @@
       view.addEventListener('drop', async (e) => {
         prevent(e);
         view.classList.remove('drag-over');
-        const consent = await ensureLocalAccessConsent();
-        const bindLocal = consent === 'yes';
 
+        // 必须在 await 授权弹窗之前读取，否则 dataTransfer 会被浏览器清空
         const items = [...(e.dataTransfer && e.dataTransfer.items || [])];
+        const droppedFiles = [...(e.dataTransfer && e.dataTransfer.files || [])]
+          .filter((f) => f.name.toLowerCase().endsWith('.ply'));
         const plyEntries = [];
         let dirHandle = null;
 
@@ -5442,15 +5444,26 @@
               if (handle.kind === 'file' && handle.name.toLowerCase().endsWith('.ply')) {
                 plyEntries.push({
                   file: await handle.getFile(),
-                  fileHandle: bindLocal ? handle : null,
+                  fileHandle: handle,
                 });
               }
             } catch (_) {}
           }
         }
 
+        const consent = await ensureLocalAccessConsent();
+        const bindLocal = consent === 'yes';
+        if (!bindLocal) {
+          for (const entry of plyEntries) entry.fileHandle = null;
+        }
+
+        if (!activeSceneId) {
+          status('请先选择或创建场景');
+          return;
+        }
+
         if (dirHandle) {
-          try { await importFromDirectoryHandle(dirHandle); } catch (err) { showError(err); }
+          try { await importFromDirectoryHandle(dirHandle, bindLocal); } catch (err) { showError(err); }
           return;
         }
 
@@ -5468,9 +5481,8 @@
           return;
         }
 
-        const files = [...(e.dataTransfer && e.dataTransfer.files || [])].filter((f) => f.name.toLowerCase().endsWith('.ply'));
-        if (!files.length) { status('请拖入 .ply 模型文件或文件夹'); return; }
-        for (const f of files) {
+        if (!droppedFiles.length) { status('请拖入 .ply 模型文件或文件夹'); return; }
+        for (const f of droppedFiles) {
           try { await addPlacementFromFile(f); } catch (err) { status(`失败: ${err.message}`); }
         }
       });
