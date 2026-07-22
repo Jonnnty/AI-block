@@ -1,4 +1,4 @@
-# 摆放器（placement）
+# 场景编辑器（placement）
 
 拖入 Gaussian Splat 模型（PLY）进行摆放，编辑相机轨迹，导出 JSON 配置。
 
@@ -12,7 +12,7 @@
    output["gs"].save_ply("model.ply")
    ```
 
-3. **拖入本编辑器**：在线或本地打开摆放器，导入 `.ply` 文件。
+3. **拖入本编辑器**：在线或本地打开场景编辑器，导入 `.ply` 文件。
 
 ## 在线
 

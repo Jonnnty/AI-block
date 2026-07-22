@@ -181,7 +181,7 @@ def main() -> None:
     port = int(os.environ.get("PORT", "8080"))
     host = os.environ.get("HOST", "127.0.0.1")
     httpd = ReusableThreadingHTTPServer((host, port), Handler)
-    print(f"摆放器: http://{host}:{port}/placement_editor.html")
+    print(f"场景编辑器: http://{host}:{port}/placement_editor.html")
     print("  拖入 PLY 模型开始摆放")
     print("  Ctrl+C to stop")
     try:

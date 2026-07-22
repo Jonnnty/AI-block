@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>摆放器</title>
+  <title>场景编辑器</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #111; color: #eee; height: 100vh; display: flex; overflow: hidden; }
@@ -143,13 +143,33 @@
     #rigPreviewFloat {
       position: absolute; left: 12px; bottom: 12px; width: 336px; z-index: 4;
       background: rgba(18, 18, 18, 0.94); border: 1px solid #444; border-radius: 8px;
-      overflow: hidden; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); pointer-events: none;
+      overflow: hidden; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); pointer-events: auto;
     }
     #rigPreviewFloat[hidden] { display: none !important; }
     #rigPreviewFloat header {
       padding: 6px 10px; font-size: 12px; color: #ccc; border-bottom: 1px solid #333;
-      display: flex; justify-content: space-between; align-items: center;
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
     }
+    .rig-preview-header-right {
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    }
+    .rig-preview-close {
+      width: 22px; height: 22px; padding: 0; border-radius: 4px;
+      background: transparent; border: 1px solid #555; color: #aaa;
+      font-size: 15px; line-height: 1; cursor: pointer; flex-shrink: 0;
+    }
+    .rig-preview-close:hover { background: #333; color: #fff; border-color: #777; }
+    .render-params-panel, .rig-settings-panel {
+      padding: 10px 10px 11px; margin-top: 8px;
+      background: linear-gradient(180deg, #252525 0%, #1f1f1f 100%);
+      border: 1px solid #383838; border-radius: 10px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .rig-settings-panel {
+      background: linear-gradient(180deg, #1e1e1e 0%, #181818 100%);
+      border-color: #333; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+    .rig-settings-panel .panel-zone-label { margin-bottom: 0; }
     #rigPreviewCanvas, #rigPreviewVideo {
       width: 100%; display: block; aspect-ratio: 16 / 9;
       background: repeating-conic-gradient(#2a2a2a 0% 25%, #222 0% 50%) 50% / 16px 16px;
@@ -342,7 +362,13 @@
     <div id="viewMain"></div>
     <div id="viewHelper"></div>
     <div id="rigPreviewFloat" hidden>
-      <header><span id="rigPreviewTitle">高斯渲染预览</span><span class="val" id="rigPreviewStatus">未渲染</span></header>
+      <header>
+        <span id="rigPreviewTitle">高斯渲染预览</span>
+        <span class="rig-preview-header-right">
+          <span class="val" id="rigPreviewStatus">未渲染</span>
+          <button type="button" id="rigPreviewCloseBtn" class="rig-preview-close" title="关闭预览">×</button>
+        </span>
+      </header>
       <canvas id="rigPreviewCanvas"></canvas>
       <video id="rigPreviewVideo" hidden playsinline loop muted></video>
     </div>
@@ -491,53 +517,56 @@
           </label>
           <p class="hint">暂停后拖路径位置条移动机位；点击轨迹添加弯折点</p>
         </div>
-        <h2 style="margin-top:8px">默认参数</h2>
-        <label>每段帧数 <span class="val" id="pathFramesVal">16</span>
-          <input type="range" id="pathFrames" min="8" max="48" step="1" value="16" />
-        </label>
-        <label>播放 FPS <span class="val" id="pathFpsVal">12</span>
-          <input type="range" id="pathFps" min="6" max="30" step="1" value="12" />
-        </label>
-        <p class="hint" id="rigCameraHint">相机与轨迹使用世界坐标，与模型独立；移动/旋转模型不影响相机与轨迹</p>
-        <h2 style="margin-top:4px">机位</h2>
-        <div id="rigPoseControls" class="rig-pose-controls">
-        <div class="row gizmo-row">
+        <div class="row gizmo-row" id="rigGizmoRow">
           <button type="button" id="gizmoMoveRig" class="secondary">移动 Q</button>
           <button type="button" id="gizmoRotateRig" class="secondary">旋转 W</button>
         </div>
-        <label>机位 X <span class="val" id="rigXVal">—</span><input type="range" id="rigX" min="-1" max="1" step="0.005" disabled /></label>
-        <label>机位 Y <span class="val" id="rigYVal">—</span><input type="range" id="rigY" min="-0.45" max="0.45" step="0.005" disabled /></label>
-        <label>机位 Z <span class="val" id="rigZVal">—</span><input type="range" id="rigZ" min="-0.05" max="0.5" step="0.005" disabled /></label>
-        <label>偏航° <span class="hint">(绕Z)</span> <span class="val" id="rigYawVal">0</span>
-          <input type="range" id="rigYaw" min="-180" max="180" step="1" value="0" disabled />
-        </label>
-        <label>俯仰° <span class="hint">(绕X)</span> <span class="val" id="rigPitchVal">0</span>
-          <input type="range" id="rigPitch" min="-180" max="180" step="1" value="0" disabled />
-        </label>
-        <label>翻滚° <span class="hint">(绕Y)</span> <span class="val" id="rigRollVal">0</span>
-          <input type="range" id="rigRoll" min="-180" max="180" step="1" value="0" disabled />
-        </label>
-        </div>
-        <label>视野 FOV° <span class="val" id="rigFovVal">50</span>
-          <input type="range" id="rigFov" min="20" max="90" step="1" value="50" />
-        </label>
-        <label>近平面 <span class="val" id="rigNearVal">0.01</span>
-          <input type="range" id="rigNear" min="0.001" max="0.5" step="0.001" value="0.01" />
-        </label>
-        <label>远平面 <span class="val" id="rigFarVal">8</span>
-          <input type="range" id="rigFar" min="0.5" max="50" step="0.1" value="8" />
-        </label>
-        <div class="cam-grid">
-          <label>渲染宽 <input type="number" id="renderWidth" min="320" max="4096" step="1" value="1920" /></label>
-          <label>渲染高 <input type="number" id="renderHeight" min="240" max="4096" step="1" value="1080" /></label>
-        </div>
-        <label><input type="checkbox" id="showFrustum" checked /> 显示四棱锥</label>
         <div class="render-actions">
           <button type="button" id="renderPreviewBtn">预览单帧</button>
+          <button type="button" id="renderPathVideoBtn" class="secondary">预览路径视频</button>
           <button type="button" id="renderExportSingleBtn" class="secondary">保存单帧 PNG</button>
           <button type="button" id="renderExportSequenceBtn" class="secondary">导出路径 PNG 序列</button>
-          <button type="button" id="renderPathVideoBtn" class="secondary">预览路径视频</button>
         </div>
+        <section class="render-params-panel">
+          <div class="cam-grid">
+            <label>渲染宽 <input type="number" id="renderWidth" min="320" max="4096" step="1" value="1920" /></label>
+            <label>渲染高 <input type="number" id="renderHeight" min="240" max="4096" step="1" value="1080" /></label>
+          </div>
+          <label>每段帧数 <span class="val" id="pathFramesVal">16</span>
+            <input type="range" id="pathFrames" min="8" max="48" step="1" value="16" />
+          </label>
+          <label>渲染 FPS <span class="val" id="pathFpsVal">12</span>
+            <input type="range" id="pathFps" min="6" max="30" step="1" value="12" />
+          </label>
+          <p class="hint" id="rigCameraHint">相机与轨迹使用世界坐标，与模型独立；移动/旋转模型不影响相机与轨迹</p>
+        </section>
+        <section class="rig-settings-panel">
+          <div class="panel-zone-label"><span>相机设置</span></div>
+          <div id="rigPoseControls" class="rig-pose-controls">
+            <label>机位 X <span class="val" id="rigXVal">—</span><input type="range" id="rigX" min="-1" max="1" step="0.005" disabled /></label>
+            <label>机位 Y <span class="val" id="rigYVal">—</span><input type="range" id="rigY" min="-0.45" max="0.45" step="0.005" disabled /></label>
+            <label>机位 Z <span class="val" id="rigZVal">—</span><input type="range" id="rigZ" min="-0.05" max="0.5" step="0.005" disabled /></label>
+            <label>偏航° <span class="hint">(绕Z)</span> <span class="val" id="rigYawVal">0</span>
+              <input type="range" id="rigYaw" min="-180" max="180" step="1" value="0" disabled />
+            </label>
+            <label>俯仰° <span class="hint">(绕X)</span> <span class="val" id="rigPitchVal">0</span>
+              <input type="range" id="rigPitch" min="-180" max="180" step="1" value="0" disabled />
+            </label>
+            <label>翻滚° <span class="hint">(绕Y)</span> <span class="val" id="rigRollVal">0</span>
+              <input type="range" id="rigRoll" min="-180" max="180" step="1" value="0" disabled />
+            </label>
+          </div>
+          <label>视野 FOV° <span class="val" id="rigFovVal">50</span>
+            <input type="range" id="rigFov" min="20" max="90" step="1" value="50" />
+          </label>
+          <label>近平面 <span class="val" id="rigNearVal">0.01</span>
+            <input type="range" id="rigNear" min="0.001" max="0.5" step="0.001" value="0.01" />
+          </label>
+          <label>远平面 <span class="val" id="rigFarVal">8</span>
+            <input type="range" id="rigFar" min="0.5" max="50" step="0.1" value="8" />
+          </label>
+          <label><input type="checkbox" id="showFrustum" checked /> 显示四棱锥</label>
+        </section>
       </section>
     </div>
     </div>
@@ -958,6 +987,7 @@
     let rigGizmoMode = null;
     let selected = -1;
     let rigOpen = false;
+    let rigPreviewFloatDismissed = false;
     let sceneReady = false;
     let syncingFromGizmo = false;
     let defaultScale = 0.12;
@@ -2994,6 +3024,16 @@
       else stopPathSlidePreview();
     }
 
+    function showRigPreviewFloat() {
+      rigPreviewFloatDismissed = false;
+      el('rigPreviewFloat').hidden = false;
+    }
+
+    function dismissRigPreviewFloat() {
+      rigPreviewFloatDismissed = true;
+      el('rigPreviewFloat').hidden = true;
+    }
+
     function stopPreviewPlayback() {
       if (previewPlaybackRaf) cancelAnimationFrame(previewPlaybackRaf);
       previewPlaybackRaf = 0;
@@ -3051,6 +3091,7 @@
 
     async function renderPathVideoPreview() {
       if (cameraMarkers.length < 2) return renderRigPreviewFrame();
+      showRigPreviewFloat();
       stopPathSlidePreview();
       stopPreviewPlayback();
       const segs = cameraMarkers.length - 1;
@@ -3315,6 +3356,7 @@
 
     async function renderRigPreviewFrame() {
       if (!(viewer && viewer.renderer) || !renderCamera || !rigOpen) return;
+      showRigPreviewFloat();
       stopPreviewPlayback();
       status('渲染机位预览…');
       el('rigPreviewStatus').textContent = '渲染中…';
@@ -3401,7 +3443,6 @@
       markerGizmoMode = null;
       updateRigGizmoUI();
       el('rigPanel').hidden = false;
-      el('rigPreviewFloat').hidden = false;
       el('toggleRigBtn').textContent = '关闭渲染摄像机';
       el('toggleRigBtn').classList.add('active');
       if (cameraHelper) cameraHelper.visible = el('showFrustum').checked;
@@ -3429,6 +3470,7 @@
 
     function closeRigCamera() {
       rigOpen = false;
+      rigPreviewFloatDismissed = false;
       rigGizmoMode = null;
       markerGizmoMode = null;
       selectedMarkerIdx = -1;
@@ -4572,6 +4614,7 @@
     el('renderExportSingleBtn').onclick = () => gaussianRenderFromRig().catch(showError);
     el('renderExportSequenceBtn').onclick = () => exportPathSequencePngs().catch(showError);
     el('renderPathVideoBtn').onclick = () => renderPathVideoPreview().catch(showError);
+    el('rigPreviewCloseBtn').onclick = () => dismissRigPreviewFloat();
     for (const id of ['rigX', 'rigY', 'rigZ']) el(id).oninput = onRigSliderChange;
     for (const id of ['rigYaw', 'rigPitch', 'rigRoll']) el(id).oninput = onRigRotationChange;
     for (const id of ['rigFov', 'rigNear', 'rigFar']) el(id).oninput = syncRenderCameraParams;
