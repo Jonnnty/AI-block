@@ -858,6 +858,67 @@
       return null;
     }
 
+    async function listSceneDirectoryHandles(sceneId) {
+      if (!sceneId) return [];
+      const prefix = sceneIdbPrefix(sceneId);
+      const keys = await idbListStoreKeys(ASSET_HANDLE_STORE);
+      const seen = new Set();
+      const handles = [];
+      for (const key of keys) {
+        if (!key.startsWith(prefix) || !key.includes(':dh:')) continue;
+        const handle = await idbGetHandle(key);
+        if (!handle || handle.kind !== 'directory') continue;
+        const dedupeKey = `${handle.name}::${key}`;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+        handles.push(handle);
+      }
+      return handles;
+    }
+
+    async function resolveDirectoryBindingForFileHandle(sceneId, fileHandle) {
+      if (!sceneId || !fileHandle) return null;
+      const dirHandles = await listSceneDirectoryHandles(sceneId);
+      const droppedFile = await fileHandle.getFile();
+      for (const dirHandle of dirHandles) {
+        if (!(await ensureReadPermission(dirHandle))) continue;
+        if (typeof dirHandle.resolve === 'function') {
+          try {
+            const pathParts = await dirHandle.resolve(fileHandle);
+            if (pathParts && pathParts.length) {
+              return {
+                dirHandle,
+                dirFileName: pathParts[pathParts.length - 1],
+                sourceLabel: `${dirHandle.name}/${pathParts.join('/')}`,
+              };
+            }
+          } catch (_) {}
+        }
+        try {
+          const entryHandle = await dirHandle.getFileHandle(fileHandle.name);
+          const entryFile = await entryHandle.getFile();
+          if (entryFile.size !== droppedFile.size || entryFile.lastModified !== droppedFile.lastModified) continue;
+          return {
+            dirHandle,
+            dirFileName: fileHandle.name,
+            sourceLabel: `${dirHandle.name}/${fileHandle.name}`,
+          };
+        } catch (_) {}
+      }
+      return null;
+    }
+
+    async function normalizeLocalImportBinding(sceneId, opts = {}) {
+      if (!sceneId || opts.dirHandle || !opts.fileHandle) return opts;
+      const dirBinding = await resolveDirectoryBindingForFileHandle(sceneId, opts.fileHandle);
+      if (!dirBinding) return opts;
+      return {
+        dirHandle: dirBinding.dirHandle,
+        dirFileName: dirBinding.dirFileName,
+        dirSourceLabel: dirBinding.sourceLabel,
+      };
+    }
+
     async function bindAssetFileHandle(sceneId, assetName, fileHandle, sourceLabel) {
       await idbPutHandle(sceneFileHandleKey(sceneId, assetName), fileHandle);
       await idbDeleteHandle(sceneDirHandleKey(sceneId, assetName));
@@ -875,7 +936,8 @@
       const assetKey = sceneAssetIdbKey(sceneId, assetName);
       if (assetKey) await idbDeleteEntry(ASSET_STORE, assetKey);
       await idbDeleteEntry(ASSET_STORE, assetName);
-      await setLocalSourceLabel(sceneId, assetName, sourceLabel || `${dirHandle.name}/${fileName || assetName}`);
+      const label = sourceLabel || `${dirHandle.name}/${fileName || assetName}`;
+      await setLocalSourceLabel(sceneId, assetName, label);
     }
 
     function sceneAssetIdbKey(sceneId, assetName) {
@@ -917,7 +979,7 @@
     }
 
     /** 模型加载追踪（控制台）；本地授权见 import-privacy-hint / localAccessBanner */
-    const MODEL_LOAD_BUILD = '20260723f';
+    const MODEL_LOAD_BUILD = '20260723g';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -4875,6 +4937,9 @@
       if (preferLocalFileHandlesOnly() && !opts.fileHandle && !opts.dirHandle) {
         throw new Error('请从文件管理器拖入文件或文件夹，以指向本地磁盘');
       }
+      const localOpts = activeSceneId
+        ? await normalizeLocalImportBinding(activeSceneId, opts)
+        : opts;
       const { assetName, missingIdx } = resolveImportAssetName(file);
       let sourcePath = inferSourcePathForImport(file);
       if (!sourcePath) sourcePath = await guessAssetPathFromServer(file.name);
@@ -4885,17 +4950,26 @@
         ab = await file.arrayBuffer();
         if (isSessionAborted(loadToken)) return;
         fileCache.set(fileCacheKey(activeSceneId, assetName), ab);
-        if (activeSceneId && !supportsLocalFileAccess() && !opts.fileHandle && !opts.dirHandle) {
+        if (activeSceneId && !supportsLocalFileAccess() && !localOpts.fileHandle && !localOpts.dirHandle) {
           idbPutSceneAsset(activeSceneId, assetName, ab, sourcePath).catch((e) => console.warn('模型缓存写入失败', e));
         }
       }
       if (activeSceneId) {
-        if (opts.fileHandle) {
-          await bindAssetFileHandle(activeSceneId, assetName, opts.fileHandle, opts.fileHandle.name);
-          sourcePath = `local-file:${opts.fileHandle.name}`;
-        } else if (opts.dirHandle && opts.dirFileName) {
-          await bindAssetDirectoryHandle(activeSceneId, assetName, opts.dirHandle, opts.dirFileName);
-          sourcePath = `local-dir:${opts.dirHandle.name}/${opts.dirFileName}`;
+        if (localOpts.dirHandle && localOpts.dirFileName) {
+          await bindAssetDirectoryHandle(
+            activeSceneId,
+            assetName,
+            localOpts.dirHandle,
+            localOpts.dirFileName,
+            localOpts.dirSourceLabel,
+          );
+          sourcePath = `local-dir:${localOpts.dirHandle.name}/${localOpts.dirFileName}`;
+          if (!opts.dirHandle && opts.fileHandle && localOpts.dirSourceLabel) {
+            modelLoadLog('单文件匹配已有文件夹', { assetName, source: localOpts.dirSourceLabel });
+          }
+        } else if (localOpts.fileHandle) {
+          await bindAssetFileHandle(activeSceneId, assetName, localOpts.fileHandle, localOpts.fileHandle.name);
+          sourcePath = `local-file:${localOpts.fileHandle.name}`;
         }
       }
       const localSourceLabel = activeSceneId
