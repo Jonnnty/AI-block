@@ -218,65 +218,75 @@
       padding-bottom: 10px; margin-bottom: 10px;
       border-bottom: 1px solid #333;
     }
-    .scene-select-row { display: flex; gap: 6px; align-items: stretch; }
-    .scene-picker { position: relative; flex: 1; min-width: 0; }
+    .scene-picker { position: relative; width: 100%; }
     .scene-picker-btn {
       width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
-      background: #1a1a1a; border: 1px solid #444; color: #ccc;
-      padding: 7px 10px; border-radius: 8px; font-size: 13px; font-weight: 500;
-      cursor: pointer; transition: border-color .15s, box-shadow .15s, color .15s;
+      background: #f5f0eb; border: 1px solid #d8cfc4; color: #3a342e;
+      padding: 8px 11px; border-radius: 8px; font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: border-color .15s, box-shadow .15s, background .15s;
     }
-    .scene-picker-btn:hover { border-color: #555; color: #eee; }
+    .scene-picker-btn:hover { background: #faf6f1; border-color: #c9bfb2; }
     .scene-picker.open .scene-picker-btn {
-      border-color: #2d6cdf; color: #eee;
-      box-shadow: 0 0 0 2px rgba(45, 108, 223, 0.22);
+      border-color: #2d6cdf; background: #faf6f1;
+      box-shadow: 0 0 0 2px rgba(45, 108, 223, 0.16);
     }
-    .scene-picker-chevron { font-size: 11px; color: #777; flex-shrink: 0; }
+    .scene-picker-chevron { font-size: 11px; color: #8a7f72; flex-shrink: 0; }
     .scene-picker-menu {
       position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
-      background: #1a1a1a; border: 1px solid #444; border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); overflow: hidden;
+      background: #f5f0eb; border: 1px solid #d8cfc4; border-radius: 8px;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28); overflow: hidden;
     }
     .scene-picker-menu[hidden] { display: none !important; }
     .scene-picker-list {
       display: flex; flex-direction: column; gap: 0; max-height: 200px; overflow-y: auto;
     }
     .scene-picker-empty {
-      padding: 12px 10px; font-size: 12px; color: #666; text-align: center;
+      padding: 12px 10px; font-size: 12px; color: #8a7f72; text-align: center;
     }
     .scene-picker-row {
       display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 10px;
-      border-bottom: 1px solid #2a2a2a; cursor: pointer; transition: background .12s;
+      border-bottom: 1px solid #e8e0d6; cursor: pointer; transition: background .12s;
     }
     .scene-picker-row:last-child { border-bottom: none; }
-    .scene-picker-row:hover { background: #242424; }
-    .scene-picker-row.active { background: #1e2a40; }
+    .scene-picker-row:hover { background: #ede6dc; }
+    .scene-picker-row.active { background: #e4eef9; }
     .scene-picker-name {
       flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      font-size: 13px; color: #ddd; cursor: text;
+      font-size: 13px; color: #3a342e; cursor: text;
       border-bottom: 1px dashed transparent;
     }
-    .scene-picker-name:hover { border-bottom-color: #666; color: #fff; }
+    .scene-picker-name:hover { border-bottom-color: #a89888; color: #1a1612; }
     .scene-picker-del {
       width: 26px; height: 26px; padding: 0; flex-shrink: 0;
-      border-radius: 6px; background: transparent; border: 1px solid #444;
-      color: #999; font-size: 14px; line-height: 1; cursor: pointer;
+      border-radius: 6px; background: rgba(255, 255, 255, 0.45); border: 1px solid #cfc4b8;
+      color: #7a6a5a; font-size: 14px; line-height: 1; cursor: pointer;
       transition: background .12s, border-color .12s, color .12s;
     }
     .scene-picker-del:hover {
-      background: rgba(139, 46, 46, 0.22); border-color: #8b4040; color: #ffc0c0;
+      background: rgba(139, 46, 46, 0.12); border-color: #c08080; color: #a03030;
     }
     .scene-rename-input {
-      flex: 1; min-width: 0; background: #111; border: 1px solid #2d6cdf; color: #eee;
+      flex: 1; min-width: 0; background: #fff; border: 1px solid #2d6cdf; color: #3a342e;
       padding: 3px 7px; border-radius: 6px; font-size: 13px;
     }
-    .scene-add-btn {
-      width: 36px; flex-shrink: 0; padding: 0; border-radius: 8px;
-      background: #2a2a2a; border: 1px solid #454545; color: #ccc;
-      font-size: 18px; line-height: 1; cursor: pointer;
-      transition: background .15s, border-color .15s, color .15s;
+    .scene-action-row {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
     }
-    .scene-add-btn:hover { background: #333; border-color: #2d6cdf; color: #fff; }
+    .scene-action-btn {
+      width: 100%; padding: 8px 10px; font-size: 12px; font-weight: 500; line-height: 1.2;
+      border-radius: 8px; border: 1px solid #454545; cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
+    }
+    .scene-action-btn-new {
+      background: linear-gradient(180deg, #3a7de6 0%, #2d6cdf 100%);
+      border-color: transparent; color: #fff;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset;
+    }
+    .scene-action-btn-new:hover { background: linear-gradient(180deg, #4a8af0 0%, #3578e8 100%); }
+    .scene-action-btn-import {
+      background: #2e2e2e; border-color: #4a4a4a; color: #d8d8d8;
+    }
+    .scene-action-btn-import:hover { background: #383838; border-color: #5a5a5a; color: #fff; }
   </style>
   <script type="importmap">
   {
@@ -322,17 +332,18 @@
           <span class="panel-zone-hint">选择后加载</span>
         </div>
         <div class="scene-manager">
-          <div class="scene-select-row">
-            <div class="scene-picker" id="scenePicker">
-              <button type="button" id="scenePickerBtn" class="scene-picker-btn" aria-haspopup="listbox" aria-expanded="false">
-                <span id="scenePickerLabel">选择已有场景</span>
-                <span class="scene-picker-chevron">▾</span>
-              </button>
-              <div id="scenePickerMenu" class="scene-picker-menu" hidden>
-                <div id="scenePickerList" class="scene-picker-list"></div>
-              </div>
+          <div class="scene-picker" id="scenePicker">
+            <button type="button" id="scenePickerBtn" class="scene-picker-btn" aria-haspopup="listbox" aria-expanded="false">
+              <span id="scenePickerLabel">选择已有场景</span>
+              <span class="scene-picker-chevron">▾</span>
+            </button>
+            <div id="scenePickerMenu" class="scene-picker-menu" hidden>
+              <div id="scenePickerList" class="scene-picker-list"></div>
             </div>
-            <button type="button" id="newSceneBtn" class="scene-add-btn" title="新建空白场景">＋</button>
+          </div>
+          <div class="scene-action-row">
+            <button type="button" id="newSceneBtn" class="scene-action-btn scene-action-btn-new">新建场景</button>
+            <button type="button" id="importSceneJsonBtn" class="scene-action-btn scene-action-btn-import">导入场景 JSON</button>
           </div>
         </div>
         <div class="panel-zone-label" style="margin-top:2px">
@@ -344,14 +355,10 @@
             <span class="cfg-btn-label">保存</span>
             <span class="cfg-btn-sub">当前场景 · 配置 + 模型缓存</span>
           </button>
-          <div class="config-toolbar-row">
-            <button type="button" id="importJsonBtn" class="cfg-btn cfg-btn-ghost" title="从 JSON 文件恢复">
-              <span class="cfg-btn-label">导入 JSON</span>
-            </button>
-            <button type="button" id="exportJsonBtn" class="cfg-btn cfg-btn-ghost" title="下载完整 JSON 配置">
-              <span class="cfg-btn-label">导出 JSON</span>
-            </button>
-          </div>
+          <button type="button" id="exportJsonBtn" class="cfg-btn cfg-btn-ghost" title="下载当前场景 JSON 配置">
+            <span class="cfg-btn-label">导出 JSON</span>
+            <span class="cfg-btn-sub">当前场景配置</span>
+          </button>
           <button type="button" id="clearBtn" class="cfg-btn cfg-btn-danger" title="清空当前工作区（不影响其它已保存场景）">
             <span class="cfg-btn-label">清空</span>
             <span class="cfg-btn-sub">重置当前工作区</span>
@@ -4097,7 +4104,7 @@
     el('saveBtn').onclick = () => savePlacements().catch(showError);
     setupScenePicker();
     el('newSceneBtn').onclick = () => createNewScene().catch(showError);
-    el('importJsonBtn').onclick = () => el('importConfigFile').click();
+    el('importSceneJsonBtn').onclick = () => el('importConfigFile').click();
     el('importConfigFile').onchange = async () => {
       const file = el('importConfigFile').files && el('importConfigFile').files[0];
       el('importConfigFile').value = '';
@@ -4204,7 +4211,7 @@
           status(`就绪${modeNote} · ${scenesStore.scenes.length} 个已保存场景 · 点「选择已有场景」加载`);
         } else {
           const modeNote = hostMode === 'static' ? ' · 在线版' : '';
-          status(`就绪${modeNote} · 点 ＋ 新建，或保存后出现在场景列表`);
+          status(`就绪${modeNote} · 新建场景或导入 JSON 开始`);
         }
       } catch (e) { showError(e); }
     })();
