@@ -219,14 +219,56 @@
       border-bottom: 1px solid #333;
     }
     .scene-select-row { display: flex; gap: 6px; align-items: stretch; }
-    .scene-select {
-      flex: 1; min-width: 0; background: #1a1a1a; border: 1px solid #444; color: #eee;
+    .scene-picker { position: relative; flex: 1; min-width: 0; }
+    .scene-picker-btn {
+      width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      background: #1a1a1a; border: 1px solid #444; color: #ccc;
       padding: 7px 10px; border-radius: 8px; font-size: 13px; font-weight: 500;
-      transition: border-color .15s, box-shadow .15s;
+      cursor: pointer; transition: border-color .15s, box-shadow .15s, color .15s;
     }
-    .scene-select:focus {
-      outline: none; border-color: #2d6cdf;
+    .scene-picker-btn:hover { border-color: #555; color: #eee; }
+    .scene-picker.open .scene-picker-btn {
+      border-color: #2d6cdf; color: #eee;
       box-shadow: 0 0 0 2px rgba(45, 108, 223, 0.22);
+    }
+    .scene-picker-chevron { font-size: 11px; color: #777; flex-shrink: 0; }
+    .scene-picker-menu {
+      position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
+      background: #1a1a1a; border: 1px solid #444; border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); overflow: hidden;
+    }
+    .scene-picker-menu[hidden] { display: none !important; }
+    .scene-picker-list {
+      display: flex; flex-direction: column; gap: 0; max-height: 200px; overflow-y: auto;
+    }
+    .scene-picker-empty {
+      padding: 12px 10px; font-size: 12px; color: #666; text-align: center;
+    }
+    .scene-picker-row {
+      display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 10px;
+      border-bottom: 1px solid #2a2a2a; cursor: pointer; transition: background .12s;
+    }
+    .scene-picker-row:last-child { border-bottom: none; }
+    .scene-picker-row:hover { background: #242424; }
+    .scene-picker-row.active { background: #1e2a40; }
+    .scene-picker-name {
+      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: 13px; color: #ddd; cursor: text;
+      border-bottom: 1px dashed transparent;
+    }
+    .scene-picker-name:hover { border-bottom-color: #666; color: #fff; }
+    .scene-picker-del {
+      width: 26px; height: 26px; padding: 0; flex-shrink: 0;
+      border-radius: 6px; background: transparent; border: 1px solid #444;
+      color: #999; font-size: 14px; line-height: 1; cursor: pointer;
+      transition: background .12s, border-color .12s, color .12s;
+    }
+    .scene-picker-del:hover {
+      background: rgba(139, 46, 46, 0.22); border-color: #8b4040; color: #ffc0c0;
+    }
+    .scene-rename-input {
+      flex: 1; min-width: 0; background: #111; border: 1px solid #2d6cdf; color: #eee;
+      padding: 3px 7px; border-radius: 6px; font-size: 13px;
     }
     .scene-add-btn {
       width: 36px; flex-shrink: 0; padding: 0; border-radius: 8px;
@@ -235,17 +277,6 @@
       transition: background .15s, border-color .15s, color .15s;
     }
     .scene-add-btn:hover { background: #333; border-color: #2d6cdf; color: #fff; }
-    .scene-del-btn {
-      width: 36px; flex-shrink: 0; padding: 0; border-radius: 8px;
-      background: #2a2a2a; border: 1px solid #454545; color: #999;
-      font-size: 16px; line-height: 1; cursor: pointer;
-      transition: background .15s, border-color .15s, color .15s, opacity .15s;
-    }
-    .scene-del-btn:hover:not(:disabled) {
-      background: rgba(139, 46, 46, 0.22); border-color: #8b4040; color: #ffc0c0;
-    }
-    .scene-del-btn:disabled { opacity: 0.32; cursor: not-allowed; }
-    .scene-select option { color: #eee; }
   </style>
   <script type="importmap">
   {
@@ -292,10 +323,15 @@
         </div>
         <div class="scene-manager">
           <div class="scene-select-row">
-            <select id="sceneSelect" class="scene-select" aria-label="选择场景">
-              <option value="">新建或选择已保存场景</option>
-            </select>
-            <button type="button" id="sceneDeleteBtn" class="scene-del-btn" title="删除当前场景" disabled>×</button>
+            <div class="scene-picker" id="scenePicker">
+              <button type="button" id="scenePickerBtn" class="scene-picker-btn" aria-haspopup="listbox" aria-expanded="false">
+                <span id="scenePickerLabel">选择已有场景</span>
+                <span class="scene-picker-chevron">▾</span>
+              </button>
+              <div id="scenePickerMenu" class="scene-picker-menu" hidden>
+                <div id="scenePickerList" class="scene-picker-list"></div>
+              </div>
+            </div>
             <button type="button" id="newSceneBtn" class="scene-add-btn" title="新建空白场景">＋</button>
           </div>
         </div>
@@ -1243,27 +1279,105 @@
       return parts.join(' · ');
     }
 
-    const SCENE_SELECT_PLACEHOLDER = '新建或选择已保存场景';
+    const SCENE_PICKER_LABEL = '选择已有场景';
+    let scenePickerOpen = false;
+
+    function setScenePickerOpen(open) {
+      scenePickerOpen = !!open;
+      const picker = el('scenePicker');
+      const menu = el('scenePickerMenu');
+      const btn = el('scenePickerBtn');
+      if (picker) picker.classList.toggle('open', scenePickerOpen);
+      if (menu) menu.hidden = !scenePickerOpen;
+      if (btn) btn.setAttribute('aria-expanded', scenePickerOpen ? 'true' : 'false');
+    }
 
     function renderSceneManagerUI() {
-      const select = el('sceneSelect');
-      const delBtn = el('sceneDeleteBtn');
-      if (!select || !scenesStore) return;
+      const list = el('scenePickerList');
+      const label = el('scenePickerLabel');
+      if (!list || !scenesStore) return;
       const scenes = scenesStore.scenes || [];
-      select.innerHTML = '';
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = SCENE_SELECT_PLACEHOLDER;
-      select.appendChild(placeholder);
-      for (const scene of scenes) {
-        const opt = document.createElement('option');
-        opt.value = scene.id;
-        const summary = sceneSummary(scene.config);
-        opt.textContent = summary === '空场景' ? scene.name : `${scene.name} · ${summary}`;
-        select.appendChild(opt);
+      if (label) label.textContent = SCENE_PICKER_LABEL;
+      list.innerHTML = '';
+      if (!scenes.length) {
+        const empty = document.createElement('div');
+        empty.className = 'scene-picker-empty';
+        empty.textContent = '暂无已保存场景';
+        list.appendChild(empty);
+        return;
       }
-      select.value = activeSceneId || '';
-      if (delBtn) delBtn.disabled = !activeSceneId;
+      for (const scene of scenes) {
+        const row = document.createElement('div');
+        row.className = 'scene-picker-row' + (scene.id === activeSceneId ? ' active' : '');
+        row.setAttribute('role', 'option');
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'scene-picker-name';
+        nameSpan.textContent = scene.name;
+        nameSpan.title = '点击重命名';
+        nameSpan.onclick = (e) => {
+          e.stopPropagation();
+          startSceneRename(scene.id, nameSpan);
+        };
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'scene-picker-del';
+        del.textContent = '×';
+        del.title = '删除场景';
+        del.onclick = (e) => {
+          e.stopPropagation();
+          deleteSceneById(scene.id).catch(showError);
+        };
+        row.appendChild(nameSpan);
+        row.appendChild(del);
+        row.onclick = () => {
+          setScenePickerOpen(false);
+          loadSceneById(scene.id).catch(showError);
+        };
+        list.appendChild(row);
+      }
+    }
+
+    function startSceneRename(sceneId, anchorEl) {
+      const scene = getSceneById(sceneId);
+      if (!scene || !(anchorEl && anchorEl.replaceWith)) return;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'scene-rename-input';
+      input.value = scene.name;
+      input.onclick = (e) => e.stopPropagation();
+      const commit = async () => {
+        const v = input.value.trim();
+        if (v && v !== scene.name) {
+          scene.name = v;
+          scene.updatedAt = new Date().toISOString();
+          await persistScenesStore();
+          status(`已重命名为「${scene.name}」`);
+        }
+        renderSceneManagerUI();
+      };
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit().catch(showError); }
+        if (e.key === 'Escape') renderSceneManagerUI();
+      };
+      input.onblur = () => commit().catch(showError);
+      anchorEl.replaceWith(input);
+      input.focus();
+      input.select();
+    }
+
+    function setupScenePicker() {
+      const btn = el('scenePickerBtn');
+      const picker = el('scenePicker');
+      if (!btn || !picker) return;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        setScenePickerOpen(!scenePickerOpen);
+      };
+      document.addEventListener('click', (e) => {
+        if (!scenePickerOpen) return;
+        if (picker.contains(e.target)) return;
+        setScenePickerOpen(false);
+      });
     }
 
     async function persistScenesStore() {
@@ -1353,6 +1467,7 @@
         await applyConfigToEditor(parseSavedConfig(scene.config), loadToken);
         if (isSessionAborted(loadToken)) return;
         renderSceneManagerUI();
+        setScenePickerOpen(false);
         await persistScenesStore().catch((e) => console.warn('场景索引保存失败', e));
         const parsed = parseSavedConfig(scene.config);
         const modelCount = _n(parsed.placements && parsed.placements.length, 0);
@@ -3980,16 +4095,8 @@
     el('tabModelsBtn').onclick = () => switchPanelTab('models');
     el('tabCameraBtn').onclick = () => switchPanelTab('camera');
     el('saveBtn').onclick = () => savePlacements().catch(showError);
-    el('sceneSelect').onchange = () => {
-      const id = el('sceneSelect').value;
-      if (!id) return;
-      loadSceneById(id).catch(showError);
-    };
+    setupScenePicker();
     el('newSceneBtn').onclick = () => createNewScene().catch(showError);
-    el('sceneDeleteBtn').onclick = () => {
-      if (!activeSceneId) return;
-      deleteSceneById(activeSceneId).catch(showError);
-    };
     el('importJsonBtn').onclick = () => el('importConfigFile').click();
     el('importConfigFile').onchange = async () => {
       const file = el('importConfigFile').files && el('importConfigFile').files[0];
@@ -4094,10 +4201,10 @@
           status('就绪 · 保存接口版本过旧，请重启 serve_editor.py 后再点保存');
         } else if (scenesStore.scenes.length) {
           const modeNote = hostMode === 'static' ? ' · 已从浏览器读取' : '';
-          status(`就绪${modeNote} · ${scenesStore.scenes.length} 个已保存场景 · 请从下拉框选择或点 ＋ 新建`);
+          status(`就绪${modeNote} · ${scenesStore.scenes.length} 个已保存场景 · 点「选择已有场景」加载`);
         } else {
           const modeNote = hostMode === 'static' ? ' · 在线版' : '';
-          status(`就绪${modeNote} · 点 ＋ 新建场景，或拖入 PLY 开始`);
+          status(`就绪${modeNote} · 点 ＋ 新建，或保存后出现在场景列表`);
         }
       } catch (e) { showError(e); }
     })();
