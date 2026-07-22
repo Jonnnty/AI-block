@@ -123,6 +123,10 @@
     }
     .scene-row:hover { background: #2a2a2a; }
     .scene-row.active { background: #1e2a40; border-color: #2d6cdf; }
+    .scene-row.missing { background: rgba(90, 30, 30, 0.45); border-color: #8b4040; }
+    .scene-row.missing .scene-name { color: #ff8888; }
+    .scene-row.missing:hover { background: rgba(110, 40, 40, 0.55); }
+    .scene-row.missing.active { background: rgba(100, 35, 35, 0.72); border-color: #c05050; }
     .scene-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .icon-btn {
       width: 24px; height: 24px; padding: 0; border-radius: 4px; background: transparent;
@@ -664,7 +668,7 @@
     const el = (id) => document.getElementById(id);
     const status = (msg) => { el('status').textContent = msg; };
 
-    /** @type {Array<{name:string,x:number,y:number,z:number,scale:number,yaw_deg:number,sceneIdx:number|null,center:number[]}>} */
+    /** @type {Array<{name:string,x:number,y:number,z:number,scale:number,yaw_deg:number,sceneIdx:number|null,center:number[],missing?:boolean}>} */
     const placements = [];
     /** @type {Map<string, ArrayBuffer>} */
     const fileCache = new Map();
@@ -3790,7 +3794,10 @@
       for (const id of ['selX', 'selY', 'selZ', 'selScale', 'selYaw']) el(id).disabled = !enabled;
       if (enabled) {
         updateSelSliders();
-        el('selHint').textContent = placements[idx].name;
+        const p = placements[idx];
+        el('selHint').textContent = p.missing
+          ? `${p.name}（缺少 PLY，放回文件后重新加载场景即可恢复）`
+          : p.name;
       } else {
         el('selHint').textContent = '从列表选中模型';
       }
@@ -3825,15 +3832,17 @@
 
     function removePlacement(idx) {
       const p = placements[idx];
-      if (!p || p.sceneIdx == null || !viewer) return;
-      viewer.removeSplatScene(p.sceneIdx, false);
-      for (const other of placements) {
-        if (other.sceneIdx != null && other.sceneIdx > p.sceneIdx) other.sceneIdx--;
+      if (!p) return;
+      if (p.sceneIdx != null && viewer) {
+        viewer.removeSplatScene(p.sceneIdx, false);
+        for (const other of placements) {
+          if (other.sceneIdx != null && other.sceneIdx > p.sceneIdx) other.sceneIdx--;
+        }
+        viewer.forceRenderNextFrame();
       }
       placements.splice(idx, 1);
       if (selected === idx) selectPlacement(-1);
       else if (selected > idx) selected--;
-      viewer.forceRenderNextFrame();
       renderList();
       status(`已删除，剩余 ${placements.length} 个`);
     }
@@ -3843,7 +3852,10 @@
       list.innerHTML = '';
       placements.forEach((p, i) => {
         const row = document.createElement('div');
-        row.className = 'scene-row' + (i === selected ? ' active' : '');
+        row.className = 'scene-row'
+          + (i === selected ? ' active' : '')
+          + (p.missing ? ' missing' : '');
+        if (p.missing) row.title = '缺少 PLY 文件，3D 视图不显示；放回文件后重新加载场景即可恢复';
         row.innerHTML = `<span class="scene-name">${p.name}</span>`;
         const del = document.createElement('button');
         del.type = 'button'; del.className = 'icon-btn'; del.textContent = '×';
@@ -4021,6 +4033,17 @@
         let ab = fileCache.get(name);
         if (!ab) {
           missing.push(name);
+          placements.push({
+            name,
+            x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
+            scale: _n(item.scale, defaultScale),
+            yaw_deg: _n(item.yaw_deg, 0),
+            sceneIdx: null,
+            center: Array.isArray(item.center) && item.center.length >= 3
+              ? [_n(item.center[0], 0), _n(item.center[1], 0), _n(item.center[2], 0)]
+              : [0, 0, 0],
+            missing: true,
+          });
           continue;
         }
         const file = new File([ab], name);
@@ -4050,8 +4073,9 @@
         placements.push(p);
       }
       renderList();
+      const loadedCount = placements.filter((p) => !p.missing).length;
       if (missing.length) {
-        status(`已恢复 ${placements.length} 个模型 · 缺少 ${missing.length} 个 PLY（请重新拖入或先点保存）: ${missing.slice(0, 3).join('、')}${missing.length > 3 ? '…' : ''}`);
+        status(`已加载 ${loadedCount} 个模型 · ${missing.length} 个缺少 PLY（红色条目，放回文件后重新加载场景即可）: ${missing.slice(0, 3).join('、')}${missing.length > 3 ? '…' : ''}`);
       } else {
         status(`已恢复 ${placements.length} 个模型`);
       }
