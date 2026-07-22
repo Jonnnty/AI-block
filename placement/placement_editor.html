@@ -558,7 +558,6 @@
         <h2>导入模型</h2>
         <input type="file" id="pickFile" accept=".ply" multiple hidden />
         <button type="button" id="importBtn" class="secondary">选择 PLY 文件</button>
-        <p class="import-privacy-hint">拖入或选择 PLY 会缓存到浏览器本地（不上传 GitHub）。清除网站数据后缓存丢失，模型会变红；拖入同名文件可恢复并保留位置等信息。</p>
       </section>
       <section>
         <h2>已放置</h2>
@@ -959,7 +958,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260724a';
+    const MODEL_LOAD_BUILD = '20260724b';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
