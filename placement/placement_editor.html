@@ -243,6 +243,12 @@
       border: 1px solid #444; color: #bbb; font-size: 12px; flex-shrink: 0;
     }
     .icon-btn:hover { background: #333; color: #fff; }
+    .icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .icon-btn.visibility-btn.is-off { opacity: 0.4; color: #777; position: relative; }
+    .icon-btn.visibility-btn.is-off::after {
+      content: ''; position: absolute; left: 4px; right: 4px; top: 50%;
+      height: 1px; background: currentColor; transform: rotate(-45deg); pointer-events: none;
+    }
     #pickFile { display: none; }
     input[type=number] {
       background: #252525; border: 1px solid #444; color: #eee;
@@ -958,7 +964,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260724b';
+    const MODEL_LOAD_BUILD = '20260724c';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -1521,7 +1527,7 @@
     const el = (id) => document.getElementById(id);
     const status = (msg) => { el('status').textContent = msg; };
 
-    /** @type {Array<{name:string,x:number,y:number,z:number,scale:number,yaw_deg:number,sceneIdx:number|null,center:number[],missing?:boolean,sourcePath?:string|null}>} */
+    /** @type {Array<{name:string,x:number,y:number,z:number,scale:number,yaw_deg:number,sceneIdx:number|null,center:number[],visible?:boolean,missing?:boolean,sourcePath?:string|null}>} */
     const placements = [];
     /** @type {Map<string, ArrayBuffer>} */
     const fileCache = new Map();
@@ -4520,7 +4526,24 @@
         rotation: [q.x, q.y, q.z, q.w],
         scale: [p.scale, p.scale, p.scale],
         splatAlphaRemovalThreshold: PLY_ALPHA,
+        visible: p.visible !== false,
       };
+    }
+
+    function applyPlacementVisibility(p) {
+      if (!viewer || !viewer.splatMesh || p.sceneIdx == null || p.missing) return;
+      const scene = viewer.splatMesh.getScene(p.sceneIdx);
+      scene.visible = p.visible !== false;
+      viewer.splatMesh.updateTransforms();
+      viewer.forceRenderNextFrame();
+    }
+
+    function togglePlacementVisibility(idx) {
+      const p = placements[idx];
+      if (!p || p.missing) return;
+      p.visible = p.visible === false;
+      applyPlacementVisibility(p);
+      renderList();
     }
 
     function syncPlacementTransform(p) {
@@ -4831,6 +4854,7 @@
         if (!Array.isArray(p.center) || p.center.length < 3) {
           p.center = [anchor.x, anchor.y, anchor.z];
         }
+        applyPlacementVisibility(p);
         selectPlacement(missingIdx);
         hideLoadProgress();
         const loadedCount = placements.filter((x) => !x.missing).length;
@@ -4851,6 +4875,7 @@
         scale: defaultScale,
         yaw_deg: 0,
         sceneIdx: null,
+        visible: true,
         center: [anchorFromBounds.x, anchorFromBounds.y, anchorFromBounds.z],
       };
       const sceneIdx = _n(viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
@@ -4977,6 +5002,7 @@
       p.sceneIdx = sceneIdx;
       p.missing = false;
       delete p.missingReason;
+      applyPlacementVisibility(p);
       renderList();
       return true;
     }
@@ -4993,9 +5019,17 @@
         row.innerHTML = p.missing
           ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || '缺少 PLY'}</span></span>`
           : `<span class="scene-name">${p.name}</span>`;
+        const vis = document.createElement('button');
+        vis.type = 'button';
+        vis.className = 'icon-btn visibility-btn' + (p.visible === false ? ' is-off' : '');
+        vis.textContent = '👁';
+        vis.title = p.visible === false ? '点击显示' : '点击隐藏';
+        vis.disabled = !!p.missing;
+        vis.onclick = (e) => { e.stopPropagation(); togglePlacementVisibility(i); };
         const del = document.createElement('button');
         del.type = 'button'; del.className = 'icon-btn'; del.textContent = '×';
         del.onclick = (e) => { e.stopPropagation(); removePlacement(i).catch(showError); };
+        row.appendChild(vis);
         row.appendChild(del);
         row.onclick = () => selectPlacement(i);
         list.appendChild(row);
@@ -5012,7 +5046,7 @@
           center: p.center,
           pitch_deg: 0,
           roll_deg: 0,
-          visible: true,
+          visible: p.visible !== false,
         };
         if (p.sourcePath) item.sourcePath = p.sourcePath;
         return item;
@@ -5199,6 +5233,7 @@
             scale: _n(item.scale, defaultScale),
             yaw_deg: _n(item.yaw_deg, 0),
             sceneIdx: null,
+            visible: item.visible !== false,
             center: Array.isArray(item.center) && item.center.length >= 3
               ? [_n(item.center[0], 0), _n(item.center[1], 0), _n(item.center[2], 0)]
               : [0, 0, 0],
@@ -5214,6 +5249,7 @@
           scale: _n(item.scale, defaultScale),
           yaw_deg: _n(item.yaw_deg, 0),
           sceneIdx: null,
+          visible: item.visible !== false,
           center: _n(item.center, [0, 0, 0]),
         };
         const bounds = computePlyBounds(ab);
