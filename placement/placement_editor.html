@@ -862,6 +862,9 @@
       await idbPutHandle(sceneFileHandleKey(sceneId, assetName), fileHandle);
       await idbDeleteHandle(sceneDirHandleKey(sceneId, assetName));
       await idbDeleteEntry(ASSET_META_STORE, sceneDirFileKey(sceneId, assetName));
+      const assetKey = sceneAssetIdbKey(sceneId, assetName);
+      if (assetKey) await idbDeleteEntry(ASSET_STORE, assetKey);
+      await idbDeleteEntry(ASSET_STORE, assetName);
       await setLocalSourceLabel(sceneId, assetName, sourceLabel || fileHandle.name);
     }
 
@@ -869,6 +872,9 @@
       await idbPutHandle(sceneDirHandleKey(sceneId, assetName), dirHandle);
       await idbDeleteHandle(sceneFileHandleKey(sceneId, assetName));
       await idbPutMeta(sceneDirFileKey(sceneId, assetName), fileName || assetName);
+      const assetKey = sceneAssetIdbKey(sceneId, assetName);
+      if (assetKey) await idbDeleteEntry(ASSET_STORE, assetKey);
+      await idbDeleteEntry(ASSET_STORE, assetName);
       await setLocalSourceLabel(sceneId, assetName, sourceLabel || `${dirHandle.name}/${fileName || assetName}`);
     }
 
@@ -890,12 +896,28 @@
       return `sourcePath:${name}`;
     }
 
+    function preferLocalFileHandlesOnly() {
+      return supportsLocalFileAccess() && hostMode === 'static';
+    }
+
+    async function purgeIdbBinaryCacheForLocalAccess() {
+      if (!supportsLocalFileAccess()) return 0;
+      const flagKey = 'placement_editor_binary_cache_purged_v4_fsa';
+      try {
+        if (localStorage.getItem(flagKey)) return 0;
+        localStorage.setItem(flagKey, '1');
+      } catch (_) {}
+      const keys = await idbListStoreKeys(ASSET_STORE);
+      for (const key of keys) await idbDeleteEntry(ASSET_STORE, key);
+      return keys.length;
+    }
+
     function fileCacheKey(sceneId, assetName) {
       return sceneId ? `${sceneId}::${assetName}` : assetName;
     }
 
     /** 模型加载追踪（控制台）；本地授权见 import-privacy-hint / localAccessBanner */
-    const MODEL_LOAD_BUILD = '20260723e';
+    const MODEL_LOAD_BUILD = '20260723f';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -1225,8 +1247,7 @@
     const BINARY_CACHE_PURGE_KEY = 'placement_editor_binary_cache_purged_v3';
 
     async function purgeLegacyBinaryCacheOnce() {
-      // 在线版依赖 IndexedDB 缓存用户拖入的 PLY，不再自动清空。
-      return 0;
+      return purgeIdbBinaryCacheForLocalAccess();
     }
 
     function isLocalFilesystemPath(pathStr) {
@@ -1403,6 +1424,14 @@
       if (trace.localHandleBlocked) {
         modelLoadWarn('resolve 本地授权未通过', { ...trace, reason: 'local_handle_permission' });
         return finish('local_handle_permission', null, { loadedFrom: 'local-denied' });
+      }
+
+      if (preferLocalFileHandlesOnly()) {
+        const hasHandle = await idbGetHandle(sceneFileHandleKey(sceneId, name))
+          || await idbGetHandle(sceneDirHandleKey(sceneId, name));
+        const reason = hasHandle ? 'local_handle_permission' : 'asset_not_found';
+        modelLoadWarn('resolve 仅本地文件', { ...trace, reason, hasHandle: !!hasHandle });
+        return finish(reason, null, { loadedFrom: 'local-required', hasHandle: !!hasHandle });
       }
 
       const httpResult = await fetchAssetStatic(name, pathHint, loadToken, trace);
@@ -4843,6 +4872,9 @@
 
     async function addPlacementFromFile(file, loadToken = sessionResetToken, opts = {}) {
       if (!sceneReady) throw new Error('场景尚未就绪');
+      if (preferLocalFileHandlesOnly() && !opts.fileHandle && !opts.dirHandle) {
+        throw new Error('请从文件管理器拖入文件或文件夹，以指向本地磁盘');
+      }
       const { assetName, missingIdx } = resolveImportAssetName(file);
       let sourcePath = inferSourcePathForImport(file);
       if (!sourcePath) sourcePath = await guessAssetPathFromServer(file.name);
@@ -5388,14 +5420,10 @@
         }
 
         if (!droppedFiles.length) {
-          status(supportsLocalFileAccess()
-            ? '请拖入 .ply 文件或文件夹（需从文件管理器拖入以指向本地）'
-            : '请拖入 .ply 模型文件或文件夹');
+          status('请从文件管理器拖入 .ply 文件或文件夹');
           return;
         }
-        for (const f of droppedFiles) {
-          try { await addPlacementFromFile(f); } catch (err) { status(`失败: ${err.message}`); }
-        }
+        status('无法指向本地文件，请从文件管理器重新拖入（不要从浏览器内拖出）');
       });
     }
 
@@ -5408,6 +5436,11 @@
     el('importBtn').onclick = () => pickPlyFilesWithLocalAccess().catch(showError);
     el('localAccessBannerBtn').onclick = () => restoreAllLocalPermissionsAndReload().catch(showError);
     el('pickFile').onchange = async () => {
+      if (preferLocalFileHandlesOnly()) {
+        el('pickFile').value = '';
+        status('请使用「选择 PLY 文件」按钮，以指向本地磁盘');
+        return;
+      }
       const files = [...(el('pickFile').files || [])];
       el('pickFile').value = '';
       for (const f of files) {
