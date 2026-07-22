@@ -963,7 +963,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260724e';
+    const MODEL_LOAD_BUILD = '20260724f';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -2994,6 +2994,18 @@
       applyPathPinPosition();
     }
 
+    function jumpPathPinToControlPoint(segIdx, pointIdx) {
+      if (cameraMarkers.length < 2 || pointIdx < 0) return;
+      const pt = cameraPathSegments[segIdx] && cameraPathSegments[segIdx].points
+        && cameraPathSegments[segIdx].points[pointIdx];
+      if (!pt) return;
+      pathSlidePlaying = false;
+      stopPathSlidePreview();
+      updatePathTransportUI();
+      applyPathPinAtGlobalT(globalTFromSegmentHit(segIdx, pt.t));
+      updatePathSlideStatus('路径预览：已暂停 · 编辑弯折点', true);
+    }
+
     function syncPathPinFromCamera() {
       if (cameraMarkers.length < 2 || !renderCamRig) return;
       let bestT = pathPinT;
@@ -3178,7 +3190,6 @@
       const segIdx = hit.object.userData.pathSegIdx;
       const t = approximateTOnSegment(segIdx, hit.point);
 
-      if (pathSlidePlaying) pausePathSlide();
       selectedMarkerIdx = -1;
       selected = -1;
       markerGizmoMode = null;
@@ -3745,8 +3756,8 @@
       rebuildCpVisuals();
       updateKeypointEditUI();
       renderMarkerList();
+      jumpPathPinToControlPoint(segIdx, pointIdx);
       attachGizmo();
-      stopPathSlidePreview();
       status('轨迹弯折 · Q 移动 · W 旋转 · 完成后点「完成」');
     }
 
