@@ -235,54 +235,35 @@
       transition: background .15s, border-color .15s, color .15s;
     }
     .scene-add-btn:hover { background: #333; border-color: #2d6cdf; color: #fff; }
-    .scene-catalog {
-      display: flex; flex-direction: column; gap: 5px;
-      max-height: 168px; overflow-y: auto; padding-right: 2px;
-    }
-    .scene-catalog:empty::before {
-      content: '暂无已保存场景 · 编辑后点保存，或点 ＋ 新建';
-      display: block; padding: 10px 8px; border-radius: 8px;
-      background: rgba(255, 255, 255, 0.02); border: 1px dashed #3a3a3a;
-      font-size: 11px; color: #666; line-height: 1.45; text-align: center;
-    }
-    .scene-catalog-row {
-      display: flex; align-items: center; gap: 6px; padding: 7px 8px;
+    .scene-active-bar {
+      display: flex; align-items: center; gap: 8px; padding: 7px 9px;
       border-radius: 8px; background: #1e1e1e; border: 1px solid #333;
-      cursor: pointer; transition: background .12s, border-color .12s, box-shadow .12s;
     }
-    .scene-catalog-row:hover { background: #262626; border-color: #444; }
-    .scene-catalog-row.active {
-      background: linear-gradient(90deg, rgba(45, 108, 223, 0.18) 0%, rgba(30, 42, 64, 0.55) 100%);
-      border-color: #2d6cdf;
-      box-shadow: inset 0 0 0 1px rgba(108, 204, 255, 0.08);
-    }
-    .scene-catalog-name {
+    .scene-active-bar[hidden] { display: none !important; }
+    .scene-active-name {
       flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      font-size: 12px; font-weight: 500; color: #ddd;
+      font-size: 12px; font-weight: 500; color: #ddd; cursor: text;
+      border-bottom: 1px dashed transparent;
     }
-    .scene-catalog-name.editable {
-      cursor: text; border-bottom: 1px dashed transparent;
-    }
-    .scene-catalog-name.editable:hover { border-bottom-color: #666; color: #fff; }
-    .scene-catalog-meta {
+    .scene-active-name:hover { border-bottom-color: #666; color: #fff; }
+    .scene-active-meta {
       flex-shrink: 0; font-size: 10px; color: #666; white-space: nowrap;
     }
-    .scene-catalog-del {
+    .scene-active-del {
       width: 26px; height: 26px; padding: 0; flex-shrink: 0;
       border-radius: 6px; background: transparent; border: 1px solid #444;
       color: #999; font-size: 14px; line-height: 1; cursor: pointer;
       transition: background .12s, border-color .12s, color .12s;
     }
-    .scene-catalog-del:hover {
+    .scene-active-del:hover {
       background: rgba(139, 46, 46, 0.22); border-color: #8b4040; color: #ffc0c0;
     }
     .scene-rename-input {
       flex: 1; min-width: 0; background: #111; border: 1px solid #2d6cdf; color: #eee;
       padding: 3px 7px; border-radius: 6px; font-size: 12px;
     }
-    .scene-manager-hint {
-      font-size: 10px; color: #555; line-height: 1.45; margin: 0;
-    }
+    .scene-select option { color: #eee; }
+    .scene-select-placeholder { color: #888; }
   </style>
   <script type="importmap">
   {
@@ -330,12 +311,15 @@
         <div class="scene-manager">
           <div class="scene-select-row">
             <select id="sceneSelect" class="scene-select" aria-label="选择场景">
-              <option value="">选择场景…</option>
+              <option value="">新建或选择已保存场景</option>
             </select>
             <button type="button" id="newSceneBtn" class="scene-add-btn" title="新建空白场景">＋</button>
           </div>
-          <div id="sceneCatalog" class="scene-catalog"></div>
-          <p class="scene-manager-hint">打开链接仅初始化；从下拉框或列表选择场景后才会复原</p>
+          <div id="sceneActiveBar" class="scene-active-bar" hidden>
+            <span id="sceneActiveName" class="scene-active-name" title="点击重命名">—</span>
+            <span id="sceneActiveMeta" class="scene-active-meta"></span>
+            <button type="button" id="sceneDeleteBtn" class="scene-active-del" title="删除当前场景">×</button>
+          </div>
         </div>
         <div class="panel-zone-label" style="margin-top:2px">
           <span>场景配置</span>
@@ -1281,49 +1265,35 @@
       return parts.join(' · ');
     }
 
+    const SCENE_SELECT_PLACEHOLDER = '新建或选择已保存场景';
+
     function renderSceneManagerUI() {
       const select = el('sceneSelect');
-      const catalog = el('sceneCatalog');
-      if (!select || !catalog || !scenesStore) return;
+      const activeBar = el('sceneActiveBar');
+      if (!select || !scenesStore) return;
       const scenes = scenesStore.scenes || [];
-      select.innerHTML = '<option value="">选择场景…</option>';
+      select.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = SCENE_SELECT_PLACEHOLDER;
+      select.appendChild(placeholder);
       for (const scene of scenes) {
         const opt = document.createElement('option');
         opt.value = scene.id;
-        opt.textContent = scene.name;
-        if (scene.id === activeSceneId) opt.selected = true;
+        const summary = sceneSummary(scene.config);
+        opt.textContent = summary === '空场景' ? scene.name : `${scene.name} · ${summary}`;
         select.appendChild(opt);
       }
-      if (!activeSceneId) select.value = '';
-      catalog.innerHTML = '';
-      for (const scene of scenes) {
-        const row = document.createElement('div');
-        row.className = 'scene-catalog-row' + (scene.id === activeSceneId ? ' active' : '');
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'scene-catalog-name editable';
-        nameSpan.textContent = scene.name;
-        nameSpan.title = '点击重命名';
-        nameSpan.onclick = (e) => {
-          e.stopPropagation();
-          startSceneRename(scene.id, nameSpan);
-        };
-        const meta = document.createElement('span');
-        meta.className = 'scene-catalog-meta';
-        meta.textContent = sceneSummary(scene.config);
-        const del = document.createElement('button');
-        del.type = 'button';
-        del.className = 'scene-catalog-del';
-        del.textContent = '×';
-        del.title = '删除场景';
-        del.onclick = (e) => {
-          e.stopPropagation();
-          deleteSceneById(scene.id).catch(showError);
-        };
-        row.appendChild(nameSpan);
-        row.appendChild(meta);
-        row.appendChild(del);
-        row.onclick = () => loadSceneById(scene.id).catch(showError);
-        catalog.appendChild(row);
+      select.value = activeSceneId || '';
+      if (activeBar) {
+        const scene = activeSceneId ? getSceneById(activeSceneId) : null;
+        activeBar.hidden = !scene;
+        if (scene) {
+          const nameEl = el('sceneActiveName');
+          const metaEl = el('sceneActiveMeta');
+          if (nameEl) nameEl.textContent = scene.name;
+          if (metaEl) metaEl.textContent = sceneSummary(scene.config);
+        }
       }
     }
 
@@ -4075,6 +4045,14 @@
       loadSceneById(id).catch(showError);
     };
     el('newSceneBtn').onclick = () => createNewScene().catch(showError);
+    el('sceneActiveName').onclick = () => {
+      if (!activeSceneId) return;
+      startSceneRename(activeSceneId, el('sceneActiveName'));
+    };
+    el('sceneDeleteBtn').onclick = () => {
+      if (!activeSceneId) return;
+      deleteSceneById(activeSceneId).catch(showError);
+    };
     el('importJsonBtn').onclick = () => el('importConfigFile').click();
     el('importConfigFile').onchange = async () => {
       const file = el('importConfigFile').files && el('importConfigFile').files[0];
@@ -4172,16 +4150,17 @@
         status('正在读取场景列表…');
         scenesStore = await loadScenesStore();
         if (isSessionAborted(loadToken)) return;
+        activeSceneId = null;
         renderSceneManagerUI();
         const saveOk = await checkSaveApiHealth();
         if (saveOk === false) {
           status('就绪 · 保存接口版本过旧，请重启 serve_editor.py 后再点保存');
         } else if (scenesStore.scenes.length) {
           const modeNote = hostMode === 'static' ? ' · 已从浏览器读取' : '';
-          status(`就绪${modeNote} · ${scenesStore.scenes.length} 个场景 · 请选择后加载`);
+          status(`就绪${modeNote} · ${scenesStore.scenes.length} 个已保存场景 · 请从下拉框选择或点 ＋ 新建`);
         } else {
-          const modeNote = hostMode === 'static' ? ' · 在线版（保存后可多场景管理）' : '';
-          status(`就绪${modeNote} · 拖入 PLY 或点 ＋ 新建场景`);
+          const modeNote = hostMode === 'static' ? ' · 在线版' : '';
+          status(`就绪${modeNote} · 点 ＋ 新建场景，或拖入 PLY 开始`);
         }
       } catch (e) { showError(e); }
     })();
