@@ -260,17 +260,17 @@
     .marker-dot.mid { background: #888; }
     .marker-dot.end { background: #a66; }
     .marker-dot.node { background: #7aa; }
-    .pose-seq-header {
-      display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px;
-    }
-    .pose-seq-header h2 { margin: 0; }
+    .pose-add-wrap { margin-top: 8px; }
     .pose-add-btn {
-      flex-shrink: 0; padding: 8px 14px; font-size: 12px; white-space: nowrap; border-radius: 8px;
-      background: linear-gradient(180deg, #ffd54f 0%, #e6a817 100%); color: #1a1408;
-      border: 1px solid #c99410; font-weight: 700;
-      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.28) inset, 0 2px 8px rgba(230, 168, 23, 0.35);
+      width: 100%; padding: 8px 12px; font-size: 13px; border-radius: 6px; font-weight: 600;
+      background: rgba(255, 205, 90, 0.12); border: 1px solid rgba(255, 195, 70, 0.28);
+      color: #d4b56a;
+      box-shadow: none;
     }
-    .pose-add-btn:hover { filter: brightness(1.06); }
+    .pose-add-btn:hover {
+      background: rgba(255, 205, 90, 0.2); border-color: rgba(255, 195, 70, 0.42); color: #e8c878;
+      filter: none;
+    }
     .curve-edit-bar {
       display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px;
       border-radius: 8px; background: rgba(255, 235, 120, 0.14); border: 1px solid rgba(255, 214, 80, 0.45);
@@ -571,8 +571,7 @@
           <button type="button" id="addPathGroupBtn" class="secondary">新建轨迹</button>
           <button type="button" id="deletePathGroupBtn" class="secondary danger">删除轨迹</button>
         </div>
-        <div class="pose-seq-header">
-          <h2>机位序列</h2>
+        <div class="pose-add-wrap">
           <button type="button" id="addMarkerBtn" class="pose-add-btn">＋ 当前机位</button>
         </div>
         <div id="markerList" class="marker-list"></div>
