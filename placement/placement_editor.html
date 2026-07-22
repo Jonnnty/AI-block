@@ -963,7 +963,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260724f';
+    const MODEL_LOAD_BUILD = '20260724g';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -4481,6 +4481,14 @@
     }
     function hideLoadProgress() { el('loadProgressWrap').hidden = true; }
 
+    function clearViewerLoadingSpinner() {
+      if (!viewer || !viewer.loadingSpinner) return;
+      try {
+        viewer.loadingSpinner.removeAllTasks();
+        viewer.loadingSpinner.hide();
+      } catch (_) {}
+    }
+
     function parsePlyHeader(arrayBuffer) {
       const bytes = new Uint8Array(arrayBuffer);
       let headerEnd = 0;
@@ -5034,7 +5042,13 @@
       const p = placements[idx];
       if (!p) return;
       if (p.sceneIdx != null && viewer) {
-        viewer.removeSplatScene(p.sceneIdx, false);
+        try {
+          await viewer.removeSplatScene(p.sceneIdx, false);
+        } catch (err) {
+          console.warn('removeSplatScene failed', err);
+        } finally {
+          clearViewerLoadingSpinner();
+        }
         for (const other of placements) {
           if (other.sceneIdx != null && other.sceneIdx > p.sceneIdx) other.sceneIdx--;
         }
@@ -5187,6 +5201,8 @@
           while (viewer && viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length > 0) {
             await viewer.removeSplatScene(0, false);
           }
+        } finally {
+          clearViewerLoadingSpinner();
         }
       }
       viewer && viewer.forceRenderNextFrame && viewer.forceRenderNextFrame();

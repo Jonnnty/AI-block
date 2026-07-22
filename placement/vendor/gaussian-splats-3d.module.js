@@ -12894,7 +12894,7 @@ class Viewer {
                 this.splatMesh.dispose();
                 this.sceneRevealMode = SceneRevealMode.Instant;
                 this.createSplatMesh();
-                this.addSplatBuffers(savedSplatBuffers, savedSceneOptions, true, false, true)
+                this.addSplatBuffers(savedSplatBuffers, savedSceneOptions, true, false, false)
                 .then(() => {
                     if (checkForEarlyExit()) return;
                     checkAndHideLoadingUI();
