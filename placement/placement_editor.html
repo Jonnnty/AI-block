@@ -484,8 +484,8 @@
     <header class="panel-chrome">
       <div class="status" id="status">初始化…</div>
       <div id="localBridgeHint" class="local-bridge-hint" hidden>
-        <div id="localBridgeHintText">GitHub 在线版无法读取 D 盘（HTTPS 限制）。本地服务已检测到，请用本地地址打开。</div>
-        <button type="button" id="openLocalEditorBtn">打开本地编辑器（自动导出 scene1 配置）</button>
+        <div id="localBridgeHintText">可选：运行 start_editor.bat 可从本机 D 盘加载大模型库。</div>
+        <button type="button" id="openLocalEditorBtn">打开本地编辑器</button>
       </div>
       <section class="panel-global">
         <div class="panel-zone-label">
@@ -518,7 +518,7 @@
         <div class="config-toolbar">
           <button type="button" id="saveBtn" class="cfg-btn cfg-btn-primary" title="保存到浏览器或 placements.json">
             <span class="cfg-btn-label">保存</span>
-            <span class="cfg-btn-sub">当前场景 · 配置 + 本地路径索引</span>
+            <span class="cfg-btn-sub">当前场景 · 配置 + 模型缓存</span>
           </button>
           <button type="button" id="exportJsonBtn" class="cfg-btn cfg-btn-ghost" title="下载当前场景 JSON 配置">
             <span class="cfg-btn-label">导出 JSON</span>
@@ -740,7 +740,7 @@
     }
 
     /** 模型变红调试：页面内「模型加载诊断」面板 + 控制台 [模型加载] */
-    const MODEL_LOAD_BUILD = '20260722i';
+    const MODEL_LOAD_BUILD = '20260722j';
     const MODEL_LOAD_DEBUG = !new URLSearchParams(location.search).has('quietModels');
     const modelLoadDiagEntries = [];
     const lastResolveTraceByAsset = new Map();
@@ -749,6 +749,7 @@
       need_local_server: '未连接本地服务，无法从 D 盘读 PLY',
       server_path_not_found: '未在 D:/Downloads/outputs 等目录找到 PLY',
       server_fetch_failed: '按 sourcePath 读文件失败',
+      asset_not_found: '未找到 PLY：请拖入文件，或确认 outputs 目录有该模型',
       session_aborted_before_fetch: '加载被中断',
       empty_asset_name: '资源名为空',
       unknown: '未知原因',
@@ -920,8 +921,12 @@
       await idbPutMeta(sceneSourcePathIdbKey(sceneId, assetName), String(sourcePath).replace(/\\/g, '/'));
     }
 
-    async function idbPutSceneAsset(sceneId, assetName, _arrayBuffer, sourcePath) {
+    async function idbPutSceneAsset(sceneId, assetName, arrayBuffer, sourcePath) {
       if (sourcePath) await idbPutSceneSourcePath(sceneId, assetName, sourcePath);
+      if (arrayBuffer) {
+        const key = sceneAssetIdbKey(sceneId, assetName) || assetName;
+        await idbPutAsset(key, arrayBuffer);
+      }
     }
 
     async function idbDeleteSceneAsset(sceneId, assetName) {
@@ -1014,8 +1019,9 @@
       }
     }
 
-    async function idbPutAssetWithMeta(sceneId, name, _arrayBuffer, sourcePath) {
-      if (sceneId) await idbPutSceneAsset(sceneId, name, null, sourcePath);
+    async function idbPutAssetWithMeta(sceneId, name, arrayBuffer, sourcePath) {
+      if (sceneId) await idbPutSceneAsset(sceneId, name, arrayBuffer, sourcePath);
+      else if (arrayBuffer) await idbPutAsset(name, arrayBuffer);
       else if (sourcePath) await idbPutMeta(legacySourcePathMetaKey(name), sourcePath);
     }
 
@@ -1032,16 +1038,8 @@
     const BINARY_CACHE_PURGE_KEY = 'placement_editor_binary_cache_purged_v3';
 
     async function purgeLegacyBinaryCacheOnce() {
-      if (localStorage.getItem(BINARY_CACHE_PURGE_KEY)) return 0;
-      try {
-        const keys = await idbListStoreKeys(ASSET_STORE);
-        await idbClearAll();
-        localStorage.setItem(BINARY_CACHE_PURGE_KEY, String(Date.now()));
-        return keys.length;
-      } catch (e) {
-        console.warn('清除浏览器 PLY 缓存失败', e);
-        return 0;
-      }
+      // 在线版依赖 IndexedDB 缓存用户拖入的 PLY，不再自动清空。
+      return 0;
     }
 
     function isLocalFilesystemPath(pathStr) {
@@ -1188,29 +1186,38 @@
 
       if (isSessionAborted(loadToken)) return finish('session_aborted_before_fetch', null);
 
-      if (!canLoadAssetsFromDisk()) {
-        modelLoadWarn('resolve 失败', { ...trace, reason: 'need_local_server' });
-        return finish('need_local_server', null);
-      }
-
       const pathHint = await resolveSourcePathForAsset(name, sourcePath, sceneId);
       trace.resolvedPath = pathHint || null;
-      if (!pathHint) {
-        modelLoadWarn('resolve 失败', { ...trace, reason: 'server_path_not_found' });
-        return finish('server_path_not_found', null);
+
+      if (canLoadAssetsFromDisk() && pathHint && isLocalFilesystemPath(pathHint)) {
+        const ab = await fetchAssetByPath(pathHint, loadToken);
+        if (ab) {
+          fileCache.set(cacheKey, ab);
+          if (sceneId) idbPutSceneSourcePath(sceneId, name, pathHint).catch((e) => console.warn('路径索引写入失败', e));
+          return finish('fetch_ok', ab, { resolvedPath: pathHint });
+        }
       }
 
-      const ab = await fetchAssetByPath(pathHint, loadToken);
-      if (!ab) {
-        modelLoadWarn('resolve 失败', { ...trace, reason: 'server_fetch_failed' });
-        return finish('server_fetch_failed', null, { resolvedPath: pathHint });
+      const httpResult = await fetchAssetStatic(name, pathHint, loadToken);
+      if (httpResult) {
+        fileCache.set(cacheKey, httpResult.ab);
+        if (sceneId) {
+          idbPutSceneAsset(sceneId, name, httpResult.ab, httpResult.resolvedPath).catch((e) => console.warn('模型缓存写入失败', e));
+        }
+        return finish('http_fetch_ok', httpResult.ab, { resolvedPath: httpResult.resolvedPath });
       }
 
-      fileCache.set(cacheKey, ab);
-      if (sceneId && isLocalFilesystemPath(pathHint)) {
-        idbPutSceneSourcePath(sceneId, name, pathHint).catch((e) => console.warn('路径索引写入失败', e));
+      const cached = await idbGetSceneAsset(sceneId, name);
+      if (cached) {
+        fileCache.set(cacheKey, cached);
+        return finish('idb_cache_hit', cached);
       }
-      return finish('fetch_ok', ab, { resolvedPath: pathHint });
+
+      const reason = canLoadAssetsFromDisk() && pathHint && isLocalFilesystemPath(pathHint)
+        ? 'server_fetch_failed'
+        : (canLoadAssetsFromDisk() && !pathHint ? 'server_path_not_found' : 'asset_not_found');
+      modelLoadWarn('resolve 失败', { ...trace, reason, resolvedPath: pathHint || null });
+      return finish(reason, null, { resolvedPath: pathHint || null });
     }
 
     function uniquePlacementAssetName(baseName) {
@@ -1230,14 +1237,16 @@
     function missingAssetRecoveryHint() {
       return canLoadAssetsFromDisk()
         ? '确认 PLY 仍在 D:/Downloads/outputs 等目录'
-        : '后台运行 start_editor.bat 后刷新页面';
+        : '将 PLY 拖入视图区，或把模型放到仓库 outputs/ 目录';
     }
 
     function missingPlacementHint(p) {
       if (!p || !p.missing) return '';
       if (p.missingReason) return p.missingReason;
       if (p.sourcePath) return `缺少 PLY：${p.sourcePath}`;
-      return canLoadAssetsFromDisk() ? '缺少 PLY · 请确认文件仍在原路径' : '需后台运行 start_editor.bat';
+      return canLoadAssetsFromDisk()
+        ? '缺少 PLY · 请确认文件仍在原路径'
+        : '缺少 PLY · 请重新拖入该文件';
     }
 
     async function migrateScenesSourcePaths(store) {
@@ -1914,14 +1923,14 @@
       } else if (localServerBridge) {
         if (saveBtn) saveBtn.title = '保存场景配置；模型从本地 D 盘路径加载，不占用浏览器空间';
       } else {
-        if (saveBtn) saveBtn.title = '保存场景配置到浏览器；需后台运行 serve_editor 才能加载 PLY';
+        if (saveBtn) saveBtn.title = '保存场景配置到浏览器；拖入的 PLY 缓存在本机 IndexedDB，刷新后仍可加载';
       }
     }
 
     function hostModeLabel() {
       if (localServerBridge) return '在线版·已桥接本地 D 盘';
       if (hostMode === 'server') return '本地路径模式';
-      return '在线版·未连接本地服务';
+      return '在线版';
     }
 
     const LOCAL_EDITOR_URL = 'http://127.0.0.1:8080/placement_editor.html';
@@ -1959,12 +1968,14 @@
         box.hidden = true;
         return;
       }
+      if (isRemoteGithubEditor()) {
+        box.hidden = true;
+        return;
+      }
       box.hidden = false;
       box.classList.remove('connected');
       if (text) {
-        text.textContent = isRemoteGithubEditor()
-          ? 'GitHub 在线版无法读取 D 盘（浏览器 HTTPS 安全限制）。请点下方按钮切换到本地编辑器；start_editor.bat 需保持运行。'
-          : '模型在 D 盘，需本机服务。请运行 placement/start_editor.bat 后点下方按钮。';
+        text.textContent = '可选：运行 placement/start_editor.bat 后，可从本机 D 盘加载大模型库（无需重复上传）。';
       }
     }
 
@@ -4606,8 +4617,8 @@
         ab = await file.arrayBuffer();
         if (isSessionAborted(loadToken)) return;
         fileCache.set(fileCacheKey(activeSceneId, assetName), ab);
-        if (activeSceneId && sourcePath) {
-          idbPutSceneSourcePath(activeSceneId, assetName, sourcePath).catch((e) => console.warn('路径索引写入失败', e));
+        if (activeSceneId) {
+          idbPutSceneAsset(activeSceneId, assetName, ab, sourcePath).catch((e) => console.warn('模型缓存写入失败', e));
         }
       }
       const bounds = computePlyBounds(ab);
