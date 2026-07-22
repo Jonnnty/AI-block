@@ -9,32 +9,41 @@ import subprocess
 import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent
 PLACEMENTS = ROOT / "placements.json"
-OUTPUTS = Path(r"D:\Downloads\outputs")
-if not OUTPUTS.is_dir():
-    OUTPUTS = ROOT / "outputs"
-OUTPUTS_50 = Path(r"D:\Downloads\outputs_50pct")
-if not OUTPUTS_50.is_dir():
-    OUTPUTS_50 = ROOT / "outputs_50pct"
 
 
-def resolve_editor_asset(asset_name: str) -> Path | None:
-    name = Path(asset_name).name
-    if not name or name != asset_name or ".." in asset_name:
+def resolve_asset_file(path_str: str) -> Path | None:
+    if not path_str or ".." in path_str:
         return None
-    for candidate in (
-        OUTPUTS_50 / name,
-        ROOT / "outputs_50pct" / name,
-        OUTPUTS / name,
-        ROOT / "outputs" / name,
-        ROOT / name,
-    ):
-        if candidate.is_file():
-            return candidate
-    return None
+    try:
+        p = Path(path_str).expanduser()
+        if not p.is_absolute():
+            p = (ROOT / p).resolve()
+        else:
+            p = p.resolve()
+    except (OSError, ValueError):
+        return None
+    if not p.is_file() or p.suffix.lower() != ".ply":
+        return None
+    return p
+
+
+def pick_folder_dialog() -> str | None:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        path = filedialog.askdirectory(title="选择模型文件夹")
+        root.destroy()
+        return path or None
+    except Exception:
+        return None
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
@@ -81,11 +90,12 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/health":
             self._json(200, {"ok": True, "configVersion": 3})
             return
-        if path.startswith("/api/asset/"):
-            raw_name = unquote(path[len("/api/asset/"):].lstrip("/"))
-            asset_path = resolve_editor_asset(raw_name)
+        if path == "/api/asset/file":
+            qs = parse_qs(urlparse(self.path).query)
+            path_str = unquote(qs.get("path", [""])[0])
+            asset_path = resolve_asset_file(path_str)
             if not asset_path:
-                self._json(404, {"error": f"asset not found: {raw_name}"})
+                self._json(404, {"error": f"asset not found: {path_str}"})
                 return
             data = asset_path.read_bytes()
             self.send_response(200)
@@ -130,6 +140,13 @@ class Handler(SimpleHTTPRequestHandler):
                 count = len(payload.get("placements", []))
                 version = 2
             self._json(200, {"ok": True, "count": count, "configVersion": version})
+            return
+        if path == "/api/pick-folder":
+            folder = pick_folder_dialog()
+            if not folder:
+                self._json(400, {"error": "未选择文件夹"})
+                return
+            self._json(200, {"path": folder.replace("\\", "/")})
             return
         if path == "/api/merge":
             data = self._read_json() if self.headers.get("Content-Length") else {}
