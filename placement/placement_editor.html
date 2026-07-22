@@ -740,7 +740,7 @@
     }
 
     /** 模型变红调试：页面内「模型加载诊断」面板 + 控制台 [模型加载] */
-    const MODEL_LOAD_BUILD = '20260722j';
+    const MODEL_LOAD_BUILD = '20260722k';
     const MODEL_LOAD_DEBUG = !new URLSearchParams(location.search).has('quietModels');
     const modelLoadDiagEntries = [];
     const lastResolveTraceByAsset = new Map();
@@ -1220,6 +1220,19 @@
       return finish(reason, null, { resolvedPath: pathHint || null });
     }
 
+    function findMissingPlacementIndex(fileName) {
+      const normalized = (fileName && String(fileName).trim()) || '';
+      if (!normalized) return -1;
+      return placements.findIndex((p) => p.missing && p.name.toLowerCase() === normalized.toLowerCase());
+    }
+
+    function resolveImportAssetName(file) {
+      const normalized = (file && file.name && String(file.name).trim()) || 'model.ply';
+      const missingIdx = findMissingPlacementIndex(normalized);
+      if (missingIdx >= 0) return { assetName: placements[missingIdx].name, missingIdx };
+      return { assetName: uniquePlacementAssetName(normalized), missingIdx: -1 };
+    }
+
     function uniquePlacementAssetName(baseName) {
       const used = new Set(placements.map((p) => p.name.toLowerCase()));
       const normalized = (baseName && String(baseName).trim()) || 'model.ply';
@@ -1246,7 +1259,7 @@
       if (p.sourcePath) return `缺少 PLY：${p.sourcePath}`;
       return canLoadAssetsFromDisk()
         ? '缺少 PLY · 请确认文件仍在原路径'
-        : '缺少 PLY · 请重新拖入该文件';
+        : '缺少 PLY · 请重新拖入同名文件';
     }
 
     async function migrateScenesSourcePaths(store) {
@@ -4607,11 +4620,11 @@
 
     async function addPlacementFromFile(file, loadToken = sessionResetToken) {
       if (!sceneReady) throw new Error('场景尚未就绪');
-      const assetName = uniquePlacementAssetName(file.name);
+      const { assetName, missingIdx } = resolveImportAssetName(file);
       let sourcePath = inferSourcePathForImport(file);
       if (!sourcePath) sourcePath = await guessAssetPathFromServer(file.name);
-      status(`加载 ${assetName}…`);
-      setLoadProgress(20, `解析 ${assetName}…`);
+      status(missingIdx >= 0 ? `恢复 ${assetName}…` : `加载 ${assetName}…`);
+      setLoadProgress(20, `${missingIdx >= 0 ? '恢复' : '解析'} ${assetName}…`);
       let ab = fileCache.get(fileCacheKey(activeSceneId, assetName));
       if (!ab) {
         ab = await file.arrayBuffer();
@@ -4622,10 +4635,42 @@
         }
       }
       const bounds = computePlyBounds(ab);
-      const anchor = placementAnchorFromBounds(bounds);
+      const anchorFromBounds = placementAnchorFromBounds(bounds);
       const decRatio = getVisualDecimationRatio(file.size);
       let visualAb = decimatePlyArrayBuffer(ab, decRatio);
-      visualAb = anchorPlyArrayBuffer(visualAb, anchor);
+
+      if (missingIdx >= 0) {
+        const p = placements[missingIdx];
+        const anchor = Array.isArray(p.center) && p.center.length >= 3
+          ? { x: p.center[0], y: p.center[1], z: p.center[2] }
+          : anchorFromBounds;
+        visualAb = anchorPlyArrayBuffer(visualAb, anchor);
+        const splatBuffer = await GaussianSplats3D.PlyLoader.loadFromFileData(
+          visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
+        );
+        if (isSessionAborted(loadToken)) return;
+        const sceneIdx = _n(viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
+        await viewer.addSplatBuffers([splatBuffer], [placementOpts(p)], true, false, false, false, true);
+        if (isSessionAborted(loadToken)) {
+          try { await viewer.removeSplatScene(sceneIdx, false); } catch (_) {}
+          return;
+        }
+        p.sceneIdx = sceneIdx;
+        p.missing = false;
+        delete p.missingReason;
+        if (sourcePath) p.sourcePath = sourcePath;
+        if (!Array.isArray(p.center) || p.center.length < 3) {
+          p.center = [anchor.x, anchor.y, anchor.z];
+        }
+        selectPlacement(missingIdx);
+        hideLoadProgress();
+        const loadedCount = placements.filter((x) => !x.missing).length;
+        status(`已恢复 ${assetName}（${loadedCount}/${placements.length}）`);
+        renderList();
+        return;
+      }
+
+      visualAb = anchorPlyArrayBuffer(visualAb, anchorFromBounds);
       const splatBuffer = await GaussianSplats3D.PlyLoader.loadFromFileData(
         visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
       );
@@ -4637,7 +4682,7 @@
         scale: defaultScale,
         yaw_deg: 0,
         sceneIdx: null,
-        center: [anchor.x, anchor.y, anchor.z],
+        center: [anchorFromBounds.x, anchorFromBounds.y, anchorFromBounds.z],
       };
       const sceneIdx = _n(viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
       await viewer.addSplatBuffers([splatBuffer], [placementOpts(p)], true, false, false, false, true);
