@@ -931,10 +931,10 @@
       if (!supportsLocalFileAccess()) return true;
       if (localStorage.getItem(LOCAL_ACCESS_CONSENT_KEY)) return true;
       const ok = confirm(
-        '浏览器将请求读取您电脑上的 PLY 模型文件。\n\n'
-        + '· 文件仅在您的浏览器本地读取，不会上传到 GitHub 或任何服务器\n'
-        + '· 授权保存在本机浏览器，刷新后可继续从磁盘加载\n'
-        + '· 清除本网站数据、换浏览器或长期未用后，可能需要再次点击授权',
+        '是否授权给您的电脑浏览器下次自动读取该文件\n\n'
+        + '1.授权属于本地电脑浏览器需求，不会上传到github或者其他服务器\n'
+        + '2.授权后，点击保存过的项目，下次打开时会自动读取该本地文件\n'
+        + '3.无授权您也可以继续进行使用，但是下次打开网站需重新拖入文件',
       );
       if (ok) {
         try { localStorage.setItem(LOCAL_ACCESS_CONSENT_KEY, '1'); } catch (_) {}
