@@ -136,6 +136,46 @@
     .import-privacy-hint {
       margin: 8px 0 0; font-size: 10px; line-height: 1.45; color: #8aa;
     }
+    .local-access-modal {
+      position: fixed; inset: 0; z-index: 10000;
+      display: flex; align-items: center; justify-content: center; padding: 20px;
+    }
+    .local-access-modal[hidden] { display: none !important; }
+    .local-access-modal-backdrop {
+      position: absolute; inset: 0; background: rgba(0, 0, 0, 0.62);
+    }
+    .local-access-modal-panel {
+      position: relative; width: min(420px, 100%);
+      background: #1e1e1e; border: 1px solid #444; border-radius: 12px;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45); overflow: hidden;
+    }
+    .local-access-modal-panel h3 {
+      margin: 0; padding: 16px 18px 10px; font-size: 15px; font-weight: 600; color: #eee;
+    }
+    .local-access-modal-body {
+      padding: 0 18px 14px; font-size: 12px; line-height: 1.55; color: #bbb;
+    }
+    .local-access-modal-lead { margin: 0 0 10px; color: #ddd; }
+    .local-access-modal-list {
+      margin: 0; padding-left: 1.2em; color: #aaa;
+    }
+    .local-access-modal-list li + li { margin-top: 6px; }
+    .local-access-modal-actions {
+      display: flex; justify-content: flex-end; gap: 10px;
+      padding: 12px 18px 16px; border-top: 1px solid #333;
+    }
+    .local-access-modal-actions button {
+      min-width: 72px; padding: 8px 16px; border-radius: 8px;
+      font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent;
+    }
+    .local-access-modal-yes {
+      background: #2d6cdf; color: #fff; border-color: #2d6cdf;
+    }
+    .local-access-modal-yes:hover { filter: brightness(1.08); }
+    .local-access-modal-no {
+      background: transparent; color: #ccc; border-color: #555;
+    }
+    .local-access-modal-no:hover { background: #2a2a2a; color: #eee; }
     .val { color: #aaa; font-size: 11px; }
     .val-editable { cursor: pointer; border-bottom: 1px dotted #666; }
     .val-editable:hover { color: #ddd; border-bottom-color: #6cf; }
@@ -709,6 +749,25 @@
     <input type="file" id="importConfigFile" accept=".json,application/json" hidden />
   </div>
 
+  <div id="localAccessConsentModal" class="local-access-modal" hidden>
+    <div class="local-access-modal-backdrop"></div>
+    <div class="local-access-modal-panel" role="dialog" aria-labelledby="localAccessConsentTitle">
+      <h3 id="localAccessConsentTitle">是否授权</h3>
+      <div class="local-access-modal-body">
+        <p class="local-access-modal-lead">是否授权给您的电脑浏览器下次自动读取该文件</p>
+        <ol class="local-access-modal-list">
+          <li>授权属于本地电脑浏览器需求，不会上传到github或者其他服务器</li>
+          <li>授权后，点击保存过的项目，下次打开时会自动读取该本地文件</li>
+          <li>无授权您也可以继续进行使用，但是下次打开网站需重新拖入文件</li>
+        </ol>
+      </div>
+      <div class="local-access-modal-actions">
+        <button type="button" id="localAccessConsentYes" class="local-access-modal-yes">是</button>
+        <button type="button" id="localAccessConsentNo" class="local-access-modal-no">否</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module">
     import * as THREE from 'three';
     import { TransformControls } from 'three/addons/controls/TransformControls.js';
@@ -895,15 +954,16 @@
     }
 
     /** 模型加载追踪（控制台）；本地授权见 import-privacy-hint / localAccessBanner */
-    const MODEL_LOAD_BUILD = '20260723b';
+    const MODEL_LOAD_BUILD = '20260723c';
     const LOCAL_ACCESS_CONSENT_KEY = 'placement_editor_local_access_consent_v1';
+    let localAccessConsentPromise = null;
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
       need_local_server: '未连接本地服务，无法从 D 盘读 PLY',
       server_path_not_found: '未在 D:/Downloads/outputs 等目录找到 PLY',
       server_fetch_failed: '按 sourcePath 读文件失败',
-      asset_not_found: '未找到 PLY：请拖入同名文件以授权本地读取',
+      asset_not_found: '未找到 PLY：请拖入同名文件以恢复',
       session_aborted_before_fetch: '加载被中断',
       empty_asset_name: '资源名为空',
       local_handle_permission: '需重新授权浏览器读取本地 PLY（不上传 GitHub）',
@@ -927,19 +987,49 @@
       if (typeof console !== 'undefined') console.warn(`[模型加载 ${MODEL_LOAD_BUILD}] ${title}`, detail);
     }
 
+    function getLocalAccessConsent() {
+      try {
+        const v = localStorage.getItem(LOCAL_ACCESS_CONSENT_KEY);
+        if (v === '1') return 'yes';
+        if (v === 'yes' || v === 'no') return v;
+      } catch (_) {}
+      return null;
+    }
+
+    function isLocalAccessAuthorized() {
+      return getLocalAccessConsent() === 'yes';
+    }
+
+    function setLocalAccessConsent(value) {
+      try { localStorage.setItem(LOCAL_ACCESS_CONSENT_KEY, value); } catch (_) {}
+    }
+
+    function showLocalAccessConsentModal() {
+      if (localAccessConsentPromise) return localAccessConsentPromise;
+      localAccessConsentPromise = new Promise((resolve) => {
+        const modal = el('localAccessConsentModal');
+        const yesBtn = el('localAccessConsentYes');
+        const noBtn = el('localAccessConsentNo');
+        const finish = (choice) => {
+          modal.hidden = true;
+          yesBtn.onclick = null;
+          noBtn.onclick = null;
+          localAccessConsentPromise = null;
+          setLocalAccessConsent(choice);
+          resolve(choice);
+        };
+        yesBtn.onclick = () => finish('yes');
+        noBtn.onclick = () => finish('no');
+        modal.hidden = false;
+      });
+      return localAccessConsentPromise;
+    }
+
     async function ensureLocalAccessConsent() {
-      if (!supportsLocalFileAccess()) return true;
-      if (localStorage.getItem(LOCAL_ACCESS_CONSENT_KEY)) return true;
-      const ok = confirm(
-        '是否授权给您的电脑浏览器下次自动读取该文件\n\n'
-        + '1.授权属于本地电脑浏览器需求，不会上传到github或者其他服务器\n'
-        + '2.授权后，点击保存过的项目，下次打开时会自动读取该本地文件\n'
-        + '3.无授权您也可以继续进行使用，但是下次打开网站需重新拖入文件',
-      );
-      if (ok) {
-        try { localStorage.setItem(LOCAL_ACCESS_CONSENT_KEY, '1'); } catch (_) {}
-      }
-      return ok;
+      if (!supportsLocalFileAccess()) return 'yes';
+      const stored = getLocalAccessConsent();
+      if (stored) return stored;
+      return showLocalAccessConsentModal();
     }
 
     function updateLocalAccessBanner(show) {
@@ -983,26 +1073,27 @@
 
     async function importFromDirectoryHandle(dirHandle) {
       if (!activeSceneId) { status('请先选择或创建场景'); return; }
-      if (!(await ensureLocalAccessConsent())) return;
+      const consent = await ensureLocalAccessConsent();
+      const bindLocal = consent === 'yes';
       if (!(await ensureReadPermission(dirHandle))) {
         status('未获得文件夹读取授权');
         return;
       }
       let matched = 0;
+      let loaded = 0;
       for await (const entry of dirHandle.values()) {
         if (entry.kind !== 'file' || !entry.name.toLowerCase().endsWith('.ply')) continue;
         const missingIdx = findMissingPlacementIndex(entry.name);
-        const assetName = missingIdx >= 0 ? placements[missingIdx].name : uniquePlacementAssetName(entry.name);
-        await bindAssetDirectoryHandle(activeSceneId, assetName, dirHandle, entry.name);
         const file = await entry.getFile();
-        if (missingIdx >= 0) {
-          placements[missingIdx].sourcePath = `local-dir:${dirHandle.name}/${entry.name}`;
-          if (await reloadPlacementAt(missingIdx)) matched++;
-        } else {
-          await addPlacementFromFile(file, sessionResetToken, { dirHandle, dirFileName: entry.name });
-        }
+        await addPlacementFromFile(
+          file,
+          sessionResetToken,
+          bindLocal ? { dirHandle, dirFileName: entry.name } : {},
+        );
+        loaded++;
+        if (missingIdx >= 0) matched++;
       }
-      status(`已从文件夹 ${dirHandle.name} 加载 · 恢复 ${matched} 个`);
+      status(`已从文件夹 ${dirHandle.name} 加载 ${loaded} 个 · 恢复 ${matched} 个`);
       updateLocalAccessBanner(sceneNeedsLocalPermissionRetry());
     }
 
@@ -1011,7 +1102,11 @@
         el('pickFile').click();
         return;
       }
-      if (!(await ensureLocalAccessConsent())) return;
+      const consent = await ensureLocalAccessConsent();
+      if (consent === 'no') {
+        el('pickFile').click();
+        return;
+      }
       const handles = await window.showOpenFilePicker({
         multiple: true,
         types: [{ description: 'PLY', accept: { 'application/octet-stream': ['.ply'] } }],
@@ -1488,7 +1583,7 @@
       if (p.sourcePath) return `缺少 PLY：${p.sourcePath}`;
       return canLoadAssetsFromDisk()
         ? '缺少 PLY · 请确认文件仍在原路径'
-        : '缺少 PLY · 请拖入同名 PLY 以授权浏览器从本地读取';
+        : '缺少 PLY · 请拖入同名 PLY 以恢复';
     }
 
     async function migrateScenesSourcePaths(store) {
@@ -4848,16 +4943,17 @@
         ab = await file.arrayBuffer();
         if (isSessionAborted(loadToken)) return;
         fileCache.set(fileCacheKey(activeSceneId, assetName), ab);
-        if (activeSceneId) {
-          if (opts.fileHandle) {
-            await bindAssetFileHandle(activeSceneId, assetName, opts.fileHandle, opts.fileHandle.name);
-            sourcePath = `local-file:${opts.fileHandle.name}`;
-          } else if (opts.dirHandle && opts.dirFileName) {
-            await bindAssetDirectoryHandle(activeSceneId, assetName, opts.dirHandle, opts.dirFileName);
-            sourcePath = `local-dir:${opts.dirHandle.name}/${opts.dirFileName}`;
-          } else if (!supportsLocalFileAccess()) {
-            idbPutSceneAsset(activeSceneId, assetName, ab, sourcePath).catch((e) => console.warn('模型缓存写入失败', e));
-          }
+        if (activeSceneId && !supportsLocalFileAccess() && !opts.fileHandle && !opts.dirHandle) {
+          idbPutSceneAsset(activeSceneId, assetName, ab, sourcePath).catch((e) => console.warn('模型缓存写入失败', e));
+        }
+      }
+      if (activeSceneId && isLocalAccessAuthorized()) {
+        if (opts.fileHandle) {
+          await bindAssetFileHandle(activeSceneId, assetName, opts.fileHandle, opts.fileHandle.name);
+          sourcePath = `local-file:${opts.fileHandle.name}`;
+        } else if (opts.dirHandle && opts.dirFileName) {
+          await bindAssetDirectoryHandle(activeSceneId, assetName, opts.dirHandle, opts.dirFileName);
+          sourcePath = `local-dir:${opts.dirHandle.name}/${opts.dirFileName}`;
         }
       }
       const bounds = computePlyBounds(ab);
@@ -4884,7 +4980,8 @@
         p.sceneIdx = sceneIdx;
         p.missing = false;
         delete p.missingReason;
-        if (sourcePath) p.sourcePath = sourcePath;
+        if (isLocalAccessAuthorized() && sourcePath) p.sourcePath = sourcePath;
+        else if (!isLocalAccessAuthorized()) p.sourcePath = null;
         if (!Array.isArray(p.center) || p.center.length < 3) {
           p.center = [anchor.x, anchor.y, anchor.z];
         }
@@ -4903,7 +5000,7 @@
       if (isSessionAborted(loadToken)) return;
       const p = {
         name: assetName,
-        sourcePath: sourcePath || null,
+        sourcePath: isLocalAccessAuthorized() ? (sourcePath || null) : null,
         x: 0, y: 0, z: defaultZ,
         scale: defaultScale,
         yaw_deg: 0,
@@ -5326,7 +5423,8 @@
       view.addEventListener('drop', async (e) => {
         prevent(e);
         view.classList.remove('drag-over');
-        if (!(await ensureLocalAccessConsent())) return;
+        const consent = await ensureLocalAccessConsent();
+        const bindLocal = consent === 'yes';
 
         const items = [...(e.dataTransfer && e.dataTransfer.items || [])];
         const plyEntries = [];
@@ -5342,7 +5440,10 @@
                 break;
               }
               if (handle.kind === 'file' && handle.name.toLowerCase().endsWith('.ply')) {
-                plyEntries.push({ file: await handle.getFile(), fileHandle: handle });
+                plyEntries.push({
+                  file: await handle.getFile(),
+                  fileHandle: bindLocal ? handle : null,
+                });
               }
             } catch (_) {}
           }
@@ -5356,7 +5457,11 @@
         if (plyEntries.length) {
           for (const entry of plyEntries) {
             try {
-              await addPlacementFromFile(entry.file, sessionResetToken, { fileHandle: entry.fileHandle });
+              await addPlacementFromFile(
+                entry.file,
+                sessionResetToken,
+                entry.fileHandle ? { fileHandle: entry.fileHandle } : {},
+              );
             } catch (err) { status(`失败: ${err.message}`); }
           }
           updateLocalAccessBanner(sceneNeedsLocalPermissionRetry());
