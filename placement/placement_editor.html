@@ -231,6 +231,7 @@
       box-shadow: 0 0 0 2px rgba(45, 108, 223, 0.16);
     }
     .scene-picker-chevron { font-size: 11px; color: #8a7f72; flex-shrink: 0; }
+    #scenePickerLabel.scene-picker-label-active { color: #1a1612; font-weight: 600; }
     .scene-picker-menu {
       position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
       background: #f5f0eb; border: 1px solid #d8cfc4; border-radius: 8px;
@@ -252,15 +253,17 @@
     .scene-picker-row.active { background: #e4eef9; }
     .scene-picker-name {
       flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      font-size: 13px; color: #3a342e; cursor: text;
-      border-bottom: 1px dashed transparent;
+      font-size: 13px; color: #3a342e; pointer-events: none;
     }
-    .scene-picker-name:hover { border-bottom-color: #a89888; color: #1a1612; }
+    .scene-picker-rename,
     .scene-picker-del {
       width: 26px; height: 26px; padding: 0; flex-shrink: 0;
       border-radius: 6px; background: rgba(255, 255, 255, 0.45); border: 1px solid #cfc4b8;
-      color: #7a6a5a; font-size: 14px; line-height: 1; cursor: pointer;
+      color: #7a6a5a; font-size: 12px; line-height: 1; cursor: pointer;
       transition: background .12s, border-color .12s, color .12s;
+    }
+    .scene-picker-rename:hover {
+      background: rgba(45, 108, 223, 0.1); border-color: #8ab0e8; color: #2d6cdf;
     }
     .scene-picker-del:hover {
       background: rgba(139, 46, 46, 0.12); border-color: #c08080; color: #a03030;
@@ -1299,12 +1302,21 @@
       if (btn) btn.setAttribute('aria-expanded', scenePickerOpen ? 'true' : 'false');
     }
 
+    function getScenePickerLabelText() {
+      if (!activeSceneId) return SCENE_PICKER_LABEL;
+      const scene = getSceneById(activeSceneId);
+      return scene ? scene.name : SCENE_PICKER_LABEL;
+    }
+
     function renderSceneManagerUI() {
       const list = el('scenePickerList');
       const label = el('scenePickerLabel');
       if (!list || !scenesStore) return;
       const scenes = scenesStore.scenes || [];
-      if (label) label.textContent = SCENE_PICKER_LABEL;
+      if (label) {
+        label.textContent = getScenePickerLabelText();
+        label.classList.toggle('scene-picker-label-active', !!activeSceneId && !!getSceneById(activeSceneId));
+      }
       list.innerHTML = '';
       if (!scenes.length) {
         const empty = document.createElement('div');
@@ -1317,11 +1329,16 @@
         const row = document.createElement('div');
         row.className = 'scene-picker-row' + (scene.id === activeSceneId ? ' active' : '');
         row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', scene.id === activeSceneId ? 'true' : 'false');
         const nameSpan = document.createElement('span');
         nameSpan.className = 'scene-picker-name';
         nameSpan.textContent = scene.name;
-        nameSpan.title = '点击重命名';
-        nameSpan.onclick = (e) => {
+        const rename = document.createElement('button');
+        rename.type = 'button';
+        rename.className = 'scene-picker-rename';
+        rename.textContent = '✎';
+        rename.title = '重命名';
+        rename.onclick = (e) => {
           e.stopPropagation();
           startSceneRename(scene.id, nameSpan);
         };
@@ -1335,6 +1352,7 @@
           deleteSceneById(scene.id).catch(showError);
         };
         row.appendChild(nameSpan);
+        row.appendChild(rename);
         row.appendChild(del);
         row.onclick = () => {
           setScenePickerOpen(false);
@@ -1570,9 +1588,9 @@
       scene.updatedAt = new Date().toISOString();
       scenesStore.scenes.push(scene);
       await persistScenesStore();
-      renderSceneManagerUI();
+      await preloadAssetsForConfig(cfg, sessionResetToken);
       await loadSceneById(scene.id);
-      status(`已导入为「${scene.name}」· ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
+      status(`已导入「${scene.name}」· ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
     }
 
     function placementsFromConfig(cfg) {
