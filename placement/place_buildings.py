@@ -100,26 +100,45 @@ def resolve_asset_path(asset_name: str) -> Path:
     raise FileNotFoundError(f"full model not found: {name} (looked in {OUTPUTS})")
 
 
+def _placements_from_v2_dict(raw: dict) -> list:
+    placements = list(raw.get("placements") or [])
+    base = raw.get("base")
+    if isinstance(base, dict) and base.get("asset"):
+        asset = base["asset"]
+        if not any(p.get("asset") == asset for p in placements):
+            placements.insert(0, {
+                "asset": asset,
+                "x": 0.0,
+                "y": 0.0,
+                "z": base.get("surfaceZ", 0.0),
+                "scale": 1.0,
+                "yaw_deg": 0.0,
+            })
+    return placements
+
+
 def load_placements(config_path: Path) -> list:
     raw = json.loads(config_path.read_text(encoding="utf-8"))
     if isinstance(raw, list):
         return raw
     if isinstance(raw, dict):
-        placements = list(raw.get("placements") or [])
-        base = raw.get("base")
-        if isinstance(base, dict) and base.get("asset"):
-            asset = base["asset"]
-            if not any(p.get("asset") == asset for p in placements):
-                placements.insert(0, {
-                    "asset": asset,
-                    "x": 0.0,
-                    "y": 0.0,
-                    "z": base.get("surfaceZ", 0.0),
-                    "scale": 1.0,
-                    "yaw_deg": 0.0,
-                })
-        return placements
-    raise ValueError("config must be a JSON list or v2 object with placements")
+        if raw.get("version", 0) >= 3 and isinstance(raw.get("scenes"), list):
+            scenes = raw["scenes"]
+            active_id = raw.get("activeSceneId")
+            chosen = None
+            if active_id:
+                for scene in scenes:
+                    if scene.get("id") == active_id:
+                        chosen = scene
+                        break
+            if chosen is None and scenes:
+                chosen = scenes[0]
+            if chosen is not None:
+                cfg = chosen.get("config") if isinstance(chosen.get("config"), dict) else chosen
+                return _placements_from_v2_dict(cfg)
+            return []
+        return _placements_from_v2_dict(raw)
+    raise ValueError("config must be a JSON list, v2 object, or v3 scenes store")
 
 
 def merge_scene(config_path: Path, out_path: Path) -> None:

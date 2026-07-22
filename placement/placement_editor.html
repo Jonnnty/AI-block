@@ -213,6 +213,76 @@
     .panel-config-note { font-size: 11px; color: #666; line-height: 1.4; margin-top: -6px; }
     button.secondary.active { background: #2d6cdf; }
     button.secondary:not(.active) { background: #333; }
+    .scene-manager {
+      display: flex; flex-direction: column; gap: 8px;
+      padding-bottom: 10px; margin-bottom: 10px;
+      border-bottom: 1px solid #333;
+    }
+    .scene-select-row { display: flex; gap: 6px; align-items: stretch; }
+    .scene-select {
+      flex: 1; min-width: 0; background: #1a1a1a; border: 1px solid #444; color: #eee;
+      padding: 7px 10px; border-radius: 8px; font-size: 13px; font-weight: 500;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .scene-select:focus {
+      outline: none; border-color: #2d6cdf;
+      box-shadow: 0 0 0 2px rgba(45, 108, 223, 0.22);
+    }
+    .scene-add-btn {
+      width: 36px; flex-shrink: 0; padding: 0; border-radius: 8px;
+      background: #2a2a2a; border: 1px solid #454545; color: #ccc;
+      font-size: 18px; line-height: 1; cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    .scene-add-btn:hover { background: #333; border-color: #2d6cdf; color: #fff; }
+    .scene-catalog {
+      display: flex; flex-direction: column; gap: 5px;
+      max-height: 168px; overflow-y: auto; padding-right: 2px;
+    }
+    .scene-catalog:empty::before {
+      content: '暂无已保存场景 · 编辑后点保存，或点 ＋ 新建';
+      display: block; padding: 10px 8px; border-radius: 8px;
+      background: rgba(255, 255, 255, 0.02); border: 1px dashed #3a3a3a;
+      font-size: 11px; color: #666; line-height: 1.45; text-align: center;
+    }
+    .scene-catalog-row {
+      display: flex; align-items: center; gap: 6px; padding: 7px 8px;
+      border-radius: 8px; background: #1e1e1e; border: 1px solid #333;
+      cursor: pointer; transition: background .12s, border-color .12s, box-shadow .12s;
+    }
+    .scene-catalog-row:hover { background: #262626; border-color: #444; }
+    .scene-catalog-row.active {
+      background: linear-gradient(90deg, rgba(45, 108, 223, 0.18) 0%, rgba(30, 42, 64, 0.55) 100%);
+      border-color: #2d6cdf;
+      box-shadow: inset 0 0 0 1px rgba(108, 204, 255, 0.08);
+    }
+    .scene-catalog-name {
+      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: 12px; font-weight: 500; color: #ddd;
+    }
+    .scene-catalog-name.editable {
+      cursor: text; border-bottom: 1px dashed transparent;
+    }
+    .scene-catalog-name.editable:hover { border-bottom-color: #666; color: #fff; }
+    .scene-catalog-meta {
+      flex-shrink: 0; font-size: 10px; color: #666; white-space: nowrap;
+    }
+    .scene-catalog-del {
+      width: 26px; height: 26px; padding: 0; flex-shrink: 0;
+      border-radius: 6px; background: transparent; border: 1px solid #444;
+      color: #999; font-size: 14px; line-height: 1; cursor: pointer;
+      transition: background .12s, border-color .12s, color .12s;
+    }
+    .scene-catalog-del:hover {
+      background: rgba(139, 46, 46, 0.22); border-color: #8b4040; color: #ffc0c0;
+    }
+    .scene-rename-input {
+      flex: 1; min-width: 0; background: #111; border: 1px solid #2d6cdf; color: #eee;
+      padding: 3px 7px; border-radius: 6px; font-size: 12px;
+    }
+    .scene-manager-hint {
+      font-size: 10px; color: #555; line-height: 1.45; margin: 0;
+    }
   </style>
   <script type="importmap">
   {
@@ -254,13 +324,27 @@
       <div class="status" id="status">初始化…</div>
       <section class="panel-global">
         <div class="panel-zone-label">
+          <span>场景</span>
+          <span class="panel-zone-hint">选择后加载</span>
+        </div>
+        <div class="scene-manager">
+          <div class="scene-select-row">
+            <select id="sceneSelect" class="scene-select" aria-label="选择场景">
+              <option value="">选择场景…</option>
+            </select>
+            <button type="button" id="newSceneBtn" class="scene-add-btn" title="新建空白场景">＋</button>
+          </div>
+          <div id="sceneCatalog" class="scene-catalog"></div>
+          <p class="scene-manager-hint">打开链接仅初始化；从下拉框或列表选择场景后才会复原</p>
+        </div>
+        <div class="panel-zone-label" style="margin-top:2px">
           <span>场景配置</span>
           <span class="panel-zone-hint">全局 · 随时可用</span>
         </div>
         <div class="config-toolbar">
           <button type="button" id="saveBtn" class="cfg-btn cfg-btn-primary" title="保存到浏览器或 placements.json">
             <span class="cfg-btn-label">保存</span>
-            <span class="cfg-btn-sub">配置 + 模型缓存</span>
+            <span class="cfg-btn-sub">当前场景 · 配置 + 模型缓存</span>
           </button>
           <div class="config-toolbar-row">
             <button type="button" id="importJsonBtn" class="cfg-btn cfg-btn-ghost" title="从 JSON 文件恢复">
@@ -270,9 +354,9 @@
               <span class="cfg-btn-label">导出 JSON</span>
             </button>
           </div>
-          <button type="button" id="clearBtn" class="cfg-btn cfg-btn-danger" title="清空场景与浏览器缓存">
+          <button type="button" id="clearBtn" class="cfg-btn cfg-btn-danger" title="清空当前工作区（不影响其它已保存场景）">
             <span class="cfg-btn-label">清空</span>
-            <span class="cfg-btn-sub">重置场景</span>
+            <span class="cfg-btn-sub">重置当前工作区</span>
           </button>
         </div>
       </section>
@@ -438,7 +522,8 @@
 
 
     function _n(v, fb) { return v !== undefined && v !== null ? v : fb; }
-    const CONFIG_STORAGE_KEY = 'placement_editor_v2_config';
+    const CONFIG_STORAGE_KEY = 'placement_editor_v3_scenes';
+    const CONFIG_STORAGE_KEY_LEGACY = 'placement_editor_v2_config';
     const ASSET_DB_NAME = 'placement_editor_assets_v1';
     const ASSET_STORE = 'files';
 
@@ -563,6 +648,11 @@
     /** @type {Map<string, ArrayBuffer>} */
     const fileCache = new Map();
     let sessionResetToken = 0;
+    /** @type {{version:number, activeSceneId:string|null, scenes:Array<{id:string,name:string,createdAt:string,updatedAt:string,config:object}>}|null} */
+    let scenesStore = null;
+    let activeSceneId = null;
+    let nextSceneId = 2;
+    let sceneLoadBusy = false;
 
     let viewer = null;
     let sharedRenderer = null;
@@ -1090,12 +1180,329 @@
       if (hostMode === 'server') {
         if (mergeBtn) mergeBtn.disabled = false;
         if (mergeHint) mergeHint.textContent = '合并时从 outputs/ 读取完整模型（非 50% 轻量版）';
-        if (saveBtn) saveBtn.title = '保存到 placements.json（模型+相机）';
+        if (saveBtn) saveBtn.title = '保存当前场景到 placements.json（含模型缓存索引）';
       } else {
         if (mergeBtn) mergeBtn.disabled = true;
         if (mergeHint) mergeHint.textContent = '在线版不可用 · 本地运行 python serve_editor.py 后可合并';
-        if (saveBtn) saveBtn.title = '保存到浏览器（含模型缓存，换机请用导出 JSON）';
+        if (saveBtn) saveBtn.title = '保存当前场景到浏览器（含模型缓存，换机请用导出 JSON）';
       }
+    }
+
+    function emptyScenesStore() {
+      return { version: 3, activeSceneId: null, scenes: [] };
+    }
+
+    function configFromParsed(cfg) {
+      return {
+        version: 2,
+        defaults: cfg.defaults || { scale: defaultScale, z: defaultZ },
+        view: cfg.view || { background: viewBgMode, rigOpen: false },
+        placements: cfg.placements || [],
+        cameraPaths: cfg.cameraPaths || [],
+        activePathId: cfg.activePathId || null,
+        renderSettings: cfg.renderSettings || null,
+        renderCamera: cfg.renderCamera || null,
+      };
+    }
+
+    function sceneHasContent(cfg) {
+      const parsed = parseSavedConfig(cfg);
+      return (parsed.placements && parsed.placements.length > 0)
+        || (parsed.cameraPaths && parsed.cameraPaths.length > 0);
+    }
+
+    function migrateLegacyToScenesStore(data) {
+      if (data && typeof data === 'object' && data.version >= 3 && Array.isArray(data.scenes)) {
+        return normalizeScenesStore(data);
+      }
+      const cfg = parseSavedConfig(data);
+      if (!sceneHasContent(cfg)) return emptyScenesStore();
+      return {
+        version: 3,
+        activeSceneId: null,
+        scenes: [{
+          id: 'scene-1',
+          name: 'scene1',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          config: configFromParsed(cfg),
+        }],
+      };
+    }
+
+    function normalizeScenesStore(raw) {
+      if (!raw || typeof raw !== 'object') return emptyScenesStore();
+      if (raw.version >= 3 && Array.isArray(raw.scenes)) {
+        const scenes = raw.scenes.map((s, i) => ({
+          id: s.id || `scene-${i + 1}`,
+          name: (s.name && String(s.name).trim()) || `scene${i + 1}`,
+          createdAt: s.createdAt || new Date().toISOString(),
+          updatedAt: s.updatedAt || s.createdAt || new Date().toISOString(),
+          config: configFromParsed(parseSavedConfig(s.config || s)),
+        }));
+        for (const s of scenes) {
+          const m = /^scene-(\d+)$/.exec(s.id);
+          if (m) nextSceneId = Math.max(nextSceneId, parseInt(m[1], 10) + 1);
+        }
+        return {
+          version: 3,
+          activeSceneId: raw.activeSceneId || null,
+          scenes,
+        };
+      }
+      return migrateLegacyToScenesStore(raw);
+    }
+
+    function generateSceneId() {
+      return `scene-${nextSceneId++}`;
+    }
+
+    function getNextSceneName() {
+      const used = new Set((scenesStore && scenesStore.scenes || []).map((s) => s.name.toLowerCase()));
+      for (let i = 1; i < 9999; i++) {
+        const name = `scene${i}`;
+        if (!used.has(name.toLowerCase())) return name;
+      }
+      return `scene${Date.now()}`;
+    }
+
+    function getSceneById(sceneId) {
+      return scenesStore && scenesStore.scenes.find((s) => s.id === sceneId) || null;
+    }
+
+    function sceneSummary(cfg) {
+      const parsed = parseSavedConfig(cfg);
+      const models = _n(parsed.placements && parsed.placements.length, 0);
+      const paths = _n(parsed.cameraPaths && parsed.cameraPaths.length, 0);
+      if (!models && !paths) return '空场景';
+      const parts = [];
+      if (models) parts.push(`${models} 模型`);
+      if (paths) parts.push(`${paths} 轨迹`);
+      return parts.join(' · ');
+    }
+
+    function renderSceneManagerUI() {
+      const select = el('sceneSelect');
+      const catalog = el('sceneCatalog');
+      if (!select || !catalog || !scenesStore) return;
+      const scenes = scenesStore.scenes || [];
+      select.innerHTML = '<option value="">选择场景…</option>';
+      for (const scene of scenes) {
+        const opt = document.createElement('option');
+        opt.value = scene.id;
+        opt.textContent = scene.name;
+        if (scene.id === activeSceneId) opt.selected = true;
+        select.appendChild(opt);
+      }
+      if (!activeSceneId) select.value = '';
+      catalog.innerHTML = '';
+      for (const scene of scenes) {
+        const row = document.createElement('div');
+        row.className = 'scene-catalog-row' + (scene.id === activeSceneId ? ' active' : '');
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'scene-catalog-name editable';
+        nameSpan.textContent = scene.name;
+        nameSpan.title = '点击重命名';
+        nameSpan.onclick = (e) => {
+          e.stopPropagation();
+          startSceneRename(scene.id, nameSpan);
+        };
+        const meta = document.createElement('span');
+        meta.className = 'scene-catalog-meta';
+        meta.textContent = sceneSummary(scene.config);
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'scene-catalog-del';
+        del.textContent = '×';
+        del.title = '删除场景';
+        del.onclick = (e) => {
+          e.stopPropagation();
+          deleteSceneById(scene.id).catch(showError);
+        };
+        row.appendChild(nameSpan);
+        row.appendChild(meta);
+        row.appendChild(del);
+        row.onclick = () => loadSceneById(scene.id).catch(showError);
+        catalog.appendChild(row);
+      }
+    }
+
+    function startSceneRename(sceneId, anchorEl) {
+      const scene = getSceneById(sceneId);
+      if (!scene || !(anchorEl && anchorEl.replaceWith)) return;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'scene-rename-input';
+      input.value = scene.name;
+      input.onclick = (e) => e.stopPropagation();
+      const commit = async () => {
+        const v = input.value.trim();
+        if (v && v !== scene.name) {
+          scene.name = v;
+          scene.updatedAt = new Date().toISOString();
+          await persistScenesStore();
+          status(`已重命名为「${scene.name}」`);
+        }
+        renderSceneManagerUI();
+      };
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit().catch(showError); }
+        if (e.key === 'Escape') renderSceneManagerUI();
+      };
+      input.onblur = () => commit().catch(showError);
+      anchorEl.replaceWith(input);
+      input.focus();
+      input.select();
+    }
+
+    async function persistScenesStore() {
+      if (!scenesStore) scenesStore = emptyScenesStore();
+      scenesStore.activeSceneId = activeSceneId;
+      const bodyText = JSON.stringify(scenesStore);
+      if (hostMode === 'static') {
+        try {
+          localStorage.setItem(CONFIG_STORAGE_KEY, bodyText);
+        } catch (e) {
+          throw new Error(`浏览器存储空间不足: ${e.message}`);
+        }
+        try {
+          localStorage.removeItem(CONFIG_STORAGE_KEY_LEGACY);
+        } catch (_) {}
+        return;
+      }
+      const res = await fetch(apiUrl('api/placements'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: bodyText,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `保存失败 HTTP ${res.status}`);
+    }
+
+    async function loadScenesStore() {
+      if (hostMode === 'server') {
+        try {
+          const res = await fetchWithTimeout(apiUrl('api/placements'));
+          if (!res.ok) return emptyScenesStore();
+          const data = await res.json();
+          const store = normalizeScenesStore(data);
+          if (data && typeof data === 'object' && _n(data.version, 0) < 3 && store.scenes.length) {
+            scenesStore = store;
+            await persistScenesStore();
+          }
+          return store;
+        } catch (_) {
+          return emptyScenesStore();
+        }
+      }
+      let raw = localStorage.getItem(CONFIG_STORAGE_KEY);
+      if (!raw) {
+        raw = localStorage.getItem(CONFIG_STORAGE_KEY_LEGACY);
+        if (raw) {
+          const store = migrateLegacyToScenesStore(JSON.parse(raw));
+          scenesStore = store;
+          await persistScenesStore();
+          return store;
+        }
+        return emptyScenesStore();
+      }
+      try {
+        return normalizeScenesStore(JSON.parse(raw));
+      } catch (_) {
+        return emptyScenesStore();
+      }
+    }
+
+    async function applyConfigToEditor(cfg, loadToken = sessionResetToken) {
+      await clearAllPlacementsFromViewer();
+      resetCameraEditorState();
+      applyConfigMeta(cfg);
+      await preloadAssetsForConfig(cfg, loadToken);
+      if (isSessionAborted(loadToken)) return;
+      const savedPlacements = placementsFromConfig(cfg);
+      if (savedPlacements.length) await restorePlacements(savedPlacements, loadToken);
+      if (isSessionAborted(loadToken)) return;
+      restoreCameraPaths(cfg.cameraPaths, cfg.activePathId, cfg.renderSettings, cfg.renderCamera);
+      restoreRigUiState(cfg);
+      selectPlacement(-1);
+      renderList();
+    }
+
+    async function loadSceneById(sceneId) {
+      if (!sceneId || sceneLoadBusy) return;
+      const scene = getSceneById(sceneId);
+      if (!scene) return;
+      if (sceneId === activeSceneId && placements.length) return;
+      sceneLoadBusy = true;
+      const loadToken = ++sessionResetToken;
+      try {
+        status(`正在加载「${scene.name}」…`);
+        activeSceneId = sceneId;
+        if (scenesStore) scenesStore.activeSceneId = sceneId;
+        await applyConfigToEditor(parseSavedConfig(scene.config), loadToken);
+        if (isSessionAborted(loadToken)) return;
+        renderSceneManagerUI();
+        await persistScenesStore().catch((e) => console.warn('场景索引保存失败', e));
+        const parsed = parseSavedConfig(scene.config);
+        const modelCount = _n(parsed.placements && parsed.placements.length, 0);
+        const pathCount = _n(parsed.cameraPaths && parsed.cameraPaths.length, 0);
+        status(`已加载「${scene.name}」· ${modelCount} 模型 · ${pathCount} 轨迹`);
+      } finally {
+        sceneLoadBusy = false;
+      }
+    }
+
+    function createSceneRecord(name) {
+      const now = new Date().toISOString();
+      return {
+        id: generateSceneId(),
+        name: name || getNextSceneName(),
+        createdAt: now,
+        updatedAt: now,
+        config: emptyConfigJson(),
+      };
+    }
+
+    async function createNewScene(name) {
+      if (!scenesStore) scenesStore = emptyScenesStore();
+      const scene = createSceneRecord(name);
+      scenesStore.scenes.push(scene);
+      await persistScenesStore();
+      renderSceneManagerUI();
+      await loadSceneById(scene.id);
+      status(`已新建「${scene.name}」`);
+      return scene;
+    }
+
+    async function ensureActiveSceneForSave() {
+      if (!scenesStore) scenesStore = emptyScenesStore();
+      if (activeSceneId && getSceneById(activeSceneId)) return getSceneById(activeSceneId);
+      const scene = createSceneRecord(getNextSceneName());
+      scenesStore.scenes.push(scene);
+      activeSceneId = scene.id;
+      scenesStore.activeSceneId = scene.id;
+      renderSceneManagerUI();
+      return scene;
+    }
+
+    async function deleteSceneById(sceneId) {
+      const scene = getSceneById(sceneId);
+      if (!scene) return;
+      if (!confirm(`确定删除场景「${scene.name}」？\n\n将永久删除该场景的配置，且无法撤销。`)) return;
+      scenesStore.scenes = scenesStore.scenes.filter((s) => s.id !== sceneId);
+      if (activeSceneId === sceneId) {
+        activeSceneId = null;
+        scenesStore.activeSceneId = null;
+        sessionResetToken++;
+        await clearAllPlacementsFromViewer();
+        resetCameraEditorState();
+        resetEditorDefaults();
+        selectPlacement(-1);
+        renderList();
+      }
+      await persistScenesStore();
+      renderSceneManagerUI();
+      status(`已删除「${scene.name}」`);
     }
 
     async function loadSavedConfig() {
@@ -1120,20 +1527,19 @@
     async function importConfigFromFile(file) {
       const text = await file.text();
       const cfg = parseSavedConfig(JSON.parse(text));
-      applyConfigMeta(cfg);
-      for (let i = placements.length - 1; i >= 0; i--) removePlacement(i);
-      await preloadAssetsForConfig(cfg, sessionResetToken);
-      if (isSessionAborted(sessionResetToken)) return;
-      const savedPlacements = placementsFromConfig(cfg);
-      if (savedPlacements.length) await restorePlacements(savedPlacements, sessionResetToken);
-      if (isSessionAborted(sessionResetToken)) return;
-      restoreCameraPaths(cfg.cameraPaths, cfg.activePathId, cfg.renderSettings, cfg.renderCamera);
-      restoreRigUiState(cfg);
-      if (hostMode === 'static') {
-        await idbPutAllFromCache();
-        localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(configToJson()));
-      }
-      status(`已导入 · ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
+      if (!scenesStore) scenesStore = emptyScenesStore();
+      const baseName = file.name.replace(/\.json$/i, '') || '导入场景';
+      let name = baseName;
+      const used = new Set(scenesStore.scenes.map((s) => s.name.toLowerCase()));
+      for (let i = 2; used.has(name.toLowerCase()); i++) name = `${baseName} ${i}`;
+      const scene = createSceneRecord(name);
+      scene.config = configFromParsed(cfg);
+      scene.updatedAt = new Date().toISOString();
+      scenesStore.scenes.push(scene);
+      await persistScenesStore();
+      renderSceneManagerUI();
+      await loadSceneById(scene.id);
+      status(`已导入为「${scene.name}」· ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
     }
 
     function placementsFromConfig(cfg) {
@@ -3432,37 +3838,25 @@
     }
 
     async function clearEditorSession() {
-      if (!confirm('确定清空当前场景？\n\n将删除所有模型、相机轨迹和浏览器中的已保存配置，且无法撤销。')) return;
+      if (!confirm('确定清空当前工作区？\n\n将删除当前场景中的所有模型与相机轨迹，且无法撤销。')) return;
       sessionResetToken++;
       hideLoadProgress();
-      fileCache.clear();
       await clearAllPlacementsFromViewer();
       resetCameraEditorState();
       resetEditorDefaults();
       selectPlacement(-1);
       renderList();
-      const emptyCfg = JSON.stringify(emptyConfigJson());
-      try {
-        localStorage.setItem(CONFIG_STORAGE_KEY, emptyCfg);
-      } catch (_) {
-        localStorage.removeItem(CONFIG_STORAGE_KEY);
-      }
-      try {
-        await idbClearAll();
-      } catch (e) {
-        console.warn('清空模型缓存失败', e);
-      }
-      if (hostMode === 'server') {
-        try {
-          await fetch(apiUrl('api/placements'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: emptyCfg,
-          });
-        } catch (_) {}
+      if (activeSceneId) {
+        const scene = getSceneById(activeSceneId);
+        if (scene) {
+          scene.config = emptyConfigJson();
+          scene.updatedAt = new Date().toISOString();
+          await persistScenesStore();
+          renderSceneManagerUI();
+        }
       }
       el('rigPreviewStatus').textContent = '未渲染';
-      status('已清空 · 可重新拖入模型');
+      status('已清空当前工作区');
       viewer && viewer.forceRenderNextFrame && viewer.forceRenderNextFrame();
     }
 
@@ -3488,45 +3882,16 @@
       } catch (e) {
         throw new Error(`配置生成失败: ${e.message}`);
       }
-      let bodyText = '';
-      try {
-        bodyText = JSON.stringify(data);
-      } catch (e) {
-        throw new Error(`配置无法序列化为 JSON: ${e.message}`);
-      }
-      let res;
-      try {
-        if (hostMode === 'static') {
-          status('正在写入浏览器缓存…');
-          await idbPutAllFromCache();
-          try {
-            localStorage.setItem(CONFIG_STORAGE_KEY, bodyText);
-          } catch (e) {
-            throw new Error(`浏览器存储空间不足: ${e.message} · 可删除部分模型或用导出 JSON`);
-          }
-          const camNote = data.cameraPaths.length ? `${data.cameraPaths.length} 条轨迹` : '无相机轨迹';
-          status(`已保存到浏览器 · ${data.placements.length} 模型 · ${camNote} · 刷新可恢复`);
-          return;
-        }
-        res = await fetch(apiUrl('api/placements'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: bodyText,
-        });
-      } catch (_) {
-        throw new Error('无法连接保存接口 · 请用 python serve_editor.py 启动，并访问 http://127.0.0.1:8080/placement_editor.html');
-      }
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg = body.error || `HTTP ${res.status}`;
-        if (/JSON list/i.test(msg)) {
-          throw new Error('保存失败：服务器版本过旧 · 请关闭旧终端里的 serve_editor.py，重新运行后再保存');
-        }
-        throw new Error(`保存失败：${msg}`);
-      }
-      await idbPutAllFromCache().catch((e) => console.warn('模型缓存写入失败', e));
+      const scene = await ensureActiveSceneForSave();
+      scene.config = data;
+      scene.updatedAt = new Date().toISOString();
+      status('正在写入浏览器缓存…');
+      await idbPutAllFromCache();
+      await persistScenesStore();
+      renderSceneManagerUI();
       const camNote = data.cameraPaths.length ? `${data.cameraPaths.length} 条轨迹` : '无相机轨迹';
-      status(`已保存 · ${data.placements.length} 模型 · ${camNote}`);
+      const modeNote = hostMode === 'static' ? '到浏览器' : '到 placements.json';
+      status(`已保存「${scene.name}」${modeNote} · ${data.placements.length} 模型 · ${camNote}`);
     }
 
     async function checkSaveApiHealth() {
@@ -3535,7 +3900,7 @@
         const res = await fetchWithTimeout(apiUrl('api/health'));
         if (!res.ok) return false;
         const data = await res.json().catch(() => ({}));
-        return data.configVersion >= 2;
+        return data.configVersion >= 3;
       } catch (_) {
         return null;
       }
@@ -3704,6 +4069,12 @@
     el('tabModelsBtn').onclick = () => switchPanelTab('models');
     el('tabCameraBtn').onclick = () => switchPanelTab('camera');
     el('saveBtn').onclick = () => savePlacements().catch(showError);
+    el('sceneSelect').onchange = () => {
+      const id = el('sceneSelect').value;
+      if (!id) return;
+      loadSceneById(id).catch(showError);
+    };
+    el('newSceneBtn').onclick = () => createNewScene().catch(showError);
     el('importJsonBtn').onclick = () => el('importConfigFile').click();
     el('importConfigFile').onchange = async () => {
       const file = el('importConfigFile').files && el('importConfigFile').files[0];
@@ -3798,31 +4169,19 @@
         await ensureViewer();
         if (isSessionAborted(loadToken)) return;
         await initScene();
-        status('正在恢复场景…');
-        const cfg = await loadSavedConfig();
+        status('正在读取场景列表…');
+        scenesStore = await loadScenesStore();
         if (isSessionAborted(loadToken)) return;
-        applyConfigMeta(cfg);
-        await preloadAssetsForConfig(cfg, loadToken);
-        if (isSessionAborted(loadToken)) return;
-        const savedPlacements = placementsFromConfig(cfg);
-        if (savedPlacements.length) {
-          await restorePlacements(savedPlacements, loadToken);
-        } else if (hostMode === 'server') {
-          status('就绪 · 拖入模型恢复摆放（需同名文件）');
-        }
-        if (isSessionAborted(loadToken)) return;
-        restoreCameraPaths(cfg.cameraPaths, cfg.activePathId, cfg.renderSettings, cfg.renderCamera);
-        restoreRigUiState(cfg);
-        if (isSessionAborted(loadToken)) return;
+        renderSceneManagerUI();
         const saveOk = await checkSaveApiHealth();
         if (saveOk === false) {
           status('就绪 · 保存接口版本过旧，请重启 serve_editor.py 后再点保存');
-        } else if (savedPlacements.length || cameraPaths.length) {
-          const modeNote = hostMode === 'static' ? ' · 已从浏览器恢复' : '';
-          status(`就绪${modeNote} · ${placements.length} 模型 · ${cameraPaths.length} 轨迹`);
-        } else if (sceneReady) {
-          const modeNote = hostMode === 'static' ? ' · 在线版（点保存后刷新可恢复）' : '';
-          status(`就绪${modeNote} · 拖入 PLY 模型开始`);
+        } else if (scenesStore.scenes.length) {
+          const modeNote = hostMode === 'static' ? ' · 已从浏览器读取' : '';
+          status(`就绪${modeNote} · ${scenesStore.scenes.length} 个场景 · 请选择后加载`);
+        } else {
+          const modeNote = hostMode === 'static' ? ' · 在线版（保存后可多场景管理）' : '';
+          status(`就绪${modeNote} · 拖入 PLY 或点 ＋ 新建场景`);
         }
       } catch (e) { showError(e); }
     })();

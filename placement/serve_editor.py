@@ -54,10 +54,10 @@ class Handler(SimpleHTTPRequestHandler):
             if PLACEMENTS.exists():
                 self._json(200, json.loads(PLACEMENTS.read_text(encoding="utf-8")))
             else:
-                self._json(200, [])
+                self._json(200, {"version": 3, "activeSceneId": None, "scenes": []})
             return
         if path == "/api/health":
-            self._json(200, {"ok": True, "configVersion": 2})
+            self._json(200, {"ok": True, "configVersion": 3})
             return
         return super().do_GET()
 
@@ -68,11 +68,14 @@ class Handler(SimpleHTTPRequestHandler):
             if isinstance(data, list):
                 payload = data
             elif isinstance(data, dict) and (
-                data.get("version", 0) >= 2 or isinstance(data.get("placements"), list)
+                data.get("version", 0) >= 3
+                or data.get("version", 0) >= 2
+                or isinstance(data.get("placements"), list)
+                or isinstance(data.get("scenes"), list)
             ):
                 payload = data
             else:
-                self._json(400, {"error": "expected JSON list or v2 config object"})
+                self._json(400, {"error": "expected JSON list, v2 config, or v3 scenes store"})
                 return
             try:
                 PLACEMENTS.write_text(
@@ -82,8 +85,16 @@ class Handler(SimpleHTTPRequestHandler):
             except OSError as e:
                 self._json(500, {"error": f"cannot write placements.json: {e}"})
                 return
-            count = len(payload) if isinstance(payload, list) else len(payload.get("placements", []))
-            self._json(200, {"ok": True, "count": count, "configVersion": 2 if isinstance(payload, dict) else 1})
+            if isinstance(payload, list):
+                count = len(payload)
+                version = 1
+            elif payload.get("version", 0) >= 3:
+                count = len(payload.get("scenes", []))
+                version = 3
+            else:
+                count = len(payload.get("placements", []))
+                version = 2
+            self._json(200, {"ok": True, "count": count, "configVersion": version})
             return
         if path == "/api/merge":
             data = self._read_json() if self.headers.get("Content-Length") else {}
