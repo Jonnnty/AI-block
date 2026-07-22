@@ -443,8 +443,6 @@
           </select>
         </label>
       </section>
-      <button type="button" id="mergeBtn" class="secondary">合并完整 scene.ply</button>
-      <p class="hint" id="mergeHint">合并时从 outputs/ 读取完整模型（需本地 python serve_editor.py）</p>
     </div>
 
     <div id="cameraPanel" hidden>
@@ -1196,16 +1194,10 @@
     }
 
     function updateHostModeUI() {
-      const mergeBtn = el('mergeBtn');
-      const mergeHint = el('mergeHint');
       const saveBtn = el('saveBtn');
       if (hostMode === 'server') {
-        if (mergeBtn) mergeBtn.disabled = false;
-        if (mergeHint) mergeHint.textContent = '合并时从 outputs/ 读取完整模型（非 50% 轻量版）';
         if (saveBtn) saveBtn.title = '保存当前场景到 placements.json（含模型缓存索引）';
       } else {
-        if (mergeBtn) mergeBtn.disabled = true;
-        if (mergeHint) mergeHint.textContent = '在线版不可用 · 本地运行 python serve_editor.py 后可合并';
         if (saveBtn) saveBtn.title = '保存当前场景到浏览器（含模型缓存，换机请用导出 JSON）';
       }
     }
@@ -3988,21 +3980,6 @@
       viewer && viewer.forceRenderNextFrame && viewer.forceRenderNextFrame();
     }
 
-    async function mergeScene() {
-      if (hostMode !== 'server') {
-        throw new Error('合并完整模型需本地运行 python serve_editor.py');
-      }
-      status('合并完整模型中…');
-      const res = await fetch(apiUrl('api/merge'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ out: 'scene.ply' }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '合并失败');
-      status('已生成 scene.ply（完整模型）');
-    }
-
     async function savePlacements() {
       let data;
       try {
@@ -4208,7 +4185,6 @@
     };
     el('exportJsonBtn').onclick = () => exportConfigJson();
     el('clearBtn').onclick = () => clearEditorSession().catch(showError);
-    el('mergeBtn').onclick = () => mergeScene().catch(showError);
     el('addMarkerBtn').onclick = () => addCameraMarker();
     el('addPathGroupBtn').onclick = () => addCameraPathGroup();
     el('deletePathGroupBtn').onclick = () => deleteCameraPathGroup();
