@@ -963,7 +963,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260724h';
+    const MODEL_LOAD_BUILD = '20260724i';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -4615,12 +4615,35 @@
       const scene = sm.getScene(p.sceneIdx);
       const show = p.visible !== false;
       scene.visible = show;
+      if (Array.isArray(sm.sceneOptions) && sm.sceneOptions[p.sceneIdx]) {
+        sm.sceneOptions[p.sceneIdx].visible = show;
+      }
       if (sm.enableOptionalEffects && sm.material && sm.material.uniforms && sm.material.uniforms.sceneVisibility) {
         sm.material.uniforms.sceneVisibility.value[p.sceneIdx] = show ? 1 : 0;
         sm.material.uniformsNeedUpdate = true;
       }
       sm.updateTransforms();
       viewer.forceRenderNextFrame();
+    }
+
+    /** Keep sceneOptions in sync so addSplatBuffers rebuild does not resurrect hidden models. */
+    function syncSceneOptionsFromPlacements() {
+      if (!viewer || !viewer.splatMesh || !Array.isArray(viewer.splatMesh.sceneOptions)) return;
+      for (const p of placements) {
+        if (p.sceneIdx == null || p.missing) continue;
+        const opts = viewer.splatMesh.sceneOptions[p.sceneIdx];
+        if (opts) opts.visible = p.visible !== false;
+      }
+    }
+
+    function applyAllPlacementsVisibility() {
+      for (const p of placements) applyPlacementVisibility(p);
+    }
+
+    async function addSplatBuffersKeepVisibility(splatBuffers, sceneOptions) {
+      syncSceneOptionsFromPlacements();
+      await viewer.addSplatBuffers(splatBuffers, sceneOptions, true, false, false, false, true);
+      applyAllPlacementsVisibility();
     }
 
     function togglePlacementVisibility(idx) {
@@ -4936,7 +4959,7 @@
         );
         if (isSessionAborted(loadToken)) return;
         const sceneIdx = _n(viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
-        await viewer.addSplatBuffers([splatBuffer], [placementOpts(p)], true, false, false, false, true);
+        await addSplatBuffersKeepVisibility([splatBuffer], [placementOpts(p)]);
         if (isSessionAborted(loadToken)) {
           try { await viewer.removeSplatScene(sceneIdx, false); } catch (_) {}
           return;
@@ -4973,7 +4996,7 @@
         center: [anchorFromBounds.x, anchorFromBounds.y, anchorFromBounds.z],
       };
       const sceneIdx = _n(viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
-      await viewer.addSplatBuffers([splatBuffer], [placementOpts(p)], true, false, false, false, true);
+      await addSplatBuffersKeepVisibility([splatBuffer], [placementOpts(p)]);
       if (isSessionAborted(loadToken)) {
         try { await viewer.removeSplatScene(sceneIdx, false); } catch (_) {}
         return;
@@ -5094,7 +5117,7 @@
       );
       if (isSessionAborted(loadToken)) return false;
       const sceneIdx = _n(viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
-      await viewer.addSplatBuffers([splatBuffer], [placementOpts(p)], true, false, false, false, true);
+      await addSplatBuffersKeepVisibility([splatBuffer], [placementOpts(p)]);
       if (isSessionAborted(loadToken)) {
         try { await viewer.removeSplatScene(sceneIdx, false); } catch (_) {}
         return false;
@@ -5366,7 +5389,7 @@
         );
         if (isSessionAborted(loadToken)) return;
         const sceneIdx = viewer.splatMesh.scenes.length;
-        await viewer.addSplatBuffers([splatBuffer], [placementOpts(p)], true, false, false, false, true);
+        await addSplatBuffersKeepVisibility([splatBuffer], [placementOpts(p)]);
         if (isSessionAborted(loadToken)) return;
         p.sceneIdx = sceneIdx;
         placements.push(p);
