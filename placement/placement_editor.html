@@ -963,7 +963,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260724g';
+    const MODEL_LOAD_BUILD = '20260724h';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -4789,7 +4789,7 @@
         try { transformControls.dispose(); } catch (_) {}
       }
       pivot = new THREE.Object3D();
-      viewer.threeScene.add(pivot);
+      rigOverlayScene.add(pivot);
       transformControls = new TransformControls(viewer.camera, viewer.renderer.domElement);
       rigOverlayScene.add(transformControls.getHelper());
       applyAlwaysOnTop(transformControls.getHelper());
@@ -4846,6 +4846,8 @@
           return;
         }
         if (selected < 0) return;
+        if (transformControls.object !== pivot) return;
+        if (!transformControls.dragging) return;
         const p = placements[selected];
         if (!p) return;
         p.x = pivot.position.x;
@@ -4892,10 +4894,12 @@
         return;
       }
       transformControls.setMode(placementGizmoMode);
+      transformControls.detach();
       syncingFromGizmo = true;
       pivot.position.set(p.x, p.y, p.z);
       pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
       pivot.scale.set(p.scale, p.scale, p.scale);
+      pivot.updateMatrixWorld(true);
       transformControls.attach(pivot);
       syncingFromGizmo = false;
     }
