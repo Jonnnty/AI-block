@@ -37,6 +37,8 @@ AI 场景创建和视频生成（持续扩展中）。
 
 3. **导入场景编辑器**：把生成的 `.ply` 拖入 [场景编辑器](https://jonnnty.github.io/AI-block/placement/placement_editor.html) 即可摆放。
 
+<img src="docs/readme-assets/scene_editor.png" width="800" alt="">
+
 #### 渲染画面润色
 
 渲染出来的视频画面可以使用 [Bernini](https://github.com/bytedance/Bernini) 的 **Bernini-R 1.3B** 进行环境渲染：
