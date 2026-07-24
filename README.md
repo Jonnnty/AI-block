@@ -36,3 +36,28 @@ AI 场景创建和视频生成（持续扩展中）。
 </table>
 
 3. **导入场景编辑器**：把生成的 `.ply` 拖入 [场景编辑器](https://jonnnty.github.io/AI-block/placement/placement_editor.html) 即可摆放。
+
+#### 渲染画面润色
+
+渲染出来的视频画面可以使用 [Bernini](https://github.com/bytedance/Bernini) 的 **Bernini-R 1.3B** 进行环境渲染：
+
+<table>
+  <tr>
+    <td align="center"></td>
+    <td align="center"><b>雪天</b></td>
+    <td align="center"><b>雨天</b></td>
+    <td align="center"><b>夜景</b></td>
+  </tr>
+  <tr>
+    <td align="center"><b>渲染画面</b></td>
+    <td align="center"><img src="docs/readme-assets/traj2_white.gif" width="180" alt=""></td>
+    <td align="center"><img src="docs/readme-assets/traj3_white.gif" width="180" alt=""></td>
+    <td align="center"><img src="docs/readme-assets/traj4_white.gif" width="180" alt=""></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Bernini-R 1.3B 润色后</b></td>
+    <td align="center"><img src="docs/readme-assets/traj2_snow.gif" width="180" alt=""></td>
+    <td align="center"><img src="docs/readme-assets/traj3_storm.gif" width="180" alt=""></td>
+    <td align="center"><img src="docs/readme-assets/traj4_night.gif" width="180" alt=""></td>
+  </tr>
+</table>
