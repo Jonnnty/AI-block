@@ -59,34 +59,54 @@ function parseNpy(u8) {
   const shape = shapeMatch[1].split(',').map((s) => s.trim()).filter(Boolean).map(Number);
   const descrMatch = header.match(/'descr': '([^']+)'/);
   const descr = descrMatch ? descrMatch[1] : '<f4';
-  const little = descr.startsWith('<');
-  const dt = descr.slice(-2);
-  const itemSize = dt === 'f4' ? 4 : dt === 'f8' ? 8 : dt === 'i4' ? 4 : dt === 'i8' ? 8 : dt === '|b1' || dt === '|u1' ? 1 : 4;
+  const little = descr.startsWith('<') || descr.startsWith('|');
   const count = shape.reduce((a, b) => a * b, 1);
+
+  const itemSize = descr === '|b1' || descr === '|u1' ? 1
+    : descr.endsWith('f4') ? 4
+      : descr.endsWith('f8') ? 8
+        : descr.endsWith('i4') ? 4
+          : descr.endsWith('i8') ? 8
+            : 0;
+  if (!itemSize) throw new Error(`unsupported npy dtype ${descr}`);
+
   const raw = u8.subarray(i, i + count * itemSize);
-  if (dt === 'f4') return { shape, data: new Float32Array(raw.buffer, raw.byteOffset, count) };
-  if (dt === 'f8') {
+  const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+
+  if (descr.endsWith('f4')) {
     const out = new Float32Array(count);
-    const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+    for (let k = 0; k < count; k++) out[k] = dv.getFloat32(k * 4, little);
+    return { shape, data: out };
+  }
+  if (descr.endsWith('f8')) {
+    const out = new Float32Array(count);
     for (let k = 0; k < count; k++) out[k] = dv.getFloat64(k * 8, little);
     return { shape, data: out };
   }
-  if (dt === 'i4') return { shape, data: new Int32Array(raw.buffer, raw.byteOffset, count) };
-  if (dt === '|b1' || dt === '|u1') return { shape, data: new Uint8Array(raw.buffer, raw.byteOffset, count) };
+  if (descr.endsWith('i4')) {
+    const out = new Int32Array(count);
+    for (let k = 0; k < count; k++) out[k] = dv.getInt32(k * 4, little);
+    return { shape, data: out };
+  }
+  if (descr === '|b1' || descr === '|u1') {
+    const out = new Uint8Array(count);
+    out.set(raw.subarray(0, count));
+    return { shape, data: out };
+  }
   throw new Error(`unsupported npy dtype ${descr}`);
 }
 
 export function parseKimodoNpz(arrayBuffer) {
   const files = unzipSync(new Uint8Array(arrayBuffer));
-  const arrays = {};
+  let posedEntry = null;
+  let rotEntry = null;
   for (const [name, bytes] of Object.entries(files)) {
     if (!name.endsWith('.npy')) continue;
     const key = name.replace(/\.npy$/, '').split('/').pop();
-    arrays[key] = parseNpy(bytes);
+    if (key === 'posed_joints') posedEntry = parseNpy(bytes);
+    else if (key === 'global_rot_mats') rotEntry = parseNpy(bytes);
   }
-  const posedEntry = arrays.posed_joints;
   if (!posedEntry) throw new Error('NPZ 缺少 posed_joints');
-  const rotEntry = arrays.global_rot_mats;
   if (!rotEntry) throw new Error('NPZ 缺少 global_rot_mats');
   const pjShape = posedEntry.shape;
   const numFrames = pjShape[0];
