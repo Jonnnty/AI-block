@@ -455,7 +455,8 @@
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
       "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
-      "@mkkellogg/gaussian-splats-3d": "./vendor/gaussian-splats-3d.module.js?v=20260722b"
+      "@mkkellogg/gaussian-splats-3d": "./vendor/gaussian-splats-3d.module.js?v=20260722b",
+      "./vendor/motion_actor.js": "./vendor/motion_actor.js?v=20260728a"
     }
   }
   </script>
@@ -561,8 +562,9 @@
     <div id="modelsPanel">
       <section>
         <h2>导入模型</h2>
-        <input type="file" id="pickFile" accept=".ply" multiple hidden />
-        <button type="button" id="importBtn" class="secondary">选择 PLY 文件</button>
+        <input type="file" id="pickFile" accept=".ply,.npz" multiple hidden />
+        <button type="button" id="importBtn" class="secondary">选择 PLY / NPZ 文件</button>
+        <p class="hint">NPZ 为 Kimodo 动作，导入后显示素色 SOMA 人模</p>
       </section>
       <section>
         <h2>已放置</h2>
@@ -590,6 +592,15 @@
         <label>高度 Z <span class="val" id="selZVal">—</span><input type="range" id="selZ" min="-0.002" max="0.003" step="0.0001" disabled /></label>
         <label>比例 <span class="val" id="selScaleVal">—</span><input type="range" id="selScale" min="0.01" max="0.5" step="0.005" disabled /></label>
         <label>旋转° <span class="val" id="selYawVal">—</span><input type="range" id="selYaw" min="-180" max="180" step="1" disabled /></label>
+        <div id="motionControls" hidden>
+          <p class="hint" id="motionMeta">动作 —</p>
+          <label>动作帧 <span class="val" id="motionFrameVal">0</span>
+            <input type="range" id="motionFrame" min="0" max="0" step="1" value="0" disabled />
+          </label>
+          <div class="row">
+            <button type="button" id="motionPlayBtn" class="secondary" disabled>▶ 预览动作</button>
+          </div>
+        </div>
         <p class="hint">默认无 Gizmo；点击按钮启用，再点一次关闭，防误触</p>
       </section>
       <section>
@@ -671,7 +682,7 @@
             <label>渲染 FPS <span class="val" id="pathFpsVal">12</span>
               <input type="range" id="pathFps" min="6" max="30" step="1" value="12" />
             </label>
-            <p class="hint" id="rigCameraHint">相机与轨迹使用世界坐标，与模型独立；移动/旋转模型不影响相机与轨迹</p>
+            <p class="hint" id="rigCameraHint">相机与轨迹使用世界坐标；导入 NPZ 人模后，路径渲染会同步 4D 动作</p>
           </div>
         </section>
         <section class="rig-settings-panel">
@@ -714,6 +725,13 @@
     import { TransformControls } from 'three/addons/controls/TransformControls.js';
     import { ViewHelper } from 'three/addons/helpers/ViewHelper.js';
     import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
+    import {
+      loadSomaSkin,
+      parseKimodoNpz,
+      buildMotionData,
+      skinFrame,
+      motionFrameForCameraFrame,
+    } from './vendor/motion_actor.js?v=20260728a';
 
 
     function _n(v, fb) { return v !== undefined && v !== null ? v : fb; }
@@ -1561,6 +1579,12 @@
     let cameraHelper = null;
     let pathSlideBeacon = null;
     let rigOverlayScene = null;
+    /** @type {import('./vendor/motion_actor.js').SomaSkin|null} */
+    let somaSkin = null;
+    let actorScene = null;
+    const ACTOR_COLOR = 0x98bdff;
+    let motionPreviewRaf = 0;
+    let motionPreviewStart = 0;
     let rigPreviewRt = null;
     const RIG_PREVIEW_W = 336;
     const RIG_PREVIEW_H = 189;
@@ -2913,6 +2937,216 @@
       }
     }
 
+    function initActorScene() {
+      if (actorScene) return;
+      actorScene = new THREE.Scene();
+      actorScene.name = 'ActorScene';
+    }
+
+    async function ensureSomaSkin() {
+      if (somaSkin) return somaSkin;
+      somaSkin = await loadSomaSkin('./vendor/soma_skin.bin');
+      return somaSkin;
+    }
+
+    function renderActorPass(camera = viewer && viewer.camera) {
+      if (!actorScene || !viewer || !viewer.renderer || !camera) return;
+      if (viewer.isDisposingOrDisposed && viewer.isDisposingOrDisposed()) return;
+      const renderer = viewer.renderer;
+      const savedAutoClear = renderer.autoClear;
+      renderer.autoClear = false;
+      renderer.render(actorScene, camera);
+      renderer.autoClear = savedAutoClear;
+    }
+
+    function getActivePathTotalFrames() {
+      const segs = Math.max(0, cameraMarkers.length - 1);
+      return Math.max(1, segs * pathFramesPerSeg + 1);
+    }
+
+    function updateAllActorsForRenderFrame(f, totalFrames) {
+      for (const p of placements) {
+        if (p.type !== 'motion' || p.missing || !p.motion) continue;
+        const frame = motionFrameForCameraFrame(f, totalFrames, p.motion);
+        updateActorFrame(p, frame);
+      }
+    }
+
+    function syncAllActorsForPathT(t) {
+      const total = getActivePathTotalFrames();
+      const camFrame = Math.round(t * Math.max(0, total - 1));
+      updateAllActorsForRenderFrame(camFrame, total);
+    }
+
+    function stopMotionPreview() {
+      if (motionPreviewRaf) cancelAnimationFrame(motionPreviewRaf);
+      motionPreviewRaf = 0;
+      motionPreviewStart = 0;
+      el('motionPlayBtn').textContent = '▶ 预览动作';
+    }
+
+    function createActorObject(p, skin, motion) {
+      initActorScene();
+      initRigOverlayScene();
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(skin.numVerts * 3), 3));
+      geo.setIndex(new THREE.BufferAttribute(skin.faces, 1));
+      geo.computeVertexNormals();
+      const mat = new THREE.MeshBasicMaterial({ color: ACTOR_COLOR, depthTest: true, depthWrite: true });
+      const mesh = new THREE.Mesh(geo, mat);
+      const root = new THREE.Group();
+      root.name = `actor:${p.name}`;
+      root.add(mesh);
+      p.mesh = mesh;
+      p.root = root;
+      p.motion = motion;
+      p.motionFps = motion.fps;
+      p.motionFrames = motion.numFrames;
+      actorScene.add(root);
+      updateActorFrame(p, 0);
+      syncActorTransform(p);
+      return root;
+    }
+
+    function updateActorFrame(p, frameIdx) {
+      if (!p.motion || !p.mesh || !somaSkin) return;
+      const verts = skinFrame(somaSkin, p.motion, frameIdx);
+      const anchor = p.center || [0, 0, 0];
+      const pos = p.mesh.geometry.attributes.position;
+      for (let i = 0; i < verts.length; i += 3) {
+        pos.array[i] = verts[i] - anchor[0];
+        pos.array[i + 1] = verts[i + 1] - anchor[1];
+        pos.array[i + 2] = verts[i + 2] - anchor[2];
+      }
+      pos.needsUpdate = true;
+      p.mesh.geometry.computeVertexNormals();
+      p.currentFrame = frameIdx;
+    }
+
+    function syncActorTransform(p) {
+      if (!p.root) return;
+      p.root.position.set(p.x, p.y, p.z);
+      p.root.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+      p.root.scale.set(p.scale, p.scale, p.scale);
+      p.root.visible = p.visible !== false;
+      viewer && viewer.forceRenderNextFrame();
+    }
+
+    function removeActorFromScene(p) {
+      if (p.root && actorScene) {
+        actorScene.remove(p.root);
+        p.mesh && p.mesh.geometry && p.mesh.geometry.dispose();
+        p.mesh && p.mesh.material && p.mesh.material.dispose();
+      }
+      p.root = null;
+      p.mesh = null;
+    }
+
+    function updateMotionControlsUI() {
+      const p = selected >= 0 ? placements[selected] : null;
+      const isMotion = !!(p && p.type === 'motion' && !p.missing);
+      el('motionControls').hidden = !isMotion;
+      el('motionFrame').disabled = !isMotion;
+      el('motionPlayBtn').disabled = !isMotion;
+      if (!isMotion) return;
+      const maxF = Math.max(0, (p.motionFrames || 1) - 1);
+      el('motionFrame').max = String(maxF);
+      el('motionFrame').value = String(_n(p.currentFrame, 0));
+      el('motionFrameVal').textContent = `${_n(p.currentFrame, 0)} / ${maxF}`;
+      el('motionMeta').textContent = `动作 ${p.motionFrames} 帧 @ ${p.motionFps || 30} FPS · 渲染时与相机路径同步`;
+    }
+
+    function startMotionPreview() {
+      const p = selected >= 0 ? placements[selected] : null;
+      if (!p || p.type !== 'motion' || !p.motion) return;
+      if (motionPreviewRaf) {
+        stopMotionPreview();
+        return;
+      }
+      el('motionPlayBtn').textContent = '⏸ 停止';
+      motionPreviewStart = performance.now();
+      const fps = p.motionFps || 30;
+      const loop = (ts) => {
+        if (!motionPreviewRaf) return;
+        const elapsed = (ts - motionPreviewStart) / 1000;
+        const frame = Math.floor(elapsed * fps) % p.motion.numFrames;
+        updateActorFrame(p, frame);
+        el('motionFrame').value = String(frame);
+        el('motionFrameVal').textContent = `${frame} / ${p.motion.numFrames - 1}`;
+        viewer && viewer.forceRenderNextFrame();
+        motionPreviewRaf = requestAnimationFrame(loop);
+      };
+      motionPreviewRaf = requestAnimationFrame(loop);
+    }
+
+    async function buildMotionFromBuffer(ab) {
+      await ensureSomaSkin();
+      const raw = parseKimodoNpz(ab);
+      if (raw.numJoints !== 77) {
+        throw new Error(`暂仅支持 77 关节 Kimodo NPZ（当前 ${raw.numJoints} 关节）`);
+      }
+      return buildMotionData(raw);
+    }
+
+    async function addMotionFromFile(file, loadToken = sessionResetToken) {
+      if (!sceneReady) throw new Error('场景尚未就绪');
+      const { assetName, missingIdx } = resolveImportAssetName(file);
+      let sourcePath = inferSourcePathForImport(file);
+      status(missingIdx >= 0 ? `恢复人模 ${assetName}…` : `加载人模 ${assetName}…`);
+      setLoadProgress(20, `解析 ${assetName}…`);
+      let ab = fileCache.get(fileCacheKey(activeSceneId, assetName));
+      if (!ab) {
+        ab = await file.arrayBuffer();
+        if (isSessionAborted(loadToken)) return;
+        fileCache.set(fileCacheKey(activeSceneId, assetName), ab);
+      }
+      if (activeSceneId) {
+        idbPutSceneAsset(activeSceneId, assetName, ab, sourcePath).catch((e) => console.warn('动作缓存写入失败', e));
+      }
+      const motion = await buildMotionFromBuffer(ab);
+      if (isSessionAborted(loadToken)) return;
+      const skin = await ensureSomaSkin();
+      if (missingIdx >= 0) {
+        const p = placements[missingIdx];
+        removeActorFromScene(p);
+        p.missing = false;
+        delete p.missingReason;
+        p.type = 'motion';
+        p.motion = motion;
+        p.motionFps = motion.fps;
+        p.motionFrames = motion.numFrames;
+        p.center = [motion.anchor.x, motion.anchor.y, motion.anchor.z];
+        if (sourcePath) p.sourcePath = sourcePath;
+        createActorObject(p, skin, motion);
+        selectPlacement(missingIdx);
+        hideLoadProgress();
+        status(`已恢复人模 ${assetName}`);
+        renderList();
+        return;
+      }
+      const p = {
+        type: 'motion',
+        name: assetName,
+        sourcePath: sourcePath || null,
+        x: 0, y: 0, z: defaultZ,
+        scale: defaultScale,
+        yaw_deg: 0,
+        sceneIdx: null,
+        visible: true,
+        center: [motion.anchor.x, motion.anchor.y, motion.anchor.z],
+        motion,
+        motionFps: motion.fps,
+        motionFrames: motion.numFrames,
+        currentFrame: 0,
+      };
+      createActorObject(p, skin, motion);
+      placements.push(p);
+      selectPlacement(placements.length - 1);
+      hideLoadProgress();
+      status(`已放置人模 ${assetName}（${motion.numFrames} 帧）`);
+      renderList();
+    }
+
     function initRigOverlayScene() {
       if (!viewer || rigOverlayScene) return;
       rigOverlayScene = new THREE.Scene();
@@ -2923,6 +3157,7 @@
       viewer._origGaussianRender = origRender;
       viewer.render = function () {
         origRender();
+        renderActorPass();
         renderRigOverlayPass();
       };
     }
@@ -3144,6 +3379,7 @@
       const sample = samplePathAt(t);
       if (!sample) return;
       applySamplePoseToRig(sample);
+      syncAllActorsForPathT(t);
       pathSlideStatusTick++;
       if (pathSlideStatusTick % 12 === 0) {
         const p = renderCamRig.position;
@@ -3553,6 +3789,7 @@
       const sample = samplePathAt(pathPinT);
       if (!sample) return;
       applySamplePoseToRig(sample);
+      syncAllActorsForPathT(pathPinT);
       viewer && viewer.forceRenderNextFrame();
       el('rigPreviewStatus').textContent = '需重新渲染';
     }
@@ -3899,6 +4136,7 @@
           const sample = samplePathAt(f / (totalFrames - 1));
           applySamplePoseToRig(sample);
           syncCameraHelper();
+          updateAllActorsForRenderFrame(f, totalFrames);
           previewFrames.push(await renderGaussToImageData());
           if (f % 3 === 0 || f === totalFrames - 1) {
             el('rigPreviewStatus').textContent = `${Math.round((f + 1) / totalFrames * 100)}%`;
@@ -3922,7 +4160,8 @@
         await done;
         showPreviewVideo(URL.createObjectURL(new Blob(chunks, { type: mime })));
         el('rigPreviewStatus').textContent = '视频就绪';
-        status(`路径视频 ${previewFrames.length} 帧 @ ${fps} FPS`);
+        const hasMotion = placements.some((p) => p.type === 'motion' && !p.missing);
+        status(`${hasMotion ? '4D ' : ''}路径视频 ${previewFrames.length} 帧 @ ${fps} FPS`);
       } finally {
         Object.assign(renderCameraPose, savedPose);
         syncRigFromPose();
@@ -4071,6 +4310,7 @@
           const sample = samplePathAt(f / (totalFrames - 1));
           applySamplePoseToRig(sample);
           syncCameraHelper();
+          updateAllActorsForRenderFrame(f, totalFrames);
           const canvas = await renderGaussFullResCanvas();
           const blob = await canvasToPngBlob(canvas);
           const name = `frame_${String(f + 1).padStart(5, '0')}.png`;
@@ -4147,6 +4387,9 @@
       if (!(viewer && viewer.renderer) || !renderCamera || !rigOpen) return;
       showRigPreviewFloat();
       stopPreviewPlayback();
+      if (placements.some((p) => p.type === 'motion' && !p.missing)) {
+        syncAllActorsForPathT(pathPinT);
+      }
       status('渲染机位预览…');
       el('rigPreviewStatus').textContent = '渲染中…';
       el('rigPreviewTitle').textContent = '单帧预览';
@@ -4424,6 +4667,7 @@
         await viewer.runSplatSort(true, true);
         viewer.updateSplatMesh();
         drawFrame();
+        renderActorPass(orbitCam);
         return await drawFn({ renderer, width, height, renderTarget });
       } finally {
         restoreRenderDims();
@@ -4610,6 +4854,10 @@
     }
 
     function applyPlacementVisibility(p) {
+      if (p.type === 'motion') {
+        syncActorTransform(p);
+        return;
+      }
       if (!viewer || !viewer.splatMesh || p.sceneIdx == null || p.missing) return;
       const sm = viewer.splatMesh;
       const scene = sm.getScene(p.sceneIdx);
@@ -4655,6 +4903,10 @@
     }
 
     function syncPlacementTransform(p) {
+      if (p.type === 'motion') {
+        syncActorTransform(p);
+        return;
+      }
       if (!viewer || !viewer.splatMesh || p.sceneIdx == null) return;
       const scene = viewer.splatMesh.getScene(p.sceneIdx);
       scene.position.set(p.x, p.y, p.z);
@@ -4752,6 +5004,7 @@
         viewer.start();
         tuneCamera();
         initRigOverlayScene();
+        initActorScene();
         setupViewHelper();
         overlayRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
         overlayRenderer.setSize(128, 128);
@@ -4928,6 +5181,8 @@
     }
 
     async function addPlacementFromFile(file, loadToken = sessionResetToken) {
+      const ext = file.name.toLowerCase().split('.').pop();
+      if (ext === 'npz') return addMotionFromFile(file, loadToken);
       if (!sceneReady) throw new Error('场景尚未就绪');
       const { assetName, missingIdx } = resolveImportAssetName(file);
       let sourcePath = inferSourcePathForImport(file);
@@ -5032,9 +5287,11 @@
         const p = placements[idx];
         el('selHint').textContent = p.missing
           ? missingPlacementHint(p)
-          : p.name;
+          : (p.type === 'motion' ? `人模 · ${p.name}` : p.name);
+        updateMotionControlsUI();
       } else {
         el('selHint').textContent = '从列表选中模型';
+        el('motionControls').hidden = true;
       }
       attachGizmo();
     }
@@ -5068,7 +5325,9 @@
     async function removePlacement(idx) {
       const p = placements[idx];
       if (!p) return;
-      if (p.sceneIdx != null && viewer) {
+      if (p.type === 'motion') {
+        removeActorFromScene(p);
+      } else if (p.sceneIdx != null && viewer) {
         try {
           await viewer.removeSplatScene(p.sceneIdx, false);
         } catch (err) {
@@ -5140,8 +5399,8 @@
           + (p.missing ? ' missing' : '');
         if (p.missing) row.title = p.missingReason || missingPlacementHint(p);
         row.innerHTML = p.missing
-          ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || '缺少 PLY'}</span></span>`
-          : `<span class="scene-name">${p.name}</span>`;
+          ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : '缺少 PLY')}</span></span>`
+          : `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : ''}${p.name}</span>`;
         const vis = document.createElement('button');
         vis.type = 'button';
         vis.className = 'icon-btn visibility-btn';
@@ -5163,6 +5422,7 @@
       return placements.map((p) => {
         const item = {
           asset: p.name,
+          type: p.type || 'splat',
           x: p.x, y: p.y, z: p.z,
           scale: p.scale,
           yaw_deg: p.yaw_deg,
@@ -5171,6 +5431,10 @@
           roll_deg: 0,
           visible: p.visible !== false,
         };
+        if (p.type === 'motion') {
+          item.motionFps = p.motionFps || 30;
+          item.motionFrames = p.motionFrames || (p.motion && p.motion.numFrames) || 0;
+        }
         if (p.sourcePath) item.sourcePath = p.sourcePath;
         return item;
       });
@@ -5216,6 +5480,10 @@
     }
 
     async function clearAllPlacementsFromViewer() {
+      stopMotionPreview();
+      for (const p of placements) {
+        if (p.type === 'motion') removeActorFromScene(p);
+      }
       placements.length = 0;
       selected = -1;
       const sceneCount = _n(viewer && viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
@@ -5352,6 +5620,7 @@
           });
           placements.push({
             name,
+            type: item.type || (name.toLowerCase().endsWith('.npz') ? 'motion' : 'splat'),
             sourcePath: storedPath || null,
             missingReason: missingReasonText,
             x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
@@ -5362,8 +5631,36 @@
             center: Array.isArray(item.center) && item.center.length >= 3
               ? [_n(item.center[0], 0), _n(item.center[1], 0), _n(item.center[2], 0)]
               : [0, 0, 0],
+            motionFps: item.motionFps,
+            motionFrames: item.motionFrames,
             missing: true,
           });
+          continue;
+        }
+        const isMotion = item.type === 'motion' || name.toLowerCase().endsWith('.npz');
+        if (isMotion) {
+          const motion = await buildMotionFromBuffer(ab);
+          if (isSessionAborted(loadToken)) return;
+          const skin = await ensureSomaSkin();
+          const p = {
+            type: 'motion',
+            name,
+            sourcePath: item.sourcePath || await idbGetSceneSourcePath(activeSceneId, name) || null,
+            x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
+            scale: _n(item.scale, defaultScale),
+            yaw_deg: _n(item.yaw_deg, 0),
+            sceneIdx: null,
+            visible: item.visible !== false,
+            center: Array.isArray(item.center) && item.center.length >= 3
+              ? [_n(item.center[0], 0), _n(item.center[1], 0), _n(item.center[2], 0)]
+              : [motion.anchor.x, motion.anchor.y, motion.anchor.z],
+            motion,
+            motionFps: motion.fps,
+            motionFrames: motion.numFrames,
+            currentFrame: 0,
+          };
+          createActorObject(p, skin, motion);
+          placements.push(p);
           continue;
         }
         const file = new File([ab], name);
@@ -5405,7 +5702,7 @@
           sceneId: activeSceneId,
           hostMode,
         });
-        status(`已加载 ${loadedCount} 个模型 · ${missing.length} 个缺少 PLY · 请拖入同名文件恢复`);
+        status(`已加载 ${loadedCount} 个模型 · ${missing.length} 个缺少文件 · 请拖入同名文件恢复`);
       } else {
         status(`已恢复 ${placements.length} 个模型`);
       }
@@ -5425,9 +5722,12 @@
           return;
         }
         const files = [...(e.dataTransfer && e.dataTransfer.files || [])]
-          .filter((f) => f.name.toLowerCase().endsWith('.ply'));
+          .filter((f) => {
+            const n = f.name.toLowerCase();
+            return n.endsWith('.ply') || n.endsWith('.npz');
+          });
         if (!files.length) {
-          status('请拖入 .ply 模型文件');
+          status('请拖入 .ply 或 .npz 文件');
           return;
         }
         for (const f of files) {
@@ -5441,6 +5741,18 @@
       hideLoadProgress();
       status(`错误: ${e.message}`);
     }
+
+    el('motionFrame').oninput = () => {
+      if (selected < 0) return;
+      const p = placements[selected];
+      if (!p || p.type !== 'motion' || !p.motion) return;
+      stopMotionPreview();
+      const frame = parseInt(el('motionFrame').value, 10) || 0;
+      updateActorFrame(p, frame);
+      el('motionFrameVal').textContent = `${frame} / ${p.motion.numFrames - 1}`;
+      viewer && viewer.forceRenderNextFrame();
+    };
+    el('motionPlayBtn').onclick = () => startMotionPreview();
 
     el('importBtn').onclick = () => el('pickFile').click();
     el('pickFile').onchange = async () => {

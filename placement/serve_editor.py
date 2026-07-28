@@ -62,7 +62,7 @@ def resolve_asset_file(path_str: str) -> Path | None:
             p = p.resolve()
     except (OSError, ValueError):
         return None
-    if not p.is_file() or p.suffix.lower() != ".ply":
+    if not p.is_file() or p.suffix.lower() not in {".ply", ".npz"}:
         return None
     return p
 
