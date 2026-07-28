@@ -456,7 +456,7 @@
       "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
       "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
       "@mkkellogg/gaussian-splats-3d": "./vendor/gaussian-splats-3d.module.js?v=20260722b",
-      "./vendor/motion_actor.js": "./vendor/motion_actor.js?v=20260728b"
+      "./vendor/motion_actor.js": "./vendor/motion_actor.js?v=20260728c"
     }
   }
   </script>
@@ -598,7 +598,7 @@
             <input type="range" id="motionFrame" min="0" max="0" step="1" value="0" disabled />
           </label>
           <div class="row">
-            <button type="button" id="motionPlayBtn" class="secondary" disabled>▶ 预览动作</button>
+            <button type="button" id="motionPlayBtn" class="secondary" disabled>▶ 播放动作</button>
           </div>
         </div>
         <p class="hint">默认无 Gizmo；点击按钮启用，再点一次关闭，防误触</p>
@@ -731,7 +731,8 @@
       buildMotionData,
       skinFrame,
       motionFrameForCameraFrame,
-    } from './vendor/motion_actor.js?v=20260728b';
+      motionDefaultScale,
+    } from './vendor/motion_actor.js?v=20260728c';
 
 
     function _n(v, fb) { return v !== undefined && v !== null ? v : fb; }
@@ -1581,7 +1582,7 @@
     let rigOverlayScene = null;
     /** @type {import('./vendor/motion_actor.js').SomaSkin|null} */
     let somaSkin = null;
-    let actorScene = null;
+    let actorRootGroup = null;
     const ACTOR_COLOR = 0x98bdff;
     let motionPreviewRaf = 0;
     let motionPreviewStart = 0;
@@ -2937,10 +2938,13 @@
       }
     }
 
-    function initActorScene() {
-      if (actorScene) return;
-      actorScene = new THREE.Scene();
-      actorScene.name = 'ActorScene';
+    function initActorRootGroup() {
+      if (actorRootGroup) return;
+      initRigOverlayScene();
+      actorRootGroup = new THREE.Group();
+      actorRootGroup.name = 'ActorRootGroup';
+      actorRootGroup.renderOrder = 900;
+      rigOverlayScene.add(actorRootGroup);
     }
 
     async function ensureSomaSkin() {
@@ -2949,14 +2953,24 @@
       return somaSkin;
     }
 
-    function renderActorPass(camera = viewer && viewer.camera) {
-      if (!actorScene || !viewer || !viewer.renderer || !camera) return;
-      if (viewer.isDisposingOrDisposed && viewer.isDisposingOrDisposed()) return;
+    function renderActorsForCapture(camera) {
+      if (!actorRootGroup || !actorRootGroup.children.length || !viewer || !viewer.renderer || !camera) return;
       const renderer = viewer.renderer;
+      const hidden = [];
+      for (const child of rigOverlayScene.children) {
+        if (child !== actorRootGroup && child.visible) {
+          hidden.push(child);
+          child.visible = false;
+        }
+      }
       const savedAutoClear = renderer.autoClear;
       renderer.autoClear = false;
-      renderer.render(actorScene, camera);
-      renderer.autoClear = savedAutoClear;
+      try {
+        renderer.render(rigOverlayScene, camera);
+      } finally {
+        hidden.forEach((c) => { c.visible = true; });
+        renderer.autoClear = savedAutoClear;
+      }
     }
 
     function getActivePathTotalFrames() {
@@ -2982,18 +2996,30 @@
       if (motionPreviewRaf) cancelAnimationFrame(motionPreviewRaf);
       motionPreviewRaf = 0;
       motionPreviewStart = 0;
-      el('motionPlayBtn').textContent = '▶ 预览动作';
+      el('motionPlayBtn').textContent = '▶ 播放动作';
+    }
+
+    function applyMotionDefaultScale(p, motion) {
+      p.scale = motionDefaultScale(motion, defaultScale);
+      p.motionHeight = motion.height;
     }
 
     function createActorObject(p, skin, motion) {
-      initActorScene();
-      initRigOverlayScene();
+      initActorRootGroup();
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(skin.numVerts * 3), 3));
-      geo.setIndex(new THREE.BufferAttribute(skin.faces, 1));
-      geo.computeVertexNormals();
-      const mat = new THREE.MeshBasicMaterial({ color: ACTOR_COLOR, depthTest: true, depthWrite: true });
+      geo.setIndex(new THREE.Uint32BufferAttribute(skin.faces, 1));
+      const mat = new THREE.MeshBasicMaterial({
+        color: ACTOR_COLOR,
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.96,
+      });
       const mesh = new THREE.Mesh(geo, mat);
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 901;
       const root = new THREE.Group();
       root.name = `actor:${p.name}`;
       root.add(mesh);
@@ -3002,9 +3028,10 @@
       p.motion = motion;
       p.motionFps = motion.fps;
       p.motionFrames = motion.numFrames;
-      actorScene.add(root);
+      actorRootGroup.add(root);
       updateActorFrame(p, 0);
       syncActorTransform(p);
+      viewer && viewer.forceRenderNextFrame();
       return root;
     }
 
@@ -3019,6 +3046,7 @@
         pos.array[i + 2] = verts[i + 2] - anchor[2];
       }
       pos.needsUpdate = true;
+      p.mesh.geometry.computeBoundingSphere();
       p.mesh.geometry.computeVertexNormals();
       p.currentFrame = frameIdx;
     }
@@ -3033,8 +3061,8 @@
     }
 
     function removeActorFromScene(p) {
-      if (p.root && actorScene) {
-        actorScene.remove(p.root);
+      if (p.root && actorRootGroup) {
+        actorRootGroup.remove(p.root);
         p.mesh && p.mesh.geometry && p.mesh.geometry.dispose();
         p.mesh && p.mesh.material && p.mesh.material.dispose();
       }
@@ -3053,7 +3081,7 @@
       el('motionFrame').max = String(maxF);
       el('motionFrame').value = String(_n(p.currentFrame, 0));
       el('motionFrameVal').textContent = `${_n(p.currentFrame, 0)} / ${maxF}`;
-      el('motionMeta').textContent = `动作 ${p.motionFrames} 帧 @ ${p.motionFps || 30} FPS · 渲染时与相机路径同步`;
+      el('motionMeta').textContent = `动作 ${p.motionFrames} 帧 @ ${p.motionFps || 30} FPS · 高度≈${(p.motionHeight || 1.75).toFixed(2)}m · 可用 Q/W 移动旋转 · 点播放`;
     }
 
     function startMotionPreview() {
@@ -3063,7 +3091,7 @@
         stopMotionPreview();
         return;
       }
-      el('motionPlayBtn').textContent = '⏸ 停止';
+      el('motionPlayBtn').textContent = '⏸ 停止动作';
       motionPreviewStart = performance.now();
       const fps = p.motionFps || 30;
       const loop = (ts) => {
@@ -3117,6 +3145,7 @@
         p.motionFrames = motion.numFrames;
         p.center = [motion.anchor.x, motion.anchor.y, motion.anchor.z];
         if (sourcePath) p.sourcePath = sourcePath;
+        applyMotionDefaultScale(p, motion);
         createActorObject(p, skin, motion);
         selectPlacement(missingIdx);
         hideLoadProgress();
@@ -3139,6 +3168,7 @@
         motionFrames: motion.numFrames,
         currentFrame: 0,
       };
+      applyMotionDefaultScale(p, motion);
       createActorObject(p, skin, motion);
       placements.push(p);
       selectPlacement(placements.length - 1);
@@ -3147,19 +3177,24 @@
       renderList();
     }
 
-    function initRigOverlayScene() {
-      if (!viewer || rigOverlayScene) return;
-      rigOverlayScene = new THREE.Scene();
-      rigOverlayScene.name = 'RigOverlayScene';
-      if (viewer._rigOverlayPatched) return;
+    function ensureViewerRenderPatch() {
+      if (!viewer || viewer._rigOverlayPatched) return;
       viewer._rigOverlayPatched = true;
       const origRender = viewer.render.bind(viewer);
       viewer._origGaussianRender = origRender;
       viewer.render = function () {
         origRender();
-        renderActorPass();
         renderRigOverlayPass();
       };
+    }
+
+    function initRigOverlayScene() {
+      if (!viewer) return;
+      if (!rigOverlayScene) {
+        rigOverlayScene = new THREE.Scene();
+        rigOverlayScene.name = 'RigOverlayScene';
+      }
+      ensureViewerRenderPatch();
     }
 
     function renderRigOverlayPass() {
@@ -4667,7 +4702,7 @@
         await viewer.runSplatSort(true, true);
         viewer.updateSplatMesh();
         drawFrame();
-        renderActorPass(orbitCam);
+        renderActorsForCapture(orbitCam);
         return await drawFn({ renderer, width, height, renderTarget });
       } finally {
         restoreRenderDims();
@@ -5004,7 +5039,7 @@
         viewer.start();
         tuneCamera();
         initRigOverlayScene();
-        initActorScene();
+        initActorRootGroup();
         setupViewHelper();
         overlayRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
         overlayRenderer.setSize(128, 128);
@@ -5299,6 +5334,9 @@
     function updateSelSliders() {
       if (selected < 0) return;
       const p = placements[selected];
+      if (p.type === 'motion') {
+        setSliderValueUnbounded(el('selScale'), p.scale);
+      }
       el('selX').value = p.x; el('selXVal').textContent = p.x.toFixed(3);
       el('selY').value = p.y; el('selYVal').textContent = p.y.toFixed(3);
       el('selZ').value = p.z; el('selZVal').textContent = p.z.toFixed(4);
@@ -5316,6 +5354,7 @@
       p.yaw_deg = parseFloat(el('selYaw').value);
       syncPlacementTransform(p);
       updateSelSliders();
+      if (p.type === 'motion') updateMotionControlsUI();
       syncingFromGizmo = true;
       pivot.position.set(p.x, p.y, p.z);
       pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));

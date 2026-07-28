@@ -158,6 +158,10 @@ export function buildMotionData(raw) {
     posedZ[i + 2] -= minZ;
   }
   const anchor = { x: ax, y: ay, z: 0 };
+  let maxZ = 0;
+  for (let j = 0; j < numJoints; j++) {
+    maxZ = Math.max(maxZ, posedZ[j * 3 + 2]);
+  }
   return {
     posedJoints: posedZ,
     globalRotMats: rotZ,
@@ -166,7 +170,15 @@ export function buildMotionData(raw) {
     fps,
     anchor,
     minZ,
+    height: maxZ,
   };
+}
+
+/** Scale motion actor to match scene props (~0.25m tall by default). */
+export function motionDefaultScale(motion, sceneScale = 0.12) {
+  const height = Math.max(motion.height || 1.75, 0.01);
+  const targetHeight = Math.max(sceneScale * 2.0, 0.18);
+  return targetHeight / height;
 }
 
 /**
