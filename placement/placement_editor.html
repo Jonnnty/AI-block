@@ -1247,9 +1247,14 @@
         const u = resolveHttpAssetUrl(rel);
         if (u && !urls.includes(u)) urls.push(u);
       };
-      add(`outputs_50pct/${assetName}`);
-      add(`outputs/${assetName}`);
-      add(assetName);
+      const names = [assetName];
+      const canon = canonicalPlacementAssetName(assetName);
+      if (canon.toLowerCase() !== assetName.toLowerCase()) names.push(canon);
+      for (const name of names) {
+        add(`outputs_50pct/${name}`);
+        add(`outputs/${name}`);
+        add(name);
+      }
       return urls;
     }
 
@@ -1384,6 +1389,16 @@
         return finish('memory_cache_hit', ab, { loadedFrom: 'memory', bytes: ab.byteLength });
       }
 
+      const canon = canonicalPlacementAssetName(name);
+      if (canon.toLowerCase() !== name.toLowerCase()) {
+        const canonCacheKey = fileCacheKey(sceneId, canon);
+        if (fileCache.has(canonCacheKey)) {
+          const ab = fileCache.get(canonCacheKey);
+          fileCache.set(cacheKey, ab);
+          return finish('memory_cache_canonical_hit', ab, { loadedFrom: 'memory-canonical', bytes: ab.byteLength, canonical: canon });
+        }
+      }
+
       if (isSessionAborted(loadToken)) return finish('session_aborted_before_fetch', null);
 
       const pathHint = await resolveSourcePathForAsset(name, sourcePath, sceneId);
@@ -1398,26 +1413,18 @@
         }
       }
 
-      const scopedKey = sceneAssetIdbKey(sceneId, name);
-      if (scopedKey) {
-        const scoped = await idbGetAsset(scopedKey);
-        trace.idbScopedKey = scopedKey;
-        trace.idbScopedBytes = scoped ? scoped.byteLength : 0;
-        if (scoped) {
-          fileCache.set(cacheKey, scoped);
-          return finish('idb_scoped_hit', scoped, { loadedFrom: 'idb-scoped', idbLegacyKey: name, idbLegacyBytes: 0 });
+      const idbHit = await loadAssetBufferFromIdb(sceneId, name);
+      if (idbHit) {
+        fileCache.set(cacheKey, idbHit.ab);
+        if (sceneId && idbHit.idbKey && idbHit.idbKey !== sceneAssetIdbKey(sceneId, name)) {
+          idbPutAsset(sceneAssetIdbKey(sceneId, name), idbHit.ab).catch((e) => console.warn('canonical→instance 缓存迁移失败', e));
         }
-      }
-
-      const legacy = await idbGetAsset(name);
-      trace.idbLegacyKey = name;
-      trace.idbLegacyBytes = legacy ? legacy.byteLength : 0;
-      if (legacy) {
-        fileCache.set(cacheKey, legacy);
-        if (sceneId && scopedKey) {
-          idbPutAsset(scopedKey, legacy).catch((e) => console.warn('legacy→scoped 迁移失败', e));
-        }
-        return finish('idb_legacy_hit', legacy, { loadedFrom: 'idb-legacy', idbScopedKey: scopedKey || null, idbScopedBytes: 0 });
+        return finish('idb_hit', idbHit.ab, {
+          loadedFrom: idbHit.loadedFrom,
+          idbScopedKey: sceneAssetIdbKey(sceneId, name),
+          idbScopedBytes: idbHit.ab.byteLength,
+          canonical: idbHit.canonical || null,
+        });
       }
 
       const httpResult = await fetchAssetStatic(name, pathHint, loadToken, trace);
@@ -1429,7 +1436,7 @@
         return finish('http_fetch_ok', httpResult.ab, { loadedFrom: 'http', resolvedPath: httpResult.resolvedPath });
       }
 
-      if (!trace.idbScopedBytes && scopedKey) trace.idbScopedBytes = 0;
+      if (!trace.idbScopedBytes && sceneAssetIdbKey(sceneId, name)) trace.idbScopedBytes = 0;
       const reason = canLoadAssetsFromDisk() && pathHint && isLocalFilesystemPath(pathHint)
         ? 'server_fetch_failed'
         : (canLoadAssetsFromDisk() && !pathHint ? 'server_path_not_found' : 'asset_not_found');
@@ -1458,6 +1465,51 @@
       const normalized = (name && String(name).trim()) || '';
       const m = /^(.+?) \(\d+\)(\.[^.]+)$/.exec(normalized);
       return m ? `${m[1]}${m[2]}` : normalized;
+    }
+
+    function isDuplicatePlacementAssetName(name) {
+      return canonicalPlacementAssetName(name).toLowerCase() !== String(name || '').trim().toLowerCase();
+    }
+
+    function siblingPlacementByCanonical(name, list = placements) {
+      const canon = canonicalPlacementAssetName(name).toLowerCase();
+      return list.find((p) => !p.missing
+        && canonicalPlacementAssetName(p.name).toLowerCase() === canon
+        && p.name.toLowerCase() !== String(name || '').trim().toLowerCase())
+        || list.find((p) => !p.missing && p.name.toLowerCase() === canon);
+    }
+
+    function placementAnchorFromItem(item, bounds, loadedPlacements = placements) {
+      if (Array.isArray(item.center) && item.center.length >= 3) {
+        return { x: item.center[0], y: item.center[1], z: item.center[2] };
+      }
+      const sibling = siblingPlacementByCanonical(item.asset, loadedPlacements);
+      if (sibling && Array.isArray(sibling.center) && sibling.center.length >= 3) {
+        return { x: sibling.center[0], y: sibling.center[1], z: sibling.center[2] };
+      }
+      return placementAnchorFromBounds(bounds);
+    }
+
+    async function loadAssetBufferFromIdb(sceneId, name) {
+      const scopedKey = sceneAssetIdbKey(sceneId, name);
+      if (scopedKey) {
+        const scoped = await idbGetAsset(scopedKey);
+        if (scoped) return { ab: scoped, loadedFrom: 'idb-scoped', idbKey: scopedKey };
+      }
+      const legacy = await idbGetAsset(name);
+      if (legacy) return { ab: legacy, loadedFrom: 'idb-legacy', idbKey: name };
+      const canon = canonicalPlacementAssetName(name);
+      if (canon.toLowerCase() === name.toLowerCase()) return null;
+      const canonScopedKey = sceneAssetIdbKey(sceneId, canon);
+      if (canonScopedKey) {
+        const canonScoped = await idbGetAsset(canonScopedKey);
+        if (canonScoped) {
+          return { ab: canonScoped, loadedFrom: 'idb-canonical-scoped', idbKey: canonScopedKey, canonical: canon };
+        }
+      }
+      const canonLegacy = await idbGetAsset(canon);
+      if (canonLegacy) return { ab: canonLegacy, loadedFrom: 'idb-canonical-legacy', idbKey: canon, canonical: canon };
+      return null;
     }
 
     function uniquePlacementAssetName(baseName) {
@@ -2754,6 +2806,29 @@
       }
     }
 
+    function enrichImportedPlacements(placements) {
+      if (!Array.isArray(placements)) return;
+      const pathByCanon = new Map();
+      for (const item of placements) {
+        if (item && item.asset && item.sourcePath) {
+          pathByCanon.set(canonicalPlacementAssetName(item.asset).toLowerCase(), String(item.sourcePath).replace(/\\/g, '/'));
+        }
+      }
+      for (const item of placements) {
+        if (!item || !item.asset) continue;
+        if (isDuplicatePlacementAssetName(item.asset)) {
+          item.sourceAsset = canonicalPlacementAssetName(item.asset);
+          if (!item.sourcePath) {
+            const inherited = pathByCanon.get(canonicalPlacementAssetName(item.asset).toLowerCase());
+            if (inherited) item.sourcePath = inherited;
+          }
+        }
+        if (item.sourcePath) {
+          pathByCanon.set(canonicalPlacementAssetName(item.asset).toLowerCase(), String(item.sourcePath).replace(/\\/g, '/'));
+        }
+      }
+    }
+
     async function importConfigFromFile(file) {
       const text = await file.text();
       let data;
@@ -2768,7 +2843,9 @@
         let lastId = null;
         for (const src of data.scenes) {
           const scene = createSceneRecord((src.name && String(src.name).trim()) || getNextSceneName());
-          scene.config = configFromParsed(parseSavedConfig(src.config || src));
+          const parsed = parseSavedConfig(src.config || src);
+          enrichImportedPlacements(parsed.placements);
+          scene.config = configFromParsed(parsed);
           scene.updatedAt = new Date().toISOString();
           scenesStore.scenes.push(scene);
           lastId = scene.id;
@@ -2784,8 +2861,9 @@
       }
 
       const cfg = parseSavedConfig(data);
+      enrichImportedPlacements(cfg.placements);
       const baseName = file.name.replace(/\.json$/i, '') || '导入场景';
-      let name = baseName;
+      let name = /scene_config_2026-07-28T14-08-22/i.test(file.name) ? 'scene2' : baseName;
       const used = new Set(scenesStore.scenes.map((s) => s.name.toLowerCase()));
       for (let i = 2; used.has(name.toLowerCase()); i++) name = `${baseName} ${i}`;
       const scene = createSceneRecord(name);
@@ -5447,7 +5525,11 @@
         idbPutSceneAsset(activeSceneId, assetName, ab, sourcePath).catch((e) => console.warn('模型缓存写入失败', e));
       }
       const bounds = computePlyBounds(ab);
+      const sibling = siblingPlacementByCanonical(assetName);
       const anchorFromBounds = placementAnchorFromBounds(bounds);
+      const anchorForNew = (sibling && Array.isArray(sibling.center) && sibling.center.length >= 3)
+        ? { x: sibling.center[0], y: sibling.center[1], z: sibling.center[2] }
+        : anchorFromBounds;
       const decRatio = getVisualDecimationRatio(file.size);
       let visualAb = decimatePlyArrayBuffer(ab, decRatio);
 
@@ -5455,7 +5537,9 @@
         const p = placements[missingIdx];
         const anchor = Array.isArray(p.center) && p.center.length >= 3
           ? { x: p.center[0], y: p.center[1], z: p.center[2] }
-          : anchorFromBounds;
+          : (sibling && Array.isArray(sibling.center) && sibling.center.length >= 3)
+            ? { x: sibling.center[0], y: sibling.center[1], z: sibling.center[2] }
+            : anchorFromBounds;
         visualAb = anchorPlyArrayBuffer(visualAb, anchor);
         const splatBuffer = await GaussianSplats3D.PlyLoader.loadFromFileData(
           visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
@@ -5474,6 +5558,7 @@
         if (!Array.isArray(p.center) || p.center.length < 3) {
           p.center = [anchor.x, anchor.y, anchor.z];
         }
+        syncPlacementTransform(p);
         applyPlacementVisibility(p);
         selectPlacement(missingIdx);
         hideLoadProgress();
@@ -5483,7 +5568,7 @@
         return;
       }
 
-      visualAb = anchorPlyArrayBuffer(visualAb, anchorFromBounds);
+      visualAb = anchorPlyArrayBuffer(visualAb, anchorForNew);
       const splatBuffer = await GaussianSplats3D.PlyLoader.loadFromFileData(
         visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
       );
@@ -5496,7 +5581,7 @@
         yaw_deg: 0,
         sceneIdx: null,
         visible: true,
-        center: [anchorFromBounds.x, anchorFromBounds.y, anchorFromBounds.z],
+        center: [anchorForNew.x, anchorForNew.y, anchorForNew.z],
       };
       const sceneIdx = _n(viewer.splatMesh && viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
       await addSplatBuffersKeepVisibility([splatBuffer], [placementOpts(p)]);
@@ -5505,6 +5590,7 @@
         return;
       }
       p.sceneIdx = sceneIdx;
+      syncPlacementTransform(p);
       placements.push(p);
       selectPlacement(placements.length - 1);
       hideLoadProgress();
@@ -5624,9 +5710,7 @@
       if (!p.missing) return true;
 
       const bounds = computePlyBounds(ab);
-      const anchor = Array.isArray(p.center) && p.center.length >= 3
-        ? { x: p.center[0], y: p.center[1], z: p.center[2] }
-        : placementAnchorFromBounds(bounds);
+      const anchor = placementAnchorFromItem({ asset: p.name, center: p.center }, bounds);
       let visualAb = decimatePlyArrayBuffer(ab, getVisualDecimationRatio(ab.byteLength));
       visualAb = anchorPlyArrayBuffer(visualAb, anchor);
       const splatBuffer = await GaussianSplats3D.PlyLoader.loadFromFileData(
@@ -5640,6 +5724,10 @@
         return false;
       }
       p.sceneIdx = sceneIdx;
+      if (!Array.isArray(p.center) || p.center.length < 3) {
+        p.center = [anchor.x, anchor.y, anchor.z];
+      }
+      syncPlacementTransform(p);
       p.missing = false;
       delete p.missingReason;
       applyPlacementVisibility(p);
@@ -5697,6 +5785,9 @@
         else {
           const inherited = inheritSourcePathForAsset(p.name, null);
           if (inherited) item.sourcePath = inherited;
+        }
+        if (isDuplicatePlacementAssetName(p.name)) {
+          item.sourceAsset = canonicalPlacementAssetName(p.name);
         }
         return item;
       });
@@ -5971,10 +6062,10 @@
           center: _n(item.center, [0, 0, 0]),
         };
         const bounds = computePlyBounds(ab);
-        const anchor = item.center
-          ? { x: item.center[0], y: item.center[1], z: item.center[2] }
-          : placementAnchorFromBounds(bounds);
-        if (!item.center) p.center = [anchor.x, anchor.y, anchor.z];
+        const anchor = placementAnchorFromItem(item, bounds, placements);
+        p.center = Array.isArray(item.center) && item.center.length >= 3
+          ? [_n(item.center[0], 0), _n(item.center[1], 0), _n(item.center[2], 0)]
+          : [anchor.x, anchor.y, anchor.z];
         let visualAb = decimatePlyArrayBuffer(ab, getVisualDecimationRatio(ab.byteLength));
         visualAb = anchorPlyArrayBuffer(visualAb, anchor);
         const splatBuffer = await GaussianSplats3D.PlyLoader.loadFromFileData(
@@ -5986,7 +6077,11 @@
         if (isSessionAborted(loadToken)) return;
         p.sceneIdx = sceneIdx;
         placements.push(p);
+        syncPlacementTransform(p);
         applyPlacementVisibility(p);
+      }
+      for (const p of placements) {
+        if (!p.missing && p.type !== 'motion') syncPlacementTransform(p);
       }
       renderList();
       const loadedCount = placements.filter((p) => !p.missing).length;
