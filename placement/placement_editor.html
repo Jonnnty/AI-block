@@ -988,7 +988,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260724i';
+    const MODEL_LOAD_BUILD = '20260729a';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -3147,25 +3147,15 @@
       const src = p._poseVerts;
       const centers = baseData.centers;
       const globalStart = getSceneGlobalSplatStart(p.sceneIdx);
-      const s = p.scale;
-      const yaw = p.yaw_deg * Math.PI / 180;
-      const cos = Math.cos(yaw);
-      const sin = Math.sin(yaw);
-      const tx = p.x;
-      const ty = p.y;
-      const tz = p.z;
       for (let i = 0; i < count; i++) {
-        const x = src[i * 3] * s;
-        const y = src[i * 3 + 1] * s;
-        const z = src[i * 3 + 2] * s;
-        const wx = cos * x - sin * y + tx;
-        const wy = sin * x + cos * y + ty;
-        const wz = z + tz;
-        setSplatBufferLocalCenter(splatBuffer, i, wx, wy, wz);
+        const lx = src[i * 3];
+        const ly = src[i * 3 + 1];
+        const lz = src[i * 3 + 2];
+        setSplatBufferLocalCenter(splatBuffer, i, lx, ly, lz);
         const gi = globalStart + i;
-        centers[gi * 3] = wx;
-        centers[gi * 3 + 1] = wy;
-        centers[gi * 3 + 2] = wz;
+        centers[gi * 3] = lx;
+        centers[gi * 3 + 1] = ly;
+        centers[gi * 3 + 2] = lz;
       }
       const globalEnd = globalStart + count - 1;
       sm.updateDataTexturesFromBaseData(globalStart, globalEnd);
@@ -3176,47 +3166,48 @@
       viewer.forceRenderNextFrame();
     }
 
-    function motionSplatSceneOpts(p) {
-      return {
-        position: [0, 0, 0],
-        rotation: [0, 0, 0, 1],
-        scale: [1, 1, 1],
-        splatAlphaRemovalThreshold: PLY_ALPHA,
-        visible: p.visible !== false,
-      };
-    }
-
-    function resetMotionSplatSceneTransform(p) {
-      if (!viewer || !viewer.splatMesh || p.sceneIdx == null) return;
+    /** 列表里有几个人模，场景里就只保留几个 2000 点 shell 场景；多余的（常见为旧导入残留）删掉。 */
+    async function reconcileMotionSplatScenes(shell) {
+      if (!viewer || !viewer.splatMesh || !shell) return;
+      const shellCount = shell.numSplats;
       const sm = viewer.splatMesh;
-      const scene = sm.getScene(p.sceneIdx);
-      scene.position.set(0, 0, 0);
-      scene.quaternion.identity();
-      scene.scale.set(1, 1, 1);
-      if (Array.isArray(sm.sceneOptions) && sm.sceneOptions[p.sceneIdx]) {
-        const opts = sm.sceneOptions[p.sceneIdx];
-        opts.position = [0, 0, 0];
-        opts.rotation = [0, 0, 0, 1];
-        opts.scale = [1, 1, 1];
+      const motionPs = placements.filter((p) => p.type === 'motion' && !p.missing && p.motionRender === 'splat');
+      const motionSceneIdxs = [];
+      for (let i = 0; i < sm.scenes.length; i++) {
+        if (sm.getScene(i).splatBuffer.getSplatCount() === shellCount) {
+          motionSceneIdxs.push(i);
+        }
       }
-      sm.updateTransforms();
-    }
-
-    async function purgeOrphanMotionSplatScenes(shellSplatCount) {
-      if (!viewer || !viewer.splatMesh || !shellSplatCount) return;
-      const used = new Set(placements.filter((pl) => pl.sceneIdx != null).map((pl) => pl.sceneIdx));
-      const sm = viewer.splatMesh;
-      for (let i = sm.scenes.length - 1; i >= 0; i--) {
-        if (used.has(i)) continue;
-        const count = sm.getScene(i).splatBuffer.getSplatCount();
-        if (count !== shellSplatCount) continue;
+      const targetCount = motionPs.length;
+      while (motionSceneIdxs.length > targetCount) {
+        const used = new Set(motionPs.map((p) => p.sceneIdx).filter((i) => i != null));
+        let removeIdx = motionSceneIdxs.find((i) => !used.has(i));
+        if (removeIdx == null) removeIdx = motionSceneIdxs[motionSceneIdxs.length - 1];
         try {
-          await viewer.removeSplatScene(i, false);
+          await viewer.removeSplatScene(removeIdx, false);
           for (const pl of placements) {
-            if (pl.sceneIdx != null && pl.sceneIdx > i) pl.sceneIdx--;
+            if (pl.sceneIdx != null && pl.sceneIdx > removeIdx) pl.sceneIdx--;
           }
+          for (let k = 0; k < motionSceneIdxs.length; k++) {
+            if (motionSceneIdxs[k] > removeIdx) motionSceneIdxs[k]--;
+          }
+          motionSceneIdxs.splice(motionSceneIdxs.indexOf(removeIdx), 1);
+          modelLoadWarn('移除多余 motion splat 场景', { removeIdx, targetCount, had: motionSceneIdxs.length + 1 });
         } catch (err) {
-          console.warn('purge orphan motion splat failed', err);
+          console.warn('reconcile motion splat failed', err);
+          break;
+        }
+      }
+      for (let j = 0; j < motionPs.length; j++) {
+        const p = motionPs[j];
+        if (j < motionSceneIdxs.length) {
+          p.sceneIdx = motionSceneIdxs[j];
+          syncPlacementTransform(p);
+        }
+      }
+      for (const p of motionPs) {
+        if (p.sceneIdx != null && p.motion) {
+          updateActorFrame(p, _n(p.currentFrame, 0));
         }
       }
     }
@@ -3381,11 +3372,13 @@
       const anchor = motionAnchorArray(p, motion);
       const bindPoseVerts = shellFrame(shell, skin, motion, 0);
       const splatBuffer = buildMotionSplatBuffer(shell, bindPoseVerts, anchor);
-      const sceneIdx = _n(viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
+      const sceneIdxBefore = _n(viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
       try {
-        await purgeOrphanMotionSplatScenes(shell.numSplats);
-        await addSplatBuffersKeepVisibility([splatBuffer], [motionSplatSceneOpts(p)]);
-        p.sceneIdx = sceneIdx;
+        await addSplatBuffersKeepVisibility([splatBuffer], [placementOpts(p)]);
+        p.sceneIdx = viewer.splatMesh.scenes.length - 1;
+        if (p.sceneIdx < sceneIdxBefore) {
+          throw new Error(`motion splat sceneIdx 异常: before=${sceneIdxBefore} after=${p.sceneIdx}`);
+        }
         p.shell = shell;
         p.motion = motion;
         p.motionFps = motion.fps;
@@ -3394,16 +3387,18 @@
         p.mesh = null;
         p._poseVerts = new Float32Array(shell.numSplats * 3);
         p.motionRender = 'splat';
-        resetMotionSplatSceneTransform(p);
+        await reconcileMotionSplatScenes(shell);
         updateActorFrame(p, 0);
+        syncPlacementTransform(p);
         applyPlacementVisibility(p);
         viewer.forceRenderNextFrame();
       } catch (err) {
-        if (viewer && p.sceneIdx === sceneIdx) {
+        if (viewer && p.sceneIdx != null && p.sceneIdx >= sceneIdxBefore) {
           try {
-            await viewer.removeSplatScene(sceneIdx, false);
+            const removedIdx = p.sceneIdx;
+            await viewer.removeSplatScene(removedIdx, false);
             for (const other of placements) {
-              if (other !== p && other.sceneIdx != null && other.sceneIdx > sceneIdx) other.sceneIdx--;
+              if (other !== p && other.sceneIdx != null && other.sceneIdx > removedIdx) other.sceneIdx--;
             }
           } catch (cleanupErr) {
             console.warn('motion splat rollback failed', cleanupErr);
@@ -5501,8 +5496,12 @@
     function syncPlacementTransform(p) {
       if (p.type === 'motion') {
         if (p.motionRender === 'splat' && p.sceneIdx != null && viewer && viewer.splatMesh) {
-          resetMotionSplatSceneTransform(p);
-          refreshMotionSplatCenters(p);
+          const scene = viewer.splatMesh.getScene(p.sceneIdx);
+          scene.position.set(p.x, p.y, p.z);
+          scene.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+          scene.scale.set(p.scale, p.scale, p.scale);
+          viewer.splatMesh.updateTransforms();
+          viewer.forceRenderNextFrame();
         } else {
           syncActorTransform(p);
         }
@@ -6368,9 +6367,9 @@
       }
       try {
         const shell = await ensureMotionSplatShell();
-        if (shell) await purgeOrphanMotionSplatScenes(shell.numSplats);
+        if (shell) await reconcileMotionSplatScenes(shell);
       } catch (e) {
-        console.warn('purge orphan motion splat after restore failed', e);
+        console.warn('reconcile motion splat after restore failed', e);
       }
       renderList();
       const loadedCount = placements.filter((p) => !p.missing).length;
