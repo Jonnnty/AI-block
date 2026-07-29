@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -35,19 +36,28 @@ def sync_placements_from_downloads() -> bool:
         print(f"[sync] placements.json 同步失败: {e}")
     return False
 
+_DUP_SUFFIX = re.compile(r"^(.+?) \(\d+\)(\.[^.]+)$")
+
+
+def canonical_asset_name(asset_name: str) -> str:
+    m = _DUP_SUFFIX.match(asset_name)
+    return f"{m.group(1)}{m.group(2)}" if m else asset_name
+
+
 def guess_asset_path(asset_name: str) -> Path | None:
     name = Path(asset_name).name
     if not name or name != asset_name or ".." in asset_name:
         return None
-    for candidate in (
-        OUTPUTS_50 / name,
-        ROOT / "outputs_50pct" / name,
-        OUTPUTS / name,
-        ROOT / "outputs" / name,
-        ROOT / name,
-    ):
-        if candidate.is_file():
-            return candidate
+    for lookup in (name, canonical_asset_name(name)):
+        for candidate in (
+            OUTPUTS_50 / lookup,
+            ROOT / "outputs_50pct" / lookup,
+            OUTPUTS / lookup,
+            ROOT / "outputs" / lookup,
+            ROOT / lookup,
+        ):
+            if candidate.is_file():
+                return candidate
     return None
 
 

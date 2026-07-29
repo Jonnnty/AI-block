@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <title>Motion viewport autotest</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; background: #d4c4a8; overflow: hidden; }
+    #view { width: 100vw; height: 100vh; }
+    #status {
+      position: fixed; left: 12px; top: 12px; z-index: 9;
+      background: rgba(0,0,0,.65); color: #fff; padding: 8px 12px; font: 13px sans-serif;
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="status">loading…</div>
+  <div id="view"></div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { TransformControls } from 'three/addons/controls/TransformControls.js';
+    import { loadSomaSkin, parseKimodoNpz, buildMotionData, skinFrame, motionDefaultScale } from './vendor/motion_actor.js?v=20260729c';
+
+    const status = document.getElementById('status');
+    const NPZ_URL = '/api/asset/file?path=' + encodeURIComponent('D:/Downloads/kimodo-test-output/person02/seg01_tower_turn/motion.npz');
+
+    async function main() {
+      const root = document.getElementById('view');
+      const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(root.clientWidth, root.clientHeight);
+      root.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xd4c4a8);
+      const camera = new THREE.PerspectiveCamera(50, root.clientWidth / root.clientHeight, 0.001, 100);
+      camera.up.set(0, 0, 1);
+      camera.position.set(0.6, -0.8, 0.35);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 0, 0.12);
+      controls.update();
+
+      const skin = await loadSomaSkin('./vendor/soma_skin.bin');
+      let ab;
+      try {
+        const r = await fetch(NPZ_URL);
+        ab = await r.arrayBuffer();
+      } catch (e) {
+        const r = await fetch('../kimodo-test-output/person02/seg01_tower_turn/motion.npz');
+        ab = await r.arrayBuffer();
+      }
+      const motion = buildMotionData(parseKimodoNpz(ab));
+      const scale = motionDefaultScale(motion, 0.12);
+      const verts = skinFrame(skin, motion, 0);
+      const anchor = [motion.anchor.x, motion.anchor.y, motion.anchor.z];
+
+      const geo = new THREE.BufferGeometry();
+      const pos = new Float32Array(verts.length);
+      for (let i = 0; i < verts.length; i += 3) {
+        pos[i] = verts[i] - anchor[0];
+        pos[i + 1] = verts[i + 1] - anchor[1];
+        pos[i + 2] = verts[i + 2] - anchor[2];
+      }
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setIndex(new THREE.BufferAttribute(new Uint16Array(skin.faces), 1));
+      geo.computeVertexNormals();
+      let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      let nanCount = 0;
+      for (let i = 0; i < pos.length; i += 3) {
+        const x = pos[i], y = pos[i + 1], z = pos[i + 2];
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) { nanCount++; continue; }
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+        minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+      }
+      const localHeight = maxZ - minZ;
+      document.title = JSON.stringify({ localHeight, nanCount, verts: pos.length / 3, faces: skin.faces.length / 3 });
+
+      const mesh = new THREE.Mesh(
+        geo,
+        new THREE.MeshBasicMaterial({ color: 0x98bdff, side: THREE.DoubleSide, depthTest: false }),
+      );
+      mesh.frustumCulled = false;
+      const actor = new THREE.Group();
+      actor.add(mesh);
+      actor.scale.setScalar(scale);
+      scene.add(actor);
+
+      const tc = new TransformControls(camera, renderer.domElement);
+      tc.setMode('translate');
+      tc.attach(actor);
+      scene.add(tc.getHelper());
+      tc.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
+
+      window.__testResult = {
+        ok: localHeight > 0.5,
+        scale,
+        localHeight,
+        worldHeight: localHeight * scale,
+        gizmoAttached: tc.object === actor,
+      };
+      status.textContent = `OK mesh h=${localHeight.toFixed(2)} scale=${scale.toFixed(3)} gizmo=${tc.object === actor}`;
+
+      function render() {
+        requestAnimationFrame(render);
+        renderer.render(scene, camera);
+      }
+      render();
+      document.body.dataset.ready = '1';
+    }
+
+    main().catch((e) => {
+      status.textContent = 'FAIL: ' + e.message;
+      document.body.dataset.error = e.message;
+    });
+  </script>
+</body>
+</html>

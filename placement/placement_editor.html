@@ -14,6 +14,8 @@
     #view.view-bg-black { background: #111; }
     #viewMain { position: absolute; inset: 0; }
     #viewMain > canvas { width: 100% !important; height: 100% !important; display: block; }
+    #motionOverlay { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+    #motionOverlay canvas { width: 100% !important; height: 100% !important; display: block; }
     #view.drag-over::after {
       content: '松开以放置模型';
       position: absolute; inset: 0; pointer-events: none; z-index: 5;
@@ -456,7 +458,7 @@
       "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
       "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
       "@mkkellogg/gaussian-splats-3d": "./vendor/gaussian-splats-3d.module.js?v=20260722b",
-      "./vendor/motion_actor.js": "./vendor/motion_actor.js?v=20260728c"
+      "./vendor/motion_actor.js": "./vendor/motion_actor.js?v=20260729c"
     }
   }
   </script>
@@ -478,7 +480,9 @@
 </head>
 <body>
   <div id="view">
+    <div id="autotestBanner" hidden style="position:fixed;left:12px;top:12px;z-index:99;background:rgba(0,0,0,.72);color:#fff;padding:8px 12px;font:13px sans-serif;border-radius:6px;"></div>
     <div id="viewMain"></div>
+    <div id="motionOverlay"></div>
     <div id="viewHelper"></div>
     <div id="rigPreviewFloat" hidden>
       <header>
@@ -732,7 +736,7 @@
       skinFrame,
       motionFrameForCameraFrame,
       motionDefaultScale,
-    } from './vendor/motion_actor.js?v=20260728c';
+    } from './vendor/motion_actor.js?v=20260729c';
 
 
     function _n(v, fb) { return v !== undefined && v !== null ? v : fb; }
@@ -1302,6 +1306,7 @@
 
     async function preloadAssetsForConfig(cfg, loadToken = sessionResetToken, sceneId = activeSceneId) {
       const items = placementsFromConfig(cfg);
+      const sourcePathMap = buildSourcePathMapFromConfig(items);
       modelLoadLog('preloadAssetsForConfig 开始', {
         sceneId,
         activeSceneId,
@@ -1314,7 +1319,8 @@
           return;
         }
         if (!item.asset) continue;
-        const sourcePath = item.sourcePath || await idbGetSceneSourcePath(sceneId, item.asset);
+        const sourcePath = resolveConfigItemSourcePath(item, sourcePathMap)
+          || await idbGetSceneSourcePath(sceneId, item.asset);
         await resolveAssetBuffer(item.asset, sourcePath, loadToken, sceneId);
       }
     }
@@ -1327,17 +1333,22 @@
 
     async function guessAssetPathFromServer(assetName) {
       if (!assetName || !canLoadAssetsFromDisk()) return null;
-      try {
-        const res = await fetchWithTimeout(
-          assetApiUrl(`api/asset/guess?asset=${encodeURIComponent(assetName)}`),
-          { cache: 'no-store' },
-        );
-        if (!res.ok) return null;
-        const data = await res.json();
-        return data.path ? String(data.path).replace(/\\/g, '/') : null;
-      } catch (_) {
-        return null;
+      const names = [assetName];
+      const canon = canonicalPlacementAssetName(assetName);
+      if (canon.toLowerCase() !== assetName.toLowerCase()) names.push(canon);
+      for (const candidate of names) {
+        if (!candidate) continue;
+        try {
+          const res = await fetchWithTimeout(
+            assetApiUrl(`api/asset/guess?asset=${encodeURIComponent(candidate)}`),
+            { cache: 'no-store' },
+          );
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (data.path) return String(data.path).replace(/\\/g, '/');
+        } catch (_) {}
       }
+      return null;
     }
 
     async function fetchAssetByPath(pathStr, loadToken = sessionResetToken) {
@@ -1429,7 +1440,11 @@
     function findMissingPlacementIndex(fileName) {
       const normalized = (fileName && String(fileName).trim()) || '';
       if (!normalized) return -1;
-      return placements.findIndex((p) => p.missing && p.name.toLowerCase() === normalized.toLowerCase());
+      const lower = normalized.toLowerCase();
+      const exact = placements.findIndex((p) => p.missing && p.name.toLowerCase() === lower);
+      if (exact >= 0) return exact;
+      return placements.findIndex((p) => p.missing
+        && canonicalPlacementAssetName(p.name).toLowerCase() === lower);
     }
 
     function resolveImportAssetName(file) {
@@ -1437,6 +1452,12 @@
       const missingIdx = findMissingPlacementIndex(normalized);
       if (missingIdx >= 0) return { assetName: placements[missingIdx].name, missingIdx };
       return { assetName: uniquePlacementAssetName(normalized), missingIdx: -1 };
+    }
+
+    function canonicalPlacementAssetName(name) {
+      const normalized = (name && String(name).trim()) || '';
+      const m = /^(.+?) \(\d+\)(\.[^.]+)$/.exec(normalized);
+      return m ? `${m[1]}${m[2]}` : normalized;
     }
 
     function uniquePlacementAssetName(baseName) {
@@ -1571,6 +1592,8 @@
     let rigPreviewFloatDismissed = false;
     let sceneReady = false;
     let syncingFromGizmo = false;
+    let applyingPlacementGizmo = false;
+    let overlayKickRaf = 0;
     let defaultScale = 0.12;
     let defaultZ = DEFAULT_Z_FALLBACK;
     let viewBgMode = localStorage.getItem('viewBackground') || 'cream';
@@ -1583,6 +1606,8 @@
     /** @type {import('./vendor/motion_actor.js').SomaSkin|null} */
     let somaSkin = null;
     let actorRootGroup = null;
+    let motionOverlayScene = null;
+    let motionOverlayRenderer = null;
     const ACTOR_COLOR = 0x98bdff;
     let motionPreviewRaf = 0;
     let motionPreviewStart = 0;
@@ -2172,6 +2197,10 @@
         localServerBridge = await detectLocalEditorBridge();
         return localServerBridge ? 'server' : 'static';
       }
+      if (isRemoteGithubEditor()) {
+        localServerBridge = await detectLocalEditorBridge();
+        return 'static';
+      }
       try {
         const res = await fetchWithTimeout(apiUrl('api/health'), { cache: 'no-store' });
         if (res.ok) {
@@ -2188,14 +2217,19 @@
       const saveBtn = el('saveBtn');
       if (hostMode === 'server' && !localServerBridge) {
         if (saveBtn) saveBtn.title = '保存场景配置与 sourcePath 到 placements.json';
+      } else if (isRemoteGithubEditor() && localServerBridge) {
+        if (saveBtn) saveBtn.title = '保存到浏览器；PLY 从本机 D 盘加载（已桥接），可导出 JSON 分享';
       } else if (localServerBridge) {
         if (saveBtn) saveBtn.title = '保存场景配置；模型从本地 D 盘路径加载，不占用浏览器空间';
+      } else if (isRemoteGithubEditor()) {
+        if (saveBtn) saveBtn.title = '保存到浏览器；拖入的 PLY 缓存在本机，可导出 JSON 分享';
       } else {
         if (saveBtn) saveBtn.title = '保存场景配置到浏览器；拖入的 PLY 缓存在本机 IndexedDB，刷新后仍可加载';
       }
     }
 
     function hostModeLabel() {
+      if (isRemoteGithubEditor() && localServerBridge) return '在线版·已桥接本地模型库';
       if (localServerBridge) return '在线版·已桥接本地 D 盘';
       if (hostMode === 'server') return '本地路径模式';
       return '在线版';
@@ -2236,14 +2270,14 @@
         box.hidden = true;
         return;
       }
-      if (isRemoteGithubEditor()) {
-        box.hidden = true;
-        return;
-      }
       box.hidden = false;
       box.classList.remove('connected');
       if (text) {
-        text.textContent = '可选：运行 placement/start_editor.bat 后，可从本机 D 盘加载大模型库（无需重复上传）。';
+        if (isRemoteGithubEditor()) {
+          text.textContent = '可选：本机运行 start_editor.bat 后，可直接从 D 盘加载大模型库（无需重复上传）。保存仍在本浏览器。';
+        } else {
+          text.textContent = '可选：运行 placement/start_editor.bat 后，可从本机 D 盘加载大模型库（无需重复上传）。';
+        }
       }
     }
 
@@ -2268,13 +2302,13 @@
       const bridge = await detectLocalEditorBridge();
       if (!bridge) return false;
       localServerBridge = bridge;
-      hostMode = 'server';
+      if (!isRemoteGithubEditor()) hostMode = 'server';
       updateHostModeUI();
       updateLocalBridgeHint(true);
       stopLocalBridgePoll();
       if (scenesStore) await migrateScenesSourcePaths(scenesStore);
       const sceneCount = scenesStore && scenesStore.scenes.length || 0;
-      status(`已连接本地 D 盘 · ${hostModeLabel()} · ${sceneCount} 个场景`);
+      status(`已连接本地模型库 · ${hostModeLabel()} · ${sceneCount} 个场景`);
       if (reloadScene && activeSceneId) {
         await loadSceneById(activeSceneId);
       }
@@ -2283,14 +2317,22 @@
 
     function startLocalBridgePoll() {
       if (localBridgePollTimer || canLoadAssetsFromDisk()) return;
-      if (isRemoteGithubEditor()) {
-        updateLocalBridgeHint(false);
-        return;
-      }
       updateLocalBridgeHint(false);
       localBridgePollTimer = setInterval(() => {
         tryConnectLocalBridge(true).catch(() => {});
       }, 3000);
+    }
+
+    async function loadBundledScenesStore() {
+      try {
+        const res = await fetchWithTimeout(apiUrl('placements.json'), { cache: 'no-store' });
+        if (!res.ok) return null;
+        const data = await res.json();
+        const store = normalizeScenesStore(data);
+        return store.scenes.length ? store : null;
+      } catch (_) {
+        return null;
+      }
     }
 
     function emptyScenesStore() {
@@ -2569,6 +2611,12 @@
           await persistScenesStore();
           return store;
         }
+        const bundled = await loadBundledScenesStore();
+        if (bundled) {
+          scenesStore = bundled;
+          await persistScenesStore();
+          return bundled;
+        }
         return emptyScenesStore();
       }
       try {
@@ -2628,6 +2676,7 @@
         const modelCount = _n(parsed.placements && parsed.placements.length, 0);
         const pathCount = _n(parsed.cameraPaths && parsed.cameraPaths.length, 0);
         status(`已加载「${scene.name}」· ${modelCount} 模型 · ${pathCount} 轨迹`);
+        kickOverlayRender();
       } catch (e) {
         if (!isSessionAborted(loadToken)) showError(e);
       } finally {
@@ -2938,9 +2987,30 @@
       }
     }
 
+    function initMotionOverlayRenderer() {
+      if (motionOverlayRenderer) return;
+      const host = el('motionOverlay');
+      if (!host || !viewer) return;
+      motionOverlayScene = new THREE.Scene();
+      motionOverlayScene.name = 'MotionOverlayScene';
+      motionOverlayRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+      motionOverlayRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      motionOverlayRenderer.setClearColor(0x000000, 0);
+      const w = host.clientWidth || 1;
+      const h = host.clientHeight || 1;
+      motionOverlayRenderer.setSize(w, h, false);
+      host.appendChild(motionOverlayRenderer.domElement);
+    }
+
     function initActorRootGroup() {
-      if (actorRootGroup) return;
       initRigOverlayScene();
+      if (actorRootGroup) {
+        if (rigOverlayScene && actorRootGroup.parent !== rigOverlayScene) {
+          actorRootGroup.parent && actorRootGroup.parent.remove(actorRootGroup);
+          rigOverlayScene.add(actorRootGroup);
+        }
+        return;
+      }
       actorRootGroup = new THREE.Group();
       actorRootGroup.name = 'ActorRootGroup';
       actorRootGroup.renderOrder = 900;
@@ -2953,22 +3023,42 @@
       return somaSkin;
     }
 
+    function renderMotionOverlayPass() {
+      if (!motionOverlayRenderer || !motionOverlayScene || !viewer || !viewer.camera) return;
+      if (!hasOverlayActors()) {
+        motionOverlayRenderer.clear(true, true, true);
+        return;
+      }
+      const host = el('motionOverlay');
+      const w = host ? host.clientWidth : 1;
+      const h = host ? host.clientHeight : 1;
+      if (w > 0 && h > 0) {
+        motionOverlayRenderer.setSize(w, h, false);
+      }
+      motionOverlayRenderer.clear(true, true, true);
+      motionOverlayRenderer.render(motionOverlayScene, viewer.camera);
+    }
+
     function renderActorsForCapture(camera) {
-      if (!actorRootGroup || !actorRootGroup.children.length || !viewer || !viewer.renderer || !camera) return;
+      if (!hasOverlayActors() || !camera || !viewer || !viewer.renderer || !rigOverlayScene || !actorRootGroup) return;
       const renderer = viewer.renderer;
       const hidden = [];
       for (const child of rigOverlayScene.children) {
-        if (child !== actorRootGroup && child.visible) {
+        if (child !== actorRootGroup && child !== pivot && child.visible) {
           hidden.push(child);
           child.visible = false;
         }
       }
+      const tcHelper = transformControls && transformControls.getHelper && transformControls.getHelper();
+      const tcWasVisible = tcHelper && tcHelper.visible;
+      if (tcHelper) tcHelper.visible = false;
       const savedAutoClear = renderer.autoClear;
       renderer.autoClear = false;
       try {
         renderer.render(rigOverlayScene, camera);
       } finally {
         hidden.forEach((c) => { c.visible = true; });
+        if (tcHelper) tcHelper.visible = tcWasVisible;
         renderer.autoClear = savedAutoClear;
       }
     }
@@ -3008,14 +3098,14 @@
       initActorRootGroup();
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(skin.numVerts * 3), 3));
-      geo.setIndex(new THREE.Uint32BufferAttribute(skin.faces, 1));
+      geo.setIndex(new THREE.BufferAttribute(new Uint16Array(skin.faces), 1));
       const mat = new THREE.MeshBasicMaterial({
         color: ACTOR_COLOR,
         depthTest: false,
         depthWrite: false,
         side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.96,
+        transparent: false,
+        opacity: 1,
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.frustumCulled = false;
@@ -3023,41 +3113,69 @@
       const root = new THREE.Group();
       root.name = `actor:${p.name}`;
       root.add(mesh);
+      applyAlwaysOnTop(root);
       p.mesh = mesh;
       p.root = root;
+      p._poseVerts = null;
       p.motion = motion;
       p.motionFps = motion.fps;
       p.motionFrames = motion.numFrames;
       actorRootGroup.add(root);
       updateActorFrame(p, 0);
       syncActorTransform(p);
-      viewer && viewer.forceRenderNextFrame();
+      kickOverlayRender();
       return root;
+    }
+
+    /** LBS 顶点已是世界朝向的 pose；整体移动/旋转/缩放在 CPU 里做，避免 Three.js 父节点叠乘扭曲。 */
+    function refreshActorMesh(p) {
+      if (!p.mesh || !p._poseVerts) return;
+      const src = p._poseVerts;
+      const pos = p.mesh.geometry.attributes.position;
+      const s = p.scale;
+      const yaw = p.yaw_deg * Math.PI / 180;
+      const cos = Math.cos(yaw);
+      const sin = Math.sin(yaw);
+      const tx = p.x;
+      const ty = p.y;
+      const tz = p.z;
+      for (let i = 0; i < src.length; i += 3) {
+        const x = src[i] * s;
+        const y = src[i + 1] * s;
+        const z = src[i + 2] * s;
+        pos.array[i] = cos * x - sin * y + tx;
+        pos.array[i + 1] = sin * x + cos * y + ty;
+        pos.array[i + 2] = z + tz;
+      }
+      pos.needsUpdate = true;
+      p.mesh.geometry.computeBoundingBox();
+      p.mesh.geometry.computeBoundingSphere();
     }
 
     function updateActorFrame(p, frameIdx) {
       if (!p.motion || !p.mesh || !somaSkin) return;
       const verts = skinFrame(somaSkin, p.motion, frameIdx);
       const anchor = p.center || [0, 0, 0];
-      const pos = p.mesh.geometry.attributes.position;
-      for (let i = 0; i < verts.length; i += 3) {
-        pos.array[i] = verts[i] - anchor[0];
-        pos.array[i + 1] = verts[i + 1] - anchor[1];
-        pos.array[i + 2] = verts[i + 2] - anchor[2];
+      if (!p._poseVerts || p._poseVerts.length !== verts.length) {
+        p._poseVerts = new Float32Array(verts.length);
       }
-      pos.needsUpdate = true;
-      p.mesh.geometry.computeBoundingSphere();
-      p.mesh.geometry.computeVertexNormals();
+      for (let i = 0; i < verts.length; i += 3) {
+        p._poseVerts[i] = verts[i] - anchor[0];
+        p._poseVerts[i + 1] = verts[i + 1] - anchor[1];
+        p._poseVerts[i + 2] = verts[i + 2] - anchor[2];
+      }
       p.currentFrame = frameIdx;
+      refreshActorMesh(p);
     }
 
     function syncActorTransform(p) {
       if (!p.root) return;
-      p.root.position.set(p.x, p.y, p.z);
-      p.root.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
-      p.root.scale.set(p.scale, p.scale, p.scale);
+      p.root.position.set(0, 0, 0);
+      p.root.quaternion.identity();
+      p.root.scale.set(1, 1, 1);
       p.root.visible = p.visible !== false;
-      viewer && viewer.forceRenderNextFrame();
+      refreshActorMesh(p);
+      kickOverlayRender();
     }
 
     function removeActorFromScene(p) {
@@ -3068,6 +3186,7 @@
       }
       p.root = null;
       p.mesh = null;
+      p._poseVerts = null;
     }
 
     function updateMotionControlsUI() {
@@ -3101,7 +3220,7 @@
         updateActorFrame(p, frame);
         el('motionFrame').value = String(frame);
         el('motionFrameVal').textContent = `${frame} / ${p.motion.numFrames - 1}`;
-        viewer && viewer.forceRenderNextFrame();
+        kickOverlayRender();
         motionPreviewRaf = requestAnimationFrame(loop);
       };
       motionPreviewRaf = requestAnimationFrame(loop);
@@ -3120,6 +3239,8 @@
       if (!sceneReady) throw new Error('场景尚未就绪');
       const { assetName, missingIdx } = resolveImportAssetName(file);
       let sourcePath = inferSourcePathForImport(file);
+      if (!sourcePath) sourcePath = await guessAssetPathFromServer(file.name);
+      sourcePath = inheritSourcePathForAsset(assetName, sourcePath);
       status(missingIdx >= 0 ? `恢复人模 ${assetName}…` : `加载人模 ${assetName}…`);
       setLoadProgress(20, `解析 ${assetName}…`);
       let ab = fileCache.get(fileCacheKey(activeSceneId, assetName));
@@ -3197,6 +3318,36 @@
       ensureViewerRenderPatch();
     }
 
+    function hasOverlayActors() {
+      return !!(actorRootGroup && actorRootGroup.children.length);
+    }
+
+    function renderStandaloneOverlayPass() {
+      if (!(viewer && viewer.initialized) || !viewer.camera) return;
+      if (viewer.isDisposingOrDisposed && viewer.isDisposingOrDisposed()) return;
+      const renderer = viewer.renderer;
+      if (!renderer) return;
+      const bg = VIEW_BACKGROUNDS[viewBgMode] || VIEW_BACKGROUNDS.cream;
+      renderer.setClearColor(bg.hex, viewBgMode === 'black' ? 1 : 0);
+      renderer.clear(true, true, true);
+      if (typeof renderer.resetState === 'function') renderer.resetState();
+      if (rigOverlayScene) renderer.render(rigOverlayScene, viewer.camera);
+    }
+
+    function kickOverlayRender() {
+      if (!viewer || !viewer.initialized) return;
+      if (overlayKickRaf) return;
+      overlayKickRaf = requestAnimationFrame(() => {
+        overlayKickRaf = 0;
+        if (!viewer || !viewer.initialized) return;
+        if (viewer.splatRenderReady) {
+          viewer.forceRenderNextFrame();
+        } else if (hasOverlayActors() || (rigOverlayScene && rigOverlayScene.children.length)) {
+          renderStandaloneOverlayPass();
+        }
+      });
+    }
+
     function renderRigOverlayPass() {
       if (!(viewer && viewer.initialized) || !rigOverlayScene || !viewer.camera) return;
       if (viewer.isDisposingOrDisposed && viewer.isDisposingOrDisposed()) return;
@@ -3205,6 +3356,7 @@
       if (!renderer) return;
       const savedAutoClear = renderer.autoClear;
       renderer.autoClear = false;
+      if (typeof renderer.resetState === 'function') renderer.resetState();
       renderer.render(rigOverlayScene, viewer.camera);
       renderer.autoClear = savedAutoClear;
     }
@@ -4411,11 +4563,65 @@
 
     function applyGizmoForSelection() {
       if (!transformControls) return;
-      const isRig = rigOpen;
-      transformControls.setSpace(isRig ? 'local' : 'world');
-      transformControls.showX = true;
-      transformControls.showY = true;
-      transformControls.showZ = true;
+      const p = selected >= 0 ? placements[selected] : null;
+      const isMotion = !!(p && p.type === 'motion' && !p.missing);
+      transformControls.setSpace('world');
+      if (isMotion && placementGizmoMode === 'rotate') {
+        transformControls.showX = false;
+        transformControls.showY = false;
+        transformControls.showZ = true;
+      } else {
+        transformControls.showX = true;
+        transformControls.showY = true;
+        transformControls.showZ = true;
+      }
+    }
+
+    function placementGizmoTarget(p) {
+      return pivot;
+    }
+
+    function syncGizmoObjectFromPlacement(p) {
+      if (!p || !pivot) return;
+      syncingFromGizmo = true;
+      try {
+        pivot.position.set(p.x, p.y, p.z);
+        pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+        pivot.scale.set(1, 1, 1);
+        pivot.updateMatrixWorld(true);
+      } finally {
+        syncingFromGizmo = false;
+      }
+    }
+
+    function meshCentroidForPlacement(p) {
+      if (!p || !p.mesh) return null;
+      p.mesh.geometry.computeBoundingBox();
+      const box = p.mesh.geometry.boundingBox;
+      if (!box) return null;
+      const c = new THREE.Vector3();
+      box.getCenter(c);
+      p.root && p.root.localToWorld(c);
+      return { x: c.x, y: c.y, z: c.z };
+    }
+
+    function applyPlacementGizmoDrag() {
+      if (syncingFromGizmo || applyingPlacementGizmo || selected < 0 || !transformControls) return;
+      if (!placementGizmoMode || transformControls.object !== pivot) return;
+      const p = placements[selected];
+      if (!p) return;
+      applyingPlacementGizmo = true;
+      try {
+        p.x = pivot.position.x;
+        p.y = pivot.position.y;
+        p.z = pivot.position.z;
+        const euler = new THREE.Euler().setFromQuaternion(pivot.quaternion, 'XYZ');
+        p.yaw_deg = THREE.MathUtils.radToDeg(euler.z);
+        syncPlacementTransform(p);
+        updateSelSliders();
+      } finally {
+        applyingPlacementGizmo = false;
+      }
     }
 
     async function renderRigPreviewFrame() {
@@ -4457,10 +4663,10 @@
 
     function togglePlacementGizmo(mode) {
       if (selected < 0) return;
-      placementGizmoMode = placementGizmoMode === mode ? null : mode;
+      placementGizmoMode = mode;
       updatePlacementGizmoUI();
       attachGizmo();
-      status(placementGizmoMode ? (placementGizmoMode === 'translate' ? '移动模式' : '旋转模式') : 'Gizmo 已关闭');
+      status(mode === 'translate' ? '移动模式' : '旋转模式');
     }
 
     function toggleRigGizmo(mode) {
@@ -5018,7 +5224,13 @@
     function startOverlayLoop() {
       const loop = () => {
         overlayRaf = requestAnimationFrame(loop);
-        if (overlayRenderer && viewHelper && viewer && viewer.initialized) viewHelper.render(overlayRenderer);
+        if (overlayRenderer && viewHelper && viewer && viewer.initialized) {
+          viewHelper.render(overlayRenderer);
+        }
+        if (viewer && viewer.initialized && !viewer.splatRenderReady
+          && (hasOverlayActors() || (rigOverlayScene && rigOverlayScene.children.length))) {
+          renderStandaloneOverlayPass();
+        }
       };
       if (overlayRaf) cancelAnimationFrame(overlayRaf);
       overlayRaf = requestAnimationFrame(loop);
@@ -5039,7 +5251,7 @@
         viewer.start();
         tuneCamera();
         initRigOverlayScene();
-        initActorRootGroup();
+        initMotionOverlayRenderer();
         setupViewHelper();
         overlayRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
         overlayRenderer.setSize(128, 128);
@@ -5107,6 +5319,9 @@
       applyGizmoForSelection();
       transformControls.addEventListener('dragging-changed', (e) => {
         if (viewer.controls) viewer.controls.enabled = !e.value;
+        if (!e.value && placementGizmoMode && transformControls.object === pivot) {
+          applyPlacementGizmoDrag();
+        }
         if (!e.value) {
           syncActivePathFromState();
           renderPathGroupList();
@@ -5116,7 +5331,7 @@
         }
       });
       transformControls.addEventListener('change', () => {
-        if (syncingFromGizmo) return;
+        if (syncingFromGizmo || applyingPlacementGizmo) return;
         const obj = transformControls.object;
         if (obj && obj.userData && obj.userData.cpPointIdx != null) {
           const i = obj.userData.cpSegIdx;
@@ -5156,18 +5371,20 @@
           viewer.forceRenderNextFrame();
           return;
         }
-        if (selected < 0) return;
-        if (transformControls.object !== pivot) return;
-        if (!transformControls.dragging) return;
-        const p = placements[selected];
-        if (!p) return;
-        p.x = pivot.position.x;
-        p.y = pivot.position.y;
-        p.z = pivot.position.z;
-        const euler = new THREE.Euler().setFromQuaternion(pivot.quaternion, 'XYZ');
-        p.yaw_deg = THREE.MathUtils.radToDeg(euler.z);
-        syncPlacementTransform(p);
-        updateSelSliders();
+        if (placementGizmoMode && transformControls.object === pivot) {
+          if (transformControls.dragging) applyPlacementGizmoDrag();
+          return;
+        }
+      });
+      transformControls.addEventListener('objectChange', () => {
+        if (syncingFromGizmo || applyingPlacementGizmo) return;
+        const obj = transformControls.object;
+        if (obj && obj.userData && obj.userData.cpPointIdx != null) return;
+        if (obj && obj.userData && obj.userData.markerIdx != null) return;
+        if (rigOpen && rigGizmoMode && transformControls.object === renderCamRig) return;
+        if (placementGizmoMode && transformControls.object === pivot) {
+          if (transformControls.dragging) applyPlacementGizmoDrag();
+        }
       });
     }
 
@@ -5206,13 +5423,8 @@
       }
       transformControls.setMode(placementGizmoMode);
       transformControls.detach();
-      syncingFromGizmo = true;
-      pivot.position.set(p.x, p.y, p.z);
-      pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
-      pivot.scale.set(p.scale, p.scale, p.scale);
-      pivot.updateMatrixWorld(true);
-      transformControls.attach(pivot);
-      syncingFromGizmo = false;
+      syncGizmoObjectFromPlacement(p);
+      transformControls.attach(placementGizmoTarget(p));
     }
 
     async function addPlacementFromFile(file, loadToken = sessionResetToken) {
@@ -5222,6 +5434,7 @@
       const { assetName, missingIdx } = resolveImportAssetName(file);
       let sourcePath = inferSourcePathForImport(file);
       if (!sourcePath) sourcePath = await guessAssetPathFromServer(file.name);
+      sourcePath = inheritSourcePathForAsset(assetName, sourcePath);
       status(missingIdx >= 0 ? `恢复 ${assetName}…` : `加载 ${assetName}…`);
       setLoadProgress(20, `${missingIdx >= 0 ? '恢复' : '解析'} ${assetName}…`);
       let ab = fileCache.get(fileCacheKey(activeSceneId, assetName));
@@ -5313,6 +5526,12 @@
         if (rigOpen && cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       }
       if (idx < 0) placementGizmoMode = null;
+      else {
+        const p = placements[idx];
+        if (p && p.type === 'motion' && !p.missing) {
+          placementGizmoMode = 'translate';
+        }
+      }
       updatePlacementGizmoUI();
       renderList();
       const enabled = idx >= 0;
@@ -5335,7 +5554,7 @@
       if (selected < 0) return;
       const p = placements[selected];
       if (p.type === 'motion') {
-        setSliderValueUnbounded(el('selScale'), p.scale);
+        setSliderValueUnbounded(el('selScale'), p.scale, true);
       }
       el('selX').value = p.x; el('selXVal').textContent = p.x.toFixed(3);
       el('selY').value = p.y; el('selYVal').textContent = p.y.toFixed(3);
@@ -5355,10 +5574,10 @@
       syncPlacementTransform(p);
       updateSelSliders();
       if (p.type === 'motion') updateMotionControlsUI();
-      syncingFromGizmo = true;
-      pivot.position.set(p.x, p.y, p.z);
-      pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
-      syncingFromGizmo = false;
+      syncGizmoObjectFromPlacement(p);
+      if (transformControls && transformControls.object === placementGizmoTarget(p)) {
+        pivot.updateMatrixWorld(true);
+      }
     }
 
     async function removePlacement(idx) {
@@ -5475,6 +5694,10 @@
           item.motionFrames = p.motionFrames || (p.motion && p.motion.numFrames) || 0;
         }
         if (p.sourcePath) item.sourcePath = p.sourcePath;
+        else {
+          const inherited = inheritSourcePathForAsset(p.name, null);
+          if (inherited) item.sourcePath = inherited;
+        }
         return item;
       });
     }
@@ -5615,12 +5838,14 @@
       await persistScenesStore();
       renderSceneManagerUI();
       const camNote = data.cameraPaths.length ? `${data.cameraPaths.length} 条轨迹` : '无相机轨迹';
-      const modeNote = hostMode === 'static' ? '到浏览器' : '到 placements.json';
+      const modeNote = hostMode === 'static'
+        ? (isRemoteGithubEditor() ? '到浏览器（在线版）' : '到浏览器')
+        : '到 placements.json';
       status(`已保存「${scene.name}」${modeNote} · ${data.placements.length} 模型 · ${camNote}`);
     }
 
     async function checkSaveApiHealth() {
-      if (hostMode === 'static') return null;
+      if (hostMode === 'static' || isRemoteGithubEditor()) return null;
       try {
         const res = await fetchWithTimeout(apiUrl('api/health'));
         if (!res.ok) return false;
@@ -5631,21 +5856,52 @@
       }
     }
 
+    function buildSourcePathMapFromConfig(saved) {
+      const map = new Map();
+      if (!Array.isArray(saved)) return map;
+      for (const item of saved) {
+        if (!item || !item.asset || !item.sourcePath) continue;
+        const path = String(item.sourcePath).replace(/\\/g, '/');
+        map.set(item.asset.toLowerCase(), path);
+        map.set(canonicalPlacementAssetName(item.asset).toLowerCase(), path);
+      }
+      return map;
+    }
+
+    function resolveConfigItemSourcePath(item, pathMap) {
+      if (item.sourcePath) return String(item.sourcePath).replace(/\\/g, '/');
+      const key = item.asset && item.asset.toLowerCase();
+      if (key && pathMap.has(key)) return pathMap.get(key);
+      const canon = item.asset && canonicalPlacementAssetName(item.asset).toLowerCase();
+      if (canon && pathMap.has(canon)) return pathMap.get(canon);
+      return null;
+    }
+
+    function inheritSourcePathForAsset(assetName, sourcePath) {
+      if (sourcePath) return sourcePath;
+      const canon = canonicalPlacementAssetName(assetName).toLowerCase();
+      const sibling = placements.find((p) => p.sourcePath
+        && canonicalPlacementAssetName(p.name).toLowerCase() === canon);
+      return sibling ? sibling.sourcePath : null;
+    }
+
     async function restorePlacements(saved, loadToken = sessionResetToken) {
       if (!Array.isArray(saved) || !saved.length) return;
       const missing = [];
+      const sourcePathMap = buildSourcePathMapFromConfig(saved);
       for (const item of saved) {
         if (isSessionAborted(loadToken)) return;
         const name = item.asset;
         if (!name) continue;
+        const configSourcePath = resolveConfigItemSourcePath(item, sourcePathMap);
         const cacheKey = fileCacheKey(activeSceneId, name);
         let ab = fileCache.get(cacheKey);
         if (!ab) {
-          ab = await resolveAssetBuffer(name, item.sourcePath || null, loadToken, activeSceneId);
+          ab = await resolveAssetBuffer(name, configSourcePath, loadToken, activeSceneId);
         }
         if (!ab) {
           missing.push(name);
-          const storedPath = item.sourcePath || await idbGetSceneSourcePath(activeSceneId, name);
+          const storedPath = configSourcePath || item.sourcePath || await idbGetSceneSourcePath(activeSceneId, name);
           const trace = lastResolveTraceByAsset.get(resolveTraceKey(activeSceneId, name));
           const missingReasonText = formatMissingReason(trace);
           modelLoadWarn('模型变红 missing', {
@@ -5660,7 +5916,7 @@
           placements.push({
             name,
             type: item.type || (name.toLowerCase().endsWith('.npz') ? 'motion' : 'splat'),
-            sourcePath: storedPath || null,
+            sourcePath: configSourcePath || storedPath || null,
             missingReason: missingReasonText,
             x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
             scale: _n(item.scale, defaultScale),
@@ -5684,7 +5940,7 @@
           const p = {
             type: 'motion',
             name,
-            sourcePath: item.sourcePath || await idbGetSceneSourcePath(activeSceneId, name) || null,
+            sourcePath: configSourcePath || item.sourcePath || await idbGetSceneSourcePath(activeSceneId, name) || null,
             x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
             scale: _n(item.scale, defaultScale),
             yaw_deg: _n(item.yaw_deg, 0),
@@ -5700,12 +5956,13 @@
           };
           createActorObject(p, skin, motion);
           placements.push(p);
+          kickOverlayRender();
           continue;
         }
         const file = new File([ab], name);
         const p = {
           name,
-          sourcePath: item.sourcePath || await idbGetSceneSourcePath(activeSceneId, name) || null,
+          sourcePath: configSourcePath || item.sourcePath || await idbGetSceneSourcePath(activeSceneId, name) || null,
           x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
           scale: _n(item.scale, defaultScale),
           yaw_deg: _n(item.yaw_deg, 0),
@@ -5789,7 +6046,7 @@
       const frame = parseInt(el('motionFrame').value, 10) || 0;
       updateActorFrame(p, frame);
       el('motionFrameVal').textContent = `${frame} / ${p.motion.numFrames - 1}`;
-      viewer && viewer.forceRenderNextFrame();
+      kickOverlayRender();
     };
     el('motionPlayBtn').onclick = () => startMotionPreview();
 
@@ -5802,7 +6059,7 @@
       }
     };
     el('viewBgSelect').onchange = (e) => applyViewBackground(e.target.value);
-    function setSliderValueUnbounded(slider, v) {
+    function setSliderValueUnbounded(slider, v, silent = false) {
       if (Number.isNaN(v)) return;
       const curMin = parseFloat(slider.min);
       const curMax = parseFloat(slider.max);
@@ -5810,10 +6067,10 @@
       if (v < curMin) slider.min = String(v - pad);
       if (v > curMax) slider.max = String(v + pad);
       slider.value = v;
-      slider.dispatchEvent(new Event('input', { bubbles: true }));
+      if (!silent) slider.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
-    function setSliderValueBounded(slider, v, min, max) {
+    function setSliderValueBounded(slider, v, min, max, silent = false) {
       if (Number.isNaN(v)) return;
       const lo = min ?? parseFloat(slider.min);
       const hi = max ?? parseFloat(slider.max);
@@ -5821,7 +6078,7 @@
       slider.min = String(lo);
       slider.max = String(hi);
       slider.value = clamped;
-      slider.dispatchEvent(new Event('input', { bubbles: true }));
+      if (!silent) slider.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     function makeValEditable(valId, sliderId, opts = {}) {
@@ -5978,7 +6235,10 @@
     window.addEventListener('resize', () => {
       if (!(viewer && viewer.renderer && viewer.renderer.domElement && viewer.renderer.domElement.parentElement)) return;
       const root = el('viewMain');
-      if (root.clientWidth > 0 && root.clientHeight > 0) viewer.renderer.setSize(root.clientWidth, root.clientHeight);
+      if (root.clientWidth > 0 && root.clientHeight > 0) {
+        viewer.renderer.setSize(root.clientWidth, root.clientHeight);
+        if (motionOverlayRenderer) motionOverlayRenderer.setSize(root.clientWidth, root.clientHeight, false);
+      }
     });
 
     setupDragDrop();
@@ -6019,7 +6279,8 @@
         if (saveOk === false) {
           status('就绪 · 保存接口版本过旧，请重启 serve_editor.py 后再点保存');
         } else if (scenesStore.scenes.length) {
-          status(`就绪 v${MODEL_LOAD_BUILD} · ${hostModeLabel()} · ${scenesStore.scenes.length} 个场景`);
+          const bridgeNote = isRemoteGithubEditor() && localServerBridge ? ' · 已桥接本地模型库' : '';
+          status(`就绪 v${MODEL_LOAD_BUILD} · ${hostModeLabel()} · ${scenesStore.scenes.length} 个场景${bridgeNote}`);
         } else {
           status(`就绪 v${MODEL_LOAD_BUILD} · ${hostModeLabel()} · 新建或导入 JSON`);
         }
@@ -6027,17 +6288,183 @@
         else updateLocalBridgeHint(true);
 
         const openLocalBtn = el('openLocalEditorBtn');
-        if (openLocalBtn) openLocalBtn.onclick = () => openLocalEditor();
+        if (openLocalBtn) {
+          openLocalBtn.onclick = () => openLocalEditor();
+          openLocalBtn.textContent = isRemoteGithubEditor() ? '导出并打开本地完整版' : '打开本地编辑器';
+        }
 
-        if (hostMode === 'server' && !localServerBridge && scenesStore.scenes.length) {
-          const last = scenesStore.activeSceneId || (scenesStore.scenes[0] && scenesStore.scenes[0].id);
-          if (last && !activeSceneId) {
-            status('正在加载场景…');
-            await loadSceneById(last);
+        const shouldAutoLoadScene = scenesStore.scenes.length
+          && (hostMode === 'server' && !localServerBridge || isRemoteGithubEditor());
+        if (shouldAutoLoadScene) {
+          const autotest = new URLSearchParams(location.search).get('autotest');
+          if (!autotest) {
+            const last = scenesStore.activeSceneId || (scenesStore.scenes[0] && scenesStore.scenes[0].id);
+            if (last && !activeSceneId) {
+              status('正在加载场景…');
+              await loadSceneById(last);
+            }
           }
+        }
+        const autotest = new URLSearchParams(location.search).get('autotest');
+        if (autotest === 'scene2') {
+          status('自动测试：加载 scene2…');
+          await loadSceneById('scene-2');
+          let p = placements.find((x) => x.type === 'motion' && !x.missing);
+          if (!p) {
+            status('自动测试：补载 motion.npz…');
+            const npzPath = 'D:/Downloads/kimodo-test-output/person01/seg01_run4s_tired4s/motion.npz';
+            const resp = await fetch('/api/asset/file?path=' + encodeURIComponent(npzPath));
+            if (!resp.ok) throw new Error('autotest NPZ 404');
+            const ab = await resp.arrayBuffer();
+            await addMotionFromFile(new File([ab], 'motion.npz'));
+            p = placements.find((x) => x.type === 'motion' && !x.missing);
+          }
+          const waitFrame = () => new Promise((r) => requestAnimationFrame(r));
+          if (p) selectPlacement(placements.indexOf(p));
+          await waitFrame();
+          await waitFrame();
+
+          el('gizmoMove').click();
+          await waitFrame();
+          const moveBtnActive = el('gizmoMove').classList.contains('active');
+          const gizmoTranslate = placementGizmoMode === 'translate'
+            && transformControls && transformControls.object === pivot;
+
+          el('gizmoRotate').click();
+          await waitFrame();
+          const rotateBtnActive = el('gizmoRotate').classList.contains('active');
+          const gizmoRotate = placementGizmoMode === 'rotate'
+            && transformControls && transformControls.object === pivot;
+
+          el('gizmoMove').click();
+          await waitFrame();
+
+          const p2 = placements.find((x) => x.type === 'motion' && !x.missing);
+          const c0 = meshCentroidForPlacement(p2);
+          const saved = { x: p2.x, y: p2.y, z: p2.z, yaw: p2.yaw_deg };
+          p2.x += 0.22;
+          p2.y += 0.12;
+          syncPlacementTransform(p2);
+          syncGizmoObjectFromPlacement(p2);
+          kickOverlayRender();
+          await waitFrame();
+          await waitFrame();
+          const c1 = meshCentroidForPlacement(p2);
+          const sliderMoved = c0 && c1 && Math.hypot(c1.x - c0.x, c1.y - c0.y) > 0.08;
+
+          syncingFromGizmo = true;
+          pivot.position.set(saved.x + 0.35, saved.y + 0.25, saved.z);
+          pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, (saved.yaw + 35) * Math.PI / 180, 'XYZ'));
+          syncingFromGizmo = false;
+          p2.x = pivot.position.x;
+          p2.y = pivot.position.y;
+          p2.z = pivot.position.z;
+          p2.yaw_deg = saved.yaw + 35;
+          syncPlacementTransform(p2);
+          kickOverlayRender();
+          await waitFrame();
+          await waitFrame();
+          const c2 = meshCentroidForPlacement(p2);
+          const pivotDragMoved = c0 && c2 && Math.hypot(c2.x - c0.x, c2.y - c0.y) > 0.12;
+          const yawChanged = Math.abs(p2.yaw_deg - (saved.yaw + 35)) < 5;
+
+          p2.x = saved.x;
+          p2.y = saved.y;
+          p2.z = saved.z;
+          p2.yaw_deg = saved.yaw;
+          syncPlacementTransform(p2);
+          syncGizmoObjectFromPlacement(p2);
+          kickOverlayRender();
+
+          let localHeight = 0;
+          let meshBreadth = 0;
+          if (p2 && p2.mesh) {
+            const pos = p2.mesh.geometry.attributes.position.array;
+            let minX = Infinity, minY = Infinity, minZ = Infinity;
+            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+            for (let i = 0; i < pos.length; i += 3) {
+              minX = Math.min(minX, pos[i]); maxX = Math.max(maxX, pos[i]);
+              minY = Math.min(minY, pos[i + 1]); maxY = Math.max(maxY, pos[i + 1]);
+              minZ = Math.min(minZ, pos[i + 2]); maxZ = Math.max(maxZ, pos[i + 2]);
+            }
+            localHeight = maxZ - minZ;
+            meshBreadth = Math.min(maxX - minX, maxY - minY);
+          }
+
+          window.__autotestResult = {
+            ok: localHeight > 0.25 && meshBreadth > 0.04 && moveBtnActive && rotateBtnActive && gizmoTranslate && gizmoRotate
+              && sliderMoved && pivotDragMoved && yawChanged,
+            scene: 'scene2',
+            moveBtnActive,
+            rotateBtnActive,
+            gizmoTranslate,
+            gizmoRotate,
+            sliderMoved,
+            pivotDragMoved,
+            yawChanged,
+            localHeight,
+            meshBreadth,
+            inRigScene: !!(p2 && p2.root && actorRootGroup && actorRootGroup.parent === rigOverlayScene),
+            gizmoOnPivot: !!(transformControls && transformControls.object === pivot),
+            cpuRigid: true,
+          };
+          document.title = JSON.stringify(window.__autotestResult);
+          const banner = el('autotestBanner');
+          if (banner) {
+            banner.hidden = false;
+            banner.textContent = window.__autotestResult.ok ? 'scene2 自测通过' : 'scene2 自测失败';
+          }
+          document.body.dataset.autotestReady = '1';
+          status(window.__autotestResult.ok ? '自动测试通过 · scene2' : '自动测试失败 · scene2');
+        } else if (autotest === 'newscene-motion') {
+          status('自动测试：新建场景…');
+          await createNewScene('NPZ测试');
+          status('自动测试：加载 motion.npz…');
+          const npzPath = 'D:/Downloads/kimodo-test-output/person02/seg01_tower_turn/motion.npz';
+          const resp = await fetch('/api/asset/file?path=' + encodeURIComponent(npzPath));
+          if (!resp.ok) throw new Error('autotest NPZ 404');
+          const ab = await resp.arrayBuffer();
+          await addMotionFromFile(new File([ab], 'motion.npz'));
+          placementGizmoMode = 'translate';
+          updatePlacementGizmoUI();
+          attachGizmo();
+          const p = placements.find((x) => x.type === 'motion' && !x.missing);
+          if (p && p.mesh) {
+            const pos = p.mesh.geometry.attributes.position.array;
+            let minZ = Infinity; let maxZ = -Infinity;
+            for (let i = 2; i < pos.length; i += 3) {
+              minZ = Math.min(minZ, pos[i]); maxZ = Math.max(maxZ, pos[i]);
+            }
+            p.root.updateMatrixWorld(true);
+            const box = new THREE.Box3().setFromObject(p.mesh);
+            const size = box.getSize(new THREE.Vector3());
+            window.__autotestResult = {
+              ok: (maxZ - minZ) > 0.5 && size.z > 0.05,
+              scale: p.scale,
+              localHeight: maxZ - minZ,
+              worldSize: { x: size.x, y: size.y, z: size.z },
+              inScene: !!(p.root && actorRootGroup && actorRootGroup.children.includes(p.root)),
+              gizmoOnPivot: !!(transformControls && transformControls.object === pivot),
+              cpuRigid: true,
+            };
+            document.title = JSON.stringify(window.__autotestResult);
+          }
+          document.body.dataset.autotestReady = '1';
+          kickOverlayRender();
+          status('自动测试完成 · 人模已加载');
         }
       } catch (e) { showError(e); }
     })();
+
+    window.__editorTest = {
+      get placements() { return placements; },
+      get selected() { return selected; },
+      get placementGizmoMode() { return placementGizmoMode; },
+      pivot, transformControls, actorRootGroup, rigOverlayScene, viewer, THREE,
+      togglePlacementGizmo, attachGizmo, applyPlacementGizmoDrag,
+      syncPlacementTransform, refreshActorMesh, kickOverlayRender,
+      meshCentroidForPlacement, el,
+    };
   </script>
 </body>
 </html>

@@ -11,6 +11,49 @@ const SKIN_MAGIC = new Uint8Array([0x53, 0x4f, 0x4d, 0x41, 0x53, 0x4b, 0x49, 0x4
 
 /** @typedef {{posedJoints:Float32Array, globalRotMats:Float32Array, numFrames:number, numJoints:number, fps:number, anchor:{x:number,y:number,z:number}, minZ:number}} MotionData */
 
+/** Kimodo Y-up (x,y,z) → editor Z-up (x,y,z). */
+export function yUpPosToZUp(x, y, z) {
+  return [x, z, y];
+}
+
+const Y_TO_Z_UP_4 = new Float32Array([
+  1, 0, 0, 0,
+  0, 0, 1, 0,
+  0, 1, 0, 0,
+  0, 0, 0, 1,
+]);
+
+function mat4MultiplyRowMajor(a, b, out) {
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 4; c++) {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) sum += a[r * 4 + k] * b[k * 4 + c];
+      out[r * 4 + c] = sum;
+    }
+  }
+}
+
+/** Row-major 4×4: M' = P M P, P maps Y-up to Z-up. */
+function yUpMat4ToZUpFlat(src, dst, base = 0) {
+  const m = src.subarray(base, base + 16);
+  const out = dst.subarray(base, base + 16);
+  const pm = new Float32Array(16);
+  mat4MultiplyRowMajor(Y_TO_Z_UP_4, m, pm);
+  mat4MultiplyRowMajor(pm, Y_TO_Z_UP_4, out);
+}
+
+function convertSkinBindPoseToZUp(bindVertices, bindRigInvRaw, bindRigInv, numVerts, numJoints) {
+  for (let i = 0; i < numVerts * 3; i += 3) {
+    const [nx, ny, nz] = yUpPosToZUp(bindVertices[i], bindVertices[i + 1], bindVertices[i + 2]);
+    bindVertices[i] = nx;
+    bindVertices[i + 1] = ny;
+    bindVertices[i + 2] = nz;
+  }
+  for (let j = 0; j < numJoints; j++) {
+    yUpMat4ToZUpFlat(bindRigInvRaw, bindRigInv, j * 16);
+  }
+}
+
 export async function loadSomaSkin(url = './vendor/soma_skin.bin') {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`无法加载 SOMA 蒙皮: ${url}`);
@@ -25,7 +68,8 @@ export async function loadSomaSkin(url = './vendor/soma_skin.bin') {
   const maxInf = view.getUint32(24, true);
   const floorY = view.getFloat32(28, true);
   let off = 32;
-  const bindVertices = new Float32Array(buf.buffer, buf.byteOffset + off, numVerts * 3);
+  const bindVertices = new Float32Array(numVerts * 3);
+  bindVertices.set(new Float32Array(buf.buffer, buf.byteOffset + off, numVerts * 3));
   off += numVerts * 3 * 4;
   const faces = new Uint32Array(buf.buffer, buf.byteOffset + off, numFaces * 3);
   off += numFaces * 3 * 4;
@@ -33,13 +77,16 @@ export async function loadSomaSkin(url = './vendor/soma_skin.bin') {
   off += numVerts * maxInf;
   const lbsWeights = new Float32Array(buf.buffer, buf.byteOffset + off, numVerts * maxInf);
   off += numVerts * maxInf * 4;
-  const bindRigInv = new Float32Array(buf.buffer, buf.byteOffset + off, numJoints * 16);
+  const bindRigInvRaw = new Float32Array(numJoints * 16);
+  bindRigInvRaw.set(new Float32Array(buf.buffer, buf.byteOffset + off, numJoints * 16));
+  const bindRigInv = new Float32Array(numJoints * 16);
+  convertSkinBindPoseToZUp(bindVertices, bindRigInvRaw, bindRigInv, numVerts, numJoints);
   return {
-    bindVertices: new Float32Array(bindVertices),
+    bindVertices,
     faces: new Uint32Array(faces),
     lbsIndices: new Uint8Array(lbsIndices),
     lbsWeights: new Float32Array(lbsWeights),
-    bindRigInv: new Float32Array(bindRigInv),
+    bindRigInv,
     numVerts,
     numFaces,
     numJoints,
@@ -120,11 +167,6 @@ export function parseKimodoNpz(arrayBuffer) {
   };
 }
 
-/** Kimodo Y-up (x,y,z) → editor Z-up (x,y,z). */
-export function yUpPosToZUp(x, y, z) {
-  return [x, z, y];
-}
-
 /** 3×3 row-major rotation: R' = P R P^T, P maps Y-up to Z-up. */
 export function yUpMat3ToZUp(m, out) {
   out[0] = m[0]; out[1] = m[2]; out[2] = m[1];
@@ -190,8 +232,7 @@ export function skinFrame(skin, motion, frameIdx) {
   const { posedJoints, globalRotMats, numJoints: nj } = motion;
   const f = Math.max(0, Math.min(motion.numFrames - 1, frameIdx | 0));
   const out = new Float32Array(numVerts * 3);
-  const m = new Float32Array(12);
-  const v4 = new Float32Array(4);
+  const m = new Float32Array(numJoints * 12);
 
   for (let j = 0; j < numJoints; j++) {
     const ji = (f * nj + j) * 9;

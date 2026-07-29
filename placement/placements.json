@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "activeSceneId": "scene-1",
+  "activeSceneId": "scene-4",
   "scenes": [
     {
       "id": "scene-1",
@@ -678,6 +678,641 @@
           "yaw_deg": 45.34503076226228,
           "pitch_deg": 84.01452534528188,
           "roll_deg": -14.643268961017407
+        }
+      }
+    },
+    {
+      "id": "scene-3",
+      "name": "scene_config_2026-07-28T14-08-22",
+      "createdAt": "2026-07-28T20:52:48.765Z",
+      "updatedAt": "2026-07-29T03:43:01.125Z",
+      "config": {
+        "version": 2,
+        "defaults": {
+          "scale": 0.12,
+          "z": 0.0006
+        },
+        "view": {
+          "background": "cream",
+          "rigOpen": false
+        },
+        "placements": [
+          {
+            "asset": "ancient_earthen_fortress.ply",
+            "x": 0,
+            "y": 0,
+            "z": 0.0006,
+            "scale": 1.29,
+            "yaw_deg": 0,
+            "center": [
+              -0.007580691682249896,
+              -0.03489733098126268,
+              -0.0816468596458435
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/ancient_earthen_fortress.ply"
+          },
+          {
+            "asset": "map3.ply",
+            "x": 0,
+            "y": 0,
+            "z": -0.001178449417375136,
+            "scale": 1.8,
+            "yaw_deg": 89.99999999999999,
+            "center": [
+              -0.002559779798079157,
+              -0.0014803953268011146,
+              -0.00657888175919652
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/map3.ply"
+          },
+          {
+            "asset": "ancient_earthen_fortress (1).ply",
+            "x": 0,
+            "y": 0,
+            "z": 0.0006,
+            "scale": 0.12,
+            "yaw_deg": 0,
+            "center": [
+              -0.0758069155746448,
+              -0.34897331030463785,
+              -0.8164685964584351
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/ancient_earthen_fortress.ply"
+          },
+          {
+            "asset": "map3 (1).ply",
+            "x": 0,
+            "y": 0.11816946471910564,
+            "z": 0.061169436626796456,
+            "scale": 0.595,
+            "yaw_deg": 0,
+            "center": [
+              -0.002559779798079157,
+              -0.0014803953268011146,
+              -0.00657888175919652
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/map3.ply"
+          },
+          {
+            "asset": "wooden_cart_with_sacks.ply",
+            "x": -0.1452893462935217,
+            "y": -0.45,
+            "z": 0.046907277616486845,
+            "scale": 0.1,
+            "yaw_deg": -98,
+            "center": [
+              0.0015725354429582874,
+              -0.177049798074733,
+              -0.24023383855819702
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/wooden_cart_with_sacks.ply"
+          },
+          {
+            "asset": "traditional_earthen_house.ply",
+            "x": -0.2451215691849704,
+            "y": -0.45,
+            "z": 0.027331591395595625,
+            "scale": 0.205,
+            "yaw_deg": -89.99999999999999,
+            "center": [
+              0.14066392130562752,
+              -0.0017185583620360403,
+              -0.25643330812454224
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/traditional_earthen_house.ply"
+          },
+          {
+            "asset": "vendor_cart.ply",
+            "x": -0.12101177800450177,
+            "y": -0.5104241651387953,
+            "z": 0.03318771533243223,
+            "scale": 0.07,
+            "yaw_deg": -50.00000000000001,
+            "center": [
+              0.0028105475194026767,
+              0.0801308213236424,
+              -0.47113505005836487
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/vendor_cart.ply"
+          },
+          {
+            "asset": "thatched_compound.ply",
+            "x": -0.2725329566858544,
+            "y": -0.6101837508991395,
+            "z": 0.05049937656922551,
+            "scale": 0.18,
+            "yaw_deg": -178.00000000000003,
+            "center": [
+              0.043452893498716796,
+              -0.05217099785661244,
+              -0.20262232422828674
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/thatched_compound.ply"
+          },
+          {
+            "asset": "thatched_house_model.ply",
+            "x": -0.23260478051415096,
+            "y": -0.7610547567668964,
+            "z": 0.03226777014082326,
+            "scale": 0.155,
+            "yaw_deg": 86.99999999999999,
+            "center": [
+              -0.004151407180898746,
+              0.012669043977214713,
+              -0.33145973086357117
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/thatched_house_model.ply"
+          },
+          {
+            "asset": "tea_stall.ply",
+            "x": 0.16,
+            "y": -0.45,
+            "z": 0.0428060147307785,
+            "scale": 0.07,
+            "yaw_deg": -89,
+            "center": [
+              -0.09641517097031843,
+              -0.002732929491873736,
+              -0.49748849868774414
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/tea_stall.ply"
+          },
+          {
+            "asset": "street2.ply",
+            "x": 0.16208898177765133,
+            "y": -0.5885587926955309,
+            "z": 0.04169861559688104,
+            "scale": 0.21,
+            "yaw_deg": -89.99999999999999,
+            "center": [
+              0.00027117151343180034,
+              0.05953518704026045,
+              -0.21497109532356262
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/street2.ply"
+          },
+          {
+            "asset": "market_stall_pink.ply",
+            "x": 0.085,
+            "y": -0.7365918523228376,
+            "z": 0.04634175629608578,
+            "scale": 0.08,
+            "yaw_deg": 0,
+            "center": [
+              -0.005020113126278734,
+              0.025281583317649275,
+              -0.49751007556915283
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/market_stall_pink.ply"
+          },
+          {
+            "asset": "street1.ply",
+            "x": 0.13533312067312087,
+            "y": -0.8849777450441951,
+            "z": 0.04105315989339081,
+            "scale": 0.21,
+            "yaw_deg": -88.98557937622795,
+            "center": [
+              0.007153386127578118,
+              0.06836945156457482,
+              -0.22129681706428528
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/street1.ply"
+          },
+          {
+            "asset": "street2 (1).ply",
+            "x": -0.2386939644244891,
+            "y": -0.9472746349250736,
+            "z": 0.04369494979167726,
+            "scale": 0.21,
+            "yaw_deg": 84.45798603004887,
+            "center": [
+              0.00027117151343180034,
+              0.05953518704026045,
+              -0.21497109532356262
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/street2.ply"
+          },
+          {
+            "asset": "thatched_house_model (1).ply",
+            "x": 0.09648216793385252,
+            "y": -1.0621284647529876,
+            "z": 0.03615399125569882,
+            "scale": 0.15,
+            "yaw_deg": -91,
+            "center": [
+              -0.004151407180898746,
+              0.012669043977214713,
+              -0.33145973086357117
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/thatched_house_model.ply"
+          },
+          {
+            "asset": "mud_hut_model.ply",
+            "x": -0.25,
+            "y": -1.1177239320015657,
+            "z": 0.04241618906661608,
+            "scale": 0.15,
+            "yaw_deg": 0,
+            "center": [
+              0.015060167381676232,
+              -0.0015401698794306779,
+              -0.344563364982605
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/mud_hut_model.ply"
+          },
+          {
+            "asset": "peach_blossom_tree.ply",
+            "x": 0.2173077922815435,
+            "y": -0.36274351007993144,
+            "z": 0.030127933038979676,
+            "scale": 0.12,
+            "yaw_deg": 0,
+            "center": [
+              0.03337947455331395,
+              -0.009852565687496758,
+              -0.5000556707382202
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true,
+            "sourcePath": "D:/Downloads/outputs_50pct/peach_blossom_tree.ply"
+          }
+        ],
+        "cameraPaths": [],
+        "activePathId": null,
+        "renderSettings": {
+          "fov": 50,
+          "near": 0.01,
+          "far": 8,
+          "width": 1920,
+          "height": 1080,
+          "showFrustum": true
+        },
+        "renderCamera": {
+          "x": 0,
+          "y": -0.5,
+          "z": 0.25,
+          "yaw_deg": 0,
+          "pitch_deg": 0,
+          "roll_deg": 0
+        }
+      }
+    },
+    {
+      "id": "scene-4",
+      "name": "scene_config_2026-07-28T14-08-22 2",
+      "createdAt": "2026-07-29T03:43:36.879Z",
+      "updatedAt": "2026-07-29T03:43:36.879Z",
+      "config": {
+        "version": 2,
+        "defaults": {
+          "scale": 0.12,
+          "z": 0.0006
+        },
+        "view": {
+          "background": "cream",
+          "rigOpen": false
+        },
+        "placements": [
+          {
+            "asset": "ancient_earthen_fortress.ply",
+            "x": 0,
+            "y": 0,
+            "z": 0.0006,
+            "scale": 1.29,
+            "yaw_deg": 0,
+            "center": [
+              -0.007580691682249896,
+              -0.03489733098126268,
+              -0.0816468596458435
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "map3.ply",
+            "x": 0,
+            "y": 0,
+            "z": -0.001178449417375136,
+            "scale": 1.8,
+            "yaw_deg": 89.99999999999999,
+            "center": [
+              -0.002559779798079157,
+              -0.0014803953268011146,
+              -0.00657888175919652
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "ancient_earthen_fortress (1).ply",
+            "x": 0,
+            "y": 0,
+            "z": 0.0006,
+            "scale": 0.12,
+            "yaw_deg": 0,
+            "center": [
+              -0.0758069155746448,
+              -0.34897331030463785,
+              -0.8164685964584351
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "map3 (1).ply",
+            "x": 0,
+            "y": 0.11816946471910564,
+            "z": 0.061169436626796456,
+            "scale": 0.595,
+            "yaw_deg": 0,
+            "center": [
+              -0.002559779798079157,
+              -0.0014803953268011146,
+              -0.00657888175919652
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "wooden_cart_with_sacks.ply",
+            "x": -0.1452893462935217,
+            "y": -0.45,
+            "z": 0.046907277616486845,
+            "scale": 0.1,
+            "yaw_deg": -98,
+            "center": [
+              0.0015725354429582874,
+              -0.177049798074733,
+              -0.24023383855819702
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "traditional_earthen_house.ply",
+            "x": -0.2451215691849704,
+            "y": -0.45,
+            "z": 0.027331591395595625,
+            "scale": 0.205,
+            "yaw_deg": -89.99999999999999,
+            "center": [
+              0.14066392130562752,
+              -0.0017185583620360403,
+              -0.25643330812454224
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "vendor_cart.ply",
+            "x": -0.12101177800450177,
+            "y": -0.5104241651387953,
+            "z": 0.03318771533243223,
+            "scale": 0.07,
+            "yaw_deg": -50.00000000000001,
+            "center": [
+              0.0028105475194026767,
+              0.0801308213236424,
+              -0.47113505005836487
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "thatched_compound.ply",
+            "x": -0.2725329566858544,
+            "y": -0.6101837508991395,
+            "z": 0.05049937656922551,
+            "scale": 0.18,
+            "yaw_deg": -178.00000000000003,
+            "center": [
+              0.043452893498716796,
+              -0.05217099785661244,
+              -0.20262232422828674
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "thatched_house_model.ply",
+            "x": -0.23260478051415096,
+            "y": -0.7610547567668964,
+            "z": 0.03226777014082326,
+            "scale": 0.155,
+            "yaw_deg": 86.99999999999999,
+            "center": [
+              -0.004151407180898746,
+              0.012669043977214713,
+              -0.33145973086357117
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "tea_stall.ply",
+            "x": 0.16,
+            "y": -0.45,
+            "z": 0.0428060147307785,
+            "scale": 0.07,
+            "yaw_deg": -89,
+            "center": [
+              -0.09641517097031843,
+              -0.002732929491873736,
+              -0.49748849868774414
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "street2.ply",
+            "x": 0.16208898177765133,
+            "y": -0.5885587926955309,
+            "z": 0.04169861559688104,
+            "scale": 0.21,
+            "yaw_deg": -89.99999999999999,
+            "center": [
+              0.00027117151343180034,
+              0.05953518704026045,
+              -0.21497109532356262
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "market_stall_pink.ply",
+            "x": 0.085,
+            "y": -0.7365918523228376,
+            "z": 0.04634175629608578,
+            "scale": 0.08,
+            "yaw_deg": 0,
+            "center": [
+              -0.005020113126278734,
+              0.025281583317649275,
+              -0.49751007556915283
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "street1.ply",
+            "x": 0.13533312067312087,
+            "y": -0.8849777450441951,
+            "z": 0.04105315989339081,
+            "scale": 0.21,
+            "yaw_deg": -88.98557937622795,
+            "center": [
+              0.007153386127578118,
+              0.06836945156457482,
+              -0.22129681706428528
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "street2 (1).ply",
+            "x": -0.2386939644244891,
+            "y": -0.9472746349250736,
+            "z": 0.04369494979167726,
+            "scale": 0.21,
+            "yaw_deg": 84.45798603004887,
+            "center": [
+              0.00027117151343180034,
+              0.05953518704026045,
+              -0.21497109532356262
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "thatched_house_model (1).ply",
+            "x": 0.09648216793385252,
+            "y": -1.0621284647529876,
+            "z": 0.03615399125569882,
+            "scale": 0.15,
+            "yaw_deg": -91,
+            "center": [
+              -0.004151407180898746,
+              0.012669043977214713,
+              -0.33145973086357117
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "mud_hut_model.ply",
+            "x": -0.25,
+            "y": -1.1177239320015657,
+            "z": 0.04241618906661608,
+            "scale": 0.15,
+            "yaw_deg": 0,
+            "center": [
+              0.015060167381676232,
+              -0.0015401698794306779,
+              -0.344563364982605
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          },
+          {
+            "asset": "peach_blossom_tree.ply",
+            "x": 0.2173077922815435,
+            "y": -0.36274351007993144,
+            "z": 0.030127933038979676,
+            "scale": 0.12,
+            "yaw_deg": 0,
+            "center": [
+              0.03337947455331395,
+              -0.009852565687496758,
+              -0.5000556707382202
+            ],
+            "pitch_deg": 0,
+            "roll_deg": 0,
+            "visible": true
+          }
+        ],
+        "cameraPaths": [],
+        "activePathId": null,
+        "renderSettings": {
+          "fov": 50,
+          "near": 0.01,
+          "far": 8,
+          "width": 1920,
+          "height": 1080,
+          "showFrustum": true
+        },
+        "renderCamera": {
+          "x": 0,
+          "y": -0.5,
+          "z": 0.25,
+          "yaw_deg": 0,
+          "pitch_deg": 0,
+          "roll_deg": 0
         }
       }
     }
