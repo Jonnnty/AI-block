@@ -6293,9 +6293,7 @@
           openLocalBtn.textContent = isRemoteGithubEditor() ? '导出并打开本地完整版' : '打开本地编辑器';
         }
 
-        const shouldAutoLoadScene = scenesStore.scenes.length
-          && (hostMode === 'server' && !localServerBridge || isRemoteGithubEditor());
-        if (shouldAutoLoadScene) {
+        if (hostMode === 'server' && !localServerBridge && scenesStore.scenes.length) {
           const autotest = new URLSearchParams(location.search).get('autotest');
           if (!autotest) {
             const last = scenesStore.activeSceneId || (scenesStore.scenes[0] && scenesStore.scenes[0].id);
