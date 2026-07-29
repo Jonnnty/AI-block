@@ -738,7 +738,7 @@
       shellFrame,
       motionFrameForCameraFrame,
       motionDefaultScale,
-    } from './vendor/motion_actor.js?v=20260729d';
+    } from './vendor/motion_actor.js?v=20260729e';
 
 
     function _n(v, fb) { return v !== undefined && v !== null ? v : fb; }
@@ -3157,6 +3157,14 @@
       viewer.forceRenderNextFrame();
     }
 
+    function motionAnchorArray(p, motion) {
+      if (Array.isArray(p.center) && p.center.length >= 3) {
+        return [_n(p.center[0], 0), _n(p.center[1], 0), _n(p.center[2], 0)];
+      }
+      const a = motion && motion.anchor;
+      return [a ? a.x : 0, a ? a.y : 0, a ? a.z : 0];
+    }
+
     function buildMotionSplatBuffer(shell, bindPoseVerts, anchor) {
       const OFF = GaussianSplats3D.UncompressedSplatArray.OFFSET;
       const splatArray = new GaussianSplats3D.UncompressedSplatArray(0);
@@ -3182,7 +3190,10 @@
         splat[OFF.OPACITY] = shell.opacity;
         splatArray.addSplat(splat);
       }
-      return GaussianSplats3D.SplatBuffer.generateFromUncompressedSplatArrays([splatArray], 1, 0);
+      const sceneCenter = new THREE.Vector3(0, 0, 0);
+      return GaussianSplats3D.SplatBuffer.generateFromUncompressedSplatArrays(
+        [splatArray], 1, 0, sceneCenter,
+      );
     }
 
     function renderMotionOverlayPass() {
@@ -3292,7 +3303,7 @@
 
     async function createActorSplatObject(p, skin, motion, shell) {
       if (!viewer || !viewer.splatMesh) throw new Error('splat viewer 未就绪');
-      const anchor = p.center || [motion.anchor.x, motion.anchor.y, motion.anchor.z];
+      const anchor = motionAnchorArray(p, motion);
       const bindPoseVerts = shellFrame(shell, skin, motion, 0);
       const splatBuffer = buildMotionSplatBuffer(shell, bindPoseVerts, anchor);
       const sceneIdx = _n(viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
@@ -3315,8 +3326,12 @@
     async function createActorObject(p, skin, motion) {
       const shell = await ensureMotionSplatShell();
       if (shell && viewer && viewer.splatMesh) {
-        await createActorSplatObject(p, skin, motion, shell);
-        return null;
+        try {
+          await createActorSplatObject(p, skin, motion, shell);
+          return null;
+        } catch (err) {
+          console.warn('motion splat 创建失败，回退 mesh 叠加层', err);
+        }
       }
       return createActorMeshObject(p, skin, motion);
     }
