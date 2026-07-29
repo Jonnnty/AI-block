@@ -988,7 +988,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260729e';
+    const MODEL_LOAD_BUILD = '20260729f';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -6010,7 +6010,8 @@
         idbPutSceneAsset(activeSceneId, assetName, ab, sourcePath).catch((e) => console.warn('模型缓存写入失败', e));
       }
       const bounds = computePlyBounds(ab);
-      const sibling = siblingPlacementByCanonical(assetName);
+      const siblings = siblingPlacementsByCanonical(assetName);
+      const sibling = siblings[0] || null;
       const anchorFromBounds = placementAnchorFromBounds(bounds);
       const anchorForNew = (sibling && Array.isArray(sibling.center) && sibling.center.length >= 3)
         ? { x: sibling.center[0], y: sibling.center[1], z: sibling.center[2] }
@@ -6058,8 +6059,6 @@
         visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
       );
       if (isSessionAborted(loadToken)) return;
-      const siblings = siblingPlacementsByCanonical(assetName);
-      const sibling = siblings[0] || null;
       const spawnPos = sibling ? placementPositionBesideSibling(sibling, siblings.length) : null;
       const p = {
         name: assetName,
