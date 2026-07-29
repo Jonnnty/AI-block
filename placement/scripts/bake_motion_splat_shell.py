@@ -25,7 +25,7 @@ OUT = ROOT / "vendor" / "motion_splat_shell.bin"
 MAGIC = b"MOTSPLAT"
 TARGET_SPLATS = 2000
 DEFAULT_SPLAT_SCALE = 0.018
-SHELL_COLOR = (0x98, 0xBD, 0xFF)
+SHELL_COLOR = (0x00, 0xB1, 0x40)
 SHELL_OPACITY = 255
 
 

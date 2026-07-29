@@ -576,8 +576,6 @@
       <section>
         <h2>已放置</h2>
         <div id="sceneList" class="scene-list"></div>
-        <button type="button" id="organizeDupBtn" class="secondary" style="margin-top:8px;width:100%">整理同名 / 修复鬼影</button>
-        <p class="hint">同名模型自动错开；修复播放 NPZ 后在原位置留下的巨大鬼影</p>
       </section>
       <section>
         <h2>默认参数</h2>
@@ -993,7 +991,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260729j';
+    const MODEL_LOAD_BUILD = '20260729k';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -1555,19 +1553,15 @@
       return removed;
     }
 
-    async function organizeSceneDuplicates() {
+    async function reconcileSceneRenderState() {
       deoverlapCanonicalPlacements();
       for (const p of placements) {
         if (!p.missing) syncPlacementTransform(p);
       }
       if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
-      const removed = await removeUnownedSplatScenes();
+      await removeUnownedSplatScenes();
       if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
       viewer && viewer.forceRenderNextFrame();
-      renderList();
-      status(removed > 0
-        ? `已整理同名模型 · 清除 ${removed} 个多余 GPU 场景 · 已修复渲染索引`
-        : '已整理同名模型 · 已修复渲染索引');
     }
 
     function placementAnchorFromItem(item, bounds, loadedPlacements = placements) {
@@ -1755,7 +1749,9 @@
     let actorRootGroup = null;
     let motionOverlayScene = null;
     let motionOverlayRenderer = null;
-    const ACTOR_COLOR = 0x98bdff;
+    const ACTOR_COLOR = 0x00b140;
+    /** 特效抠像绿（与 splat shell 一致） */
+    const MOTION_SPLAT_COLOR = [0, 177, 64];
     let motionPreviewRaf = 0;
     let motionPreviewStart = 0;
     let rigPreviewRt = null;
@@ -2825,6 +2821,7 @@
         const pathCount = _n(parsed.cameraPaths && parsed.cameraPaths.length, 0);
         status(`已加载「${scene.name}」· ${modelCount} 模型 · ${pathCount} 轨迹`);
         kickOverlayRender();
+        await reconcileSceneRenderState().catch((e) => console.warn('reconcile scene render failed', e));
       } catch (e) {
         if (!isSessionAborted(loadToken)) showError(e);
       } finally {
@@ -3208,6 +3205,7 @@
       if (motionSplatShellFailed) return null;
       try {
         motionSplatShell = await loadMotionSplatShell(motionVendorUrl('motion_splat_shell.bin'));
+        motionSplatShell.color = MOTION_SPLAT_COLOR;
         return motionSplatShell;
       } catch (err) {
         motionSplatShellFailed = true;
@@ -3506,7 +3504,7 @@
       const ax = anchor[0];
       const ay = anchor[1];
       const az = anchor[2];
-      const [cr, cg, cb] = shell.color;
+      const [cr, cg, cb] = MOTION_SPLAT_COLOR;
       for (let i = 0; i < shell.numSplats; i++) {
         const splat = GaussianSplats3D.UncompressedSplatArray.createSplat(0);
         splat[OFF.X] = bindPoseVerts[i * 3] - ax;
@@ -3590,11 +3588,18 @@
       updateAllActorsForRenderFrame(camFrame, total);
     }
 
+    function dismissPlacementGizmo() {
+      placementGizmoMode = null;
+      updatePlacementGizmoUI();
+      if (transformControls) transformControls.detach();
+    }
+
     function stopMotionPreview() {
       if (motionPreviewRaf) cancelAnimationFrame(motionPreviewRaf);
       motionPreviewRaf = 0;
       motionPreviewStart = 0;
       el('motionPlayBtn').textContent = '▶ 播放动作';
+      reconcileSceneRenderState().catch((e) => console.warn('reconcile after motion stop failed', e));
     }
 
     function applyMotionDefaultScale(p, motion) {
@@ -3705,8 +3710,7 @@
         syncPlacementTransform(p);
         applyPlacementVisibility(p);
       }
-      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
-      viewer && viewer.forceRenderNextFrame();
+      await reconcileSceneRenderState().catch((e) => console.warn('reconcile scene render failed', e));
     }
 
     async function createActorObject(p, skin, motion) {
@@ -3834,6 +3838,7 @@
         stopMotionPreview();
         return;
       }
+      dismissPlacementGizmo();
       el('motionPlayBtn').textContent = '⏸ 停止动作';
       motionPreviewStart = performance.now();
       const fps = p.motionFps || 30;
@@ -6202,12 +6207,6 @@
         if (rigOpen && cameraMarkers.length >= 2) resumePathSlideIfPlaying();
       }
       if (idx < 0) placementGizmoMode = null;
-      else {
-        const p = placements[idx];
-        if (p && p.type === 'motion' && !p.missing) {
-          placementGizmoMode = 'translate';
-        }
-      }
       updatePlacementGizmoUI();
       renderList();
       const enabled = idx >= 0;
@@ -6675,19 +6674,13 @@
         syncPlacementTransform(p);
         applyPlacementVisibility(p);
       }
-      deoverlapCanonicalPlacements();
-      for (const p of placements) {
-        if (!p.missing) syncPlacementTransform(p);
-      }
-      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
-      await removeUnownedSplatScenes();
-      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
       try {
         const shell = await ensureMotionSplatShell();
         if (shell) await reconcileMotionSplatScenes(shell);
       } catch (e) {
         console.warn('reconcile motion splat after restore failed', e);
       }
+      await reconcileSceneRenderState().catch((e) => console.warn('reconcile scene render failed', e));
       renderList();
       const loadedCount = placements.filter((p) => !p.missing).length;
       if (missing.length) {
@@ -6751,7 +6744,6 @@
     el('motionPlayBtn').onclick = () => startMotionPreview();
 
     el('importBtn').onclick = () => el('pickFile').click();
-    el('organizeDupBtn').onclick = () => organizeSceneDuplicates().catch(showError);
     el('pickFile').onchange = async () => {
       const files = [...(el('pickFile').files || [])];
       el('pickFile').value = '';
