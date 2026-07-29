@@ -988,7 +988,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260729a';
+    const MODEL_LOAD_BUILD = '20260729b';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -3137,8 +3137,13 @@
       dv.setFloat32(8, z, true);
     }
 
+    function isValidSplatSceneIdx(sceneIdx) {
+      return !!(viewer && viewer.splatMesh && sceneIdx != null
+        && sceneIdx >= 0 && sceneIdx < viewer.splatMesh.scenes.length);
+    }
+
     function refreshMotionSplatCenters(p) {
-      if (!viewer || !viewer.splatMesh || p.sceneIdx == null || !p._poseVerts) return;
+      if (!isValidSplatSceneIdx(p.sceneIdx) || !p._poseVerts) return;
       const sm = viewer.splatMesh;
       const baseData = sm.splatDataTextures && sm.splatDataTextures.baseData;
       if (!baseData || !baseData.centers) return;
@@ -3172,6 +3177,7 @@
       const shellCount = shell.numSplats;
       const sm = viewer.splatMesh;
       const motionPs = placements.filter((p) => p.type === 'motion' && !p.missing && p.motionRender === 'splat');
+      if (!motionPs.length) return;
       const motionSceneIdxs = [];
       for (let i = 0; i < sm.scenes.length; i++) {
         if (sm.getScene(i).splatBuffer.getSplatCount() === shellCount) {
@@ -3387,7 +3393,6 @@
         p.mesh = null;
         p._poseVerts = new Float32Array(shell.numSplats * 3);
         p.motionRender = 'splat';
-        await reconcileMotionSplatScenes(shell);
         updateActorFrame(p, 0);
         syncPlacementTransform(p);
         applyPlacementVisibility(p);
@@ -3409,6 +3414,16 @@
         p._poseVerts = null;
         p.motionRender = null;
         throw err;
+      }
+    }
+
+    async function finalizeMotionPlacement(p, shell) {
+      if (shell) await reconcileMotionSplatScenes(shell);
+      if (p && p.motionRender === 'splat' && isValidSplatSceneIdx(p.sceneIdx)) {
+        updateActorFrame(p, _n(p.currentFrame, 0));
+        syncPlacementTransform(p);
+        applyPlacementVisibility(p);
+        viewer && viewer.forceRenderNextFrame();
       }
     }
 
@@ -3453,7 +3468,7 @@
     function updateActorFrame(p, frameIdx) {
       if (!p.motion || !somaSkin) return;
       const anchor = p.center || [0, 0, 0];
-      if (p.motionRender === 'splat' && p.shell && p.sceneIdx != null) {
+      if (p.motionRender === 'splat' && p.shell && isValidSplatSceneIdx(p.sceneIdx)) {
         const verts = shellFrame(p.shell, somaSkin, p.motion, frameIdx);
         if (!p._poseVerts || p._poseVerts.length !== verts.length) {
           p._poseVerts = new Float32Array(verts.length);
@@ -3492,7 +3507,7 @@
     }
 
     async function removeActorFromScene(p) {
-      if (p.motionRender === 'splat' && p.sceneIdx != null && viewer) {
+      if (p.motionRender === 'splat' && isValidSplatSceneIdx(p.sceneIdx)) {
         try {
           const removedIdx = p.sceneIdx;
           await viewer.removeSplatScene(removedIdx, false);
@@ -3600,6 +3615,7 @@
         if (sourcePath) p.sourcePath = sourcePath;
         applyMotionDefaultScale(p, motion);
         await createActorObject(p, skin, motion);
+        await finalizeMotionPlacement(p, await ensureMotionSplatShell());
         selectPlacement(missingIdx);
         hideLoadProgress();
         status(`已恢复人模 ${assetName}`);
@@ -3624,6 +3640,7 @@
       applyMotionDefaultScale(p, motion);
       await createActorObject(p, skin, motion);
       placements.push(p);
+      await finalizeMotionPlacement(p, await ensureMotionSplatShell());
       selectPlacement(placements.length - 1);
       hideLoadProgress();
       status(`已放置人模 ${assetName}（${motion.numFrames} 帧）`);
@@ -5430,7 +5447,7 @@
 
     function applyPlacementVisibility(p) {
       if (p.type === 'motion') {
-        if (p.motionRender === 'splat' && p.sceneIdx != null && viewer && viewer.splatMesh && !p.missing) {
+        if (p.motionRender === 'splat' && isValidSplatSceneIdx(p.sceneIdx) && !p.missing) {
           const sm = viewer.splatMesh;
           const scene = sm.getScene(p.sceneIdx);
           const show = p.visible !== false;
@@ -5495,7 +5512,7 @@
 
     function syncPlacementTransform(p) {
       if (p.type === 'motion') {
-        if (p.motionRender === 'splat' && p.sceneIdx != null && viewer && viewer.splatMesh) {
+        if (p.motionRender === 'splat' && isValidSplatSceneIdx(p.sceneIdx)) {
           const scene = viewer.splatMesh.getScene(p.sceneIdx);
           scene.position.set(p.x, p.y, p.z);
           scene.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
