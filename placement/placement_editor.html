@@ -458,7 +458,7 @@
       "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
       "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
       "@mkkellogg/gaussian-splats-3d": "./vendor/gaussian-splats-3d.module.js?v=20260722b",
-      "./vendor/motion_actor.js": "./vendor/motion_actor.js?v=20260729c"
+      "./vendor/motion_actor.js": "./vendor/motion_actor.js?v=20260729h"
     }
   }
   </script>
@@ -988,7 +988,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260729g';
+    const MODEL_LOAD_BUILD = '20260729h';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -1691,6 +1691,7 @@
     let rigOpen = false;
     let rigPreviewFloatDismissed = false;
     let sceneReady = false;
+    let sceneLoadInProgress = false;
     let syncingFromGizmo = false;
     let applyingPlacementGizmo = false;
     let overlayKickRaf = 0;
@@ -2756,6 +2757,7 @@
 
       const loadToken = ++sessionResetToken;
       status(`正在加载「${scene.name}」…`);
+      sceneLoadInProgress = true;
 
       try {
         fileCache.clear();
@@ -2783,6 +2785,7 @@
       } catch (e) {
         if (!isSessionAborted(loadToken)) showError(e);
       } finally {
+        sceneLoadInProgress = false;
         if (!isSessionAborted(loadToken)) renderSceneManagerUI();
       }
     }
@@ -3146,9 +3149,14 @@
       rigOverlayScene.add(actorRootGroup);
     }
 
+    function motionVendorUrl(file) {
+      const base = APP_BASE.endsWith('/') ? APP_BASE : `${APP_BASE}/`;
+      return `${base}vendor/${file}`;
+    }
+
     async function ensureSomaSkin() {
       if (somaSkin) return somaSkin;
-      somaSkin = await loadSomaSkin('./vendor/soma_skin.bin');
+      somaSkin = await loadSomaSkin(motionVendorUrl('soma_skin.bin'));
       return somaSkin;
     }
 
@@ -3156,7 +3164,7 @@
       if (motionSplatShell) return motionSplatShell;
       if (motionSplatShellFailed) return null;
       try {
-        motionSplatShell = await loadMotionSplatShell('./vendor/motion_splat_shell.bin');
+        motionSplatShell = await loadMotionSplatShell(motionVendorUrl('motion_splat_shell.bin'));
         return motionSplatShell;
       } catch (err) {
         motionSplatShellFailed = true;
@@ -3205,6 +3213,7 @@
     }
 
     function refreshMotionSplatCenters(p) {
+      try {
       if (!isValidSplatSceneIdx(p.sceneIdx) || !p._poseVerts) return;
       const sm = viewer.splatMesh;
       const baseData = sm.splatDataTextures && sm.splatDataTextures.baseData;
@@ -3234,6 +3243,9 @@
       sm.updateDataTexturesFromBaseData(globalStart, globalEnd);
       patchSceneIndexTextureRange(sm, globalStart, globalEnd, p.sceneIdx);
       viewer.forceRenderNextFrame();
+      } catch (err) {
+        console.warn('refreshMotionSplatCenters failed', err);
+      }
     }
 
     function listMotionActorSceneIdxs() {
@@ -3783,9 +3795,12 @@
 
     async function addMotionFromFile(file, loadToken = sessionResetToken) {
       if (!sceneReady) throw new Error('场景尚未就绪');
+      if (sceneLoadInProgress) throw new Error('场景仍在加载，请稍后再导入 NPZ');
       const { assetName, missingIdx } = resolveImportAssetName(file);
       let sourcePath = inferSourcePathForImport(file);
-      if (!sourcePath) sourcePath = await guessAssetPathFromServer(file.name);
+      if (!sourcePath && !assetName.toLowerCase().endsWith('.npz')) {
+        sourcePath = await guessAssetPathFromServer(file.name);
+      }
       sourcePath = inheritSourcePathForAsset(assetName, sourcePath);
       status(missingIdx >= 0 ? `恢复人模 ${assetName}…` : `加载人模 ${assetName}…`);
       setLoadProgress(20, `解析 ${assetName}…`);
@@ -6640,7 +6655,7 @@
           return;
         }
         for (const f of files) {
-          try { await addPlacementFromFile(f); } catch (err) { status(`失败: ${err.message}`); }
+          try { await addPlacementFromFile(f); } catch (err) { hideLoadProgress(); status(`失败: ${err.message}`); }
         }
       });
     }
@@ -6879,6 +6894,8 @@
         status('正在加载 3D 引擎…');
         await ensureViewer();
         if (isSessionAborted(loadToken)) return;
+        ensureSomaSkin().catch((e) => console.warn('SOMA 预加载失败', e));
+        ensureMotionSplatShell().catch(() => {});
         await initScene();
         status('正在读取场景列表…');
         scenesStore = await loadScenesStore();
