@@ -13732,5 +13732,5 @@ class DropInViewer extends THREE.Group {
 
 }
 
-export { AbortablePromise, DropInViewer, KSplatLoader, Utils as LoaderUtils, LogLevel, OrbitControls, PlayCanvasCompressedPlyParser, PlyLoader, PlyParser, RenderMode, SceneFormat, SceneRevealMode, SplatBuffer, SplatBufferGenerator, SplatLoader, SplatParser, SplatPartitioner, SplatRenderMode, Viewer, WebXRMode };
+export { AbortablePromise, DropInViewer, KSplatLoader, Utils as LoaderUtils, LogLevel, OrbitControls, PlayCanvasCompressedPlyParser, PlyLoader, PlyParser, RenderMode, SceneFormat, SceneRevealMode, SplatBuffer, SplatBufferGenerator, SplatLoader, SplatParser, SplatPartitioner, SplatRenderMode, UncompressedSplatArray, Viewer, WebXRMode };
 //# sourceMappingURL=gaussian-splats-3d.module.js.map

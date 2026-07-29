@@ -731,12 +731,14 @@
     import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
     import {
       loadSomaSkin,
+      loadMotionSplatShell,
       parseKimodoNpz,
       buildMotionData,
       skinFrame,
+      shellFrame,
       motionFrameForCameraFrame,
       motionDefaultScale,
-    } from './vendor/motion_actor.js?v=20260729c';
+    } from './vendor/motion_actor.js?v=20260729d';
 
 
     function _n(v, fb) { return v !== undefined && v !== null ? v : fb; }
@@ -1657,6 +1659,9 @@
     let rigOverlayScene = null;
     /** @type {import('./vendor/motion_actor.js').SomaSkin|null} */
     let somaSkin = null;
+    /** @type {import('./vendor/motion_actor.js').MotionSplatShell|null} */
+    let motionSplatShell = null;
+    let motionSplatShellFailed = false;
     let actorRootGroup = null;
     let motionOverlayScene = null;
     let motionOverlayRenderer = null;
@@ -3101,6 +3106,85 @@
       return somaSkin;
     }
 
+    async function ensureMotionSplatShell() {
+      if (motionSplatShell) return motionSplatShell;
+      if (motionSplatShellFailed) return null;
+      try {
+        motionSplatShell = await loadMotionSplatShell('./vendor/motion_splat_shell.bin');
+        return motionSplatShell;
+      } catch (err) {
+        motionSplatShellFailed = true;
+        console.warn('motion splat shell 不可用，回退 mesh 叠加层', err);
+        return null;
+      }
+    }
+
+    function getSceneGlobalSplatStart(sceneIdx) {
+      if (!viewer || !viewer.splatMesh) return 0;
+      let offset = 0;
+      for (let i = 0; i < sceneIdx; i++) {
+        offset += viewer.splatMesh.getScene(i).splatBuffer.getSplatCount();
+      }
+      return offset;
+    }
+
+    function setSplatBufferLocalCenter(splatBuffer, localIdx, x, y, z) {
+      const section = splatBuffer.sections[0];
+      const off = section.dataBase + section.bytesPerSplat * localIdx;
+      const dv = new DataView(splatBuffer.bufferData, off);
+      dv.setFloat32(0, x, true);
+      dv.setFloat32(4, y, true);
+      dv.setFloat32(8, z, true);
+    }
+
+    function refreshMotionSplatCenters(p) {
+      if (!viewer || !viewer.splatMesh || p.sceneIdx == null || !p._poseVerts) return;
+      const sm = viewer.splatMesh;
+      const splatBuffer = sm.getScene(p.sceneIdx).splatBuffer;
+      const count = splatBuffer.getSplatCount();
+      const src = p._poseVerts;
+      for (let i = 0; i < count; i++) {
+        setSplatBufferLocalCenter(splatBuffer, i, src[i * 3], src[i * 3 + 1], src[i * 3 + 2]);
+      }
+      const globalStart = getSceneGlobalSplatStart(p.sceneIdx);
+      const globalEnd = globalStart + count - 1;
+      sm.updateBaseDataFromSplatBuffers(globalStart, globalEnd);
+      sm.updateDataTexturesFromBaseData(globalStart, globalEnd);
+      if (sm.enableDistancesComputationOnGPU) {
+        const { centers, sceneIndexes } = sm.getDataForDistancesComputation(globalStart, globalEnd);
+        sm.refreshGPUBuffersForDistancesComputation(centers, sceneIndexes, false);
+      }
+      viewer.forceRenderNextFrame();
+    }
+
+    function buildMotionSplatBuffer(shell, bindPoseVerts, anchor) {
+      const OFF = GaussianSplats3D.UncompressedSplatArray.OFFSET;
+      const splatArray = new GaussianSplats3D.UncompressedSplatArray(0);
+      const ax = anchor[0];
+      const ay = anchor[1];
+      const az = anchor[2];
+      const [cr, cg, cb] = shell.color;
+      for (let i = 0; i < shell.numSplats; i++) {
+        const splat = GaussianSplats3D.UncompressedSplatArray.createSplat(0);
+        splat[OFF.X] = bindPoseVerts[i * 3] - ax;
+        splat[OFF.Y] = bindPoseVerts[i * 3 + 1] - ay;
+        splat[OFF.Z] = bindPoseVerts[i * 3 + 2] - az;
+        splat[OFF.SCALE0] = shell.splatScale;
+        splat[OFF.SCALE1] = shell.splatScale;
+        splat[OFF.SCALE2] = shell.splatScale;
+        splat[OFF.ROTATION0] = 1;
+        splat[OFF.ROTATION1] = 0;
+        splat[OFF.ROTATION2] = 0;
+        splat[OFF.ROTATION3] = 0;
+        splat[OFF.FDC0] = cr;
+        splat[OFF.FDC1] = cg;
+        splat[OFF.FDC2] = cb;
+        splat[OFF.OPACITY] = shell.opacity;
+        splatArray.addSplat(splat);
+      }
+      return GaussianSplats3D.SplatBuffer.generateFromUncompressedSplatArrays([splatArray], 1, 0);
+    }
+
     function renderMotionOverlayPass() {
       if (!motionOverlayRenderer || !motionOverlayScene || !viewer || !viewer.camera) return;
       if (!hasOverlayActors()) {
@@ -3172,7 +3256,7 @@
       p.motionHeight = motion.height;
     }
 
-    function createActorObject(p, skin, motion) {
+    function createActorMeshObject(p, skin, motion) {
       initActorRootGroup();
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(skin.numVerts * 3), 3));
@@ -3195,6 +3279,7 @@
       p.mesh = mesh;
       p.root = root;
       p._poseVerts = null;
+      p.motionRender = 'mesh';
       p.motion = motion;
       p.motionFps = motion.fps;
       p.motionFrames = motion.numFrames;
@@ -3203,6 +3288,37 @@
       syncActorTransform(p);
       kickOverlayRender();
       return root;
+    }
+
+    async function createActorSplatObject(p, skin, motion, shell) {
+      if (!viewer || !viewer.splatMesh) throw new Error('splat viewer 未就绪');
+      const anchor = p.center || [motion.anchor.x, motion.anchor.y, motion.anchor.z];
+      const bindPoseVerts = shellFrame(shell, skin, motion, 0);
+      const splatBuffer = buildMotionSplatBuffer(shell, bindPoseVerts, anchor);
+      const sceneIdx = _n(viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
+      await addSplatBuffersKeepVisibility([splatBuffer], [placementOpts(p)]);
+      p.sceneIdx = sceneIdx;
+      p.motionRender = 'splat';
+      p.shell = shell;
+      p.motion = motion;
+      p.motionFps = motion.fps;
+      p.motionFrames = motion.numFrames;
+      p.root = null;
+      p.mesh = null;
+      p._poseVerts = new Float32Array(shell.numSplats * 3);
+      updateActorFrame(p, 0);
+      syncPlacementTransform(p);
+      applyPlacementVisibility(p);
+      viewer.forceRenderNextFrame();
+    }
+
+    async function createActorObject(p, skin, motion) {
+      const shell = await ensureMotionSplatShell();
+      if (shell && viewer && viewer.splatMesh) {
+        await createActorSplatObject(p, skin, motion, shell);
+        return null;
+      }
+      return createActorMeshObject(p, skin, motion);
     }
 
     /** LBS 顶点已是世界朝向的 pose；整体移动/旋转/缩放在 CPU 里做，避免 Three.js 父节点叠乘扭曲。 */
@@ -3231,9 +3347,24 @@
     }
 
     function updateActorFrame(p, frameIdx) {
-      if (!p.motion || !p.mesh || !somaSkin) return;
-      const verts = skinFrame(somaSkin, p.motion, frameIdx);
+      if (!p.motion || !somaSkin) return;
       const anchor = p.center || [0, 0, 0];
+      if (p.motionRender === 'splat' && p.shell && p.sceneIdx != null) {
+        const verts = shellFrame(p.shell, somaSkin, p.motion, frameIdx);
+        if (!p._poseVerts || p._poseVerts.length !== verts.length) {
+          p._poseVerts = new Float32Array(verts.length);
+        }
+        for (let i = 0; i < verts.length; i += 3) {
+          p._poseVerts[i] = verts[i] - anchor[0];
+          p._poseVerts[i + 1] = verts[i + 1] - anchor[1];
+          p._poseVerts[i + 2] = verts[i + 2] - anchor[2];
+        }
+        p.currentFrame = frameIdx;
+        refreshMotionSplatCenters(p);
+        return;
+      }
+      if (!p.mesh) return;
+      const verts = skinFrame(somaSkin, p.motion, frameIdx);
       if (!p._poseVerts || p._poseVerts.length !== verts.length) {
         p._poseVerts = new Float32Array(verts.length);
       }
@@ -3256,7 +3387,21 @@
       kickOverlayRender();
     }
 
-    function removeActorFromScene(p) {
+    async function removeActorFromScene(p) {
+      if (p.motionRender === 'splat' && p.sceneIdx != null && viewer) {
+        try {
+          const removedIdx = p.sceneIdx;
+          await viewer.removeSplatScene(removedIdx, false);
+          for (const other of placements) {
+            if (other.sceneIdx != null && other.sceneIdx > removedIdx) other.sceneIdx--;
+          }
+          viewer.forceRenderNextFrame();
+        } catch (err) {
+          console.warn('remove motion splat scene failed', err);
+        } finally {
+          clearViewerLoadingSpinner();
+        }
+      }
       if (p.root && actorRootGroup) {
         actorRootGroup.remove(p.root);
         p.mesh && p.mesh.geometry && p.mesh.geometry.dispose();
@@ -3265,6 +3410,9 @@
       p.root = null;
       p.mesh = null;
       p._poseVerts = null;
+      p.sceneIdx = null;
+      p.motionRender = null;
+      p.shell = null;
     }
 
     function updateMotionControlsUI() {
@@ -3278,7 +3426,7 @@
       el('motionFrame').max = String(maxF);
       el('motionFrame').value = String(_n(p.currentFrame, 0));
       el('motionFrameVal').textContent = `${_n(p.currentFrame, 0)} / ${maxF}`;
-      el('motionMeta').textContent = `动作 ${p.motionFrames} 帧 @ ${p.motionFps || 30} FPS · 高度≈${(p.motionHeight || 1.75).toFixed(2)}m · 可用 Q/W 移动旋转 · 点播放`;
+      el('motionMeta').textContent = `动作 ${p.motionFrames} 帧 @ ${p.motionFps || 30} FPS · 高度≈${(p.motionHeight || 1.75).toFixed(2)}m · ${p.motionRender === 'splat' ? 'splat 遮挡' : 'mesh 叠加'} · 可用 Q/W 移动旋转 · 点播放`;
     }
 
     function startMotionPreview() {
@@ -3335,7 +3483,7 @@
       const skin = await ensureSomaSkin();
       if (missingIdx >= 0) {
         const p = placements[missingIdx];
-        removeActorFromScene(p);
+        await removeActorFromScene(p);
         p.missing = false;
         delete p.missingReason;
         p.type = 'motion';
@@ -3345,7 +3493,7 @@
         p.center = [motion.anchor.x, motion.anchor.y, motion.anchor.z];
         if (sourcePath) p.sourcePath = sourcePath;
         applyMotionDefaultScale(p, motion);
-        createActorObject(p, skin, motion);
+        await createActorObject(p, skin, motion);
         selectPlacement(missingIdx);
         hideLoadProgress();
         status(`已恢复人模 ${assetName}`);
@@ -3368,7 +3516,7 @@
         currentFrame: 0,
       };
       applyMotionDefaultScale(p, motion);
-      createActorObject(p, skin, motion);
+      await createActorObject(p, skin, motion);
       placements.push(p);
       selectPlacement(placements.length - 1);
       hideLoadProgress();
@@ -5176,7 +5324,23 @@
 
     function applyPlacementVisibility(p) {
       if (p.type === 'motion') {
-        syncActorTransform(p);
+        if (p.motionRender === 'splat' && p.sceneIdx != null && viewer && viewer.splatMesh && !p.missing) {
+          const sm = viewer.splatMesh;
+          const scene = sm.getScene(p.sceneIdx);
+          const show = p.visible !== false;
+          scene.visible = show;
+          if (Array.isArray(sm.sceneOptions) && sm.sceneOptions[p.sceneIdx]) {
+            sm.sceneOptions[p.sceneIdx].visible = show;
+          }
+          if (sm.enableOptionalEffects && sm.material && sm.material.uniforms && sm.material.uniforms.sceneVisibility) {
+            sm.material.uniforms.sceneVisibility.value[p.sceneIdx] = show ? 1 : 0;
+            sm.material.uniformsNeedUpdate = true;
+          }
+          sm.updateTransforms();
+          viewer.forceRenderNextFrame();
+        } else {
+          syncActorTransform(p);
+        }
         return;
       }
       if (!viewer || !viewer.splatMesh || p.sceneIdx == null || p.missing) return;
@@ -5225,7 +5389,16 @@
 
     function syncPlacementTransform(p) {
       if (p.type === 'motion') {
-        syncActorTransform(p);
+        if (p.motionRender === 'splat' && p.sceneIdx != null && viewer && viewer.splatMesh) {
+          const scene = viewer.splatMesh.getScene(p.sceneIdx);
+          scene.position.set(p.x, p.y, p.z);
+          scene.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+          scene.scale.set(p.scale, p.scale, p.scale);
+          viewer.splatMesh.updateTransforms();
+          viewer.forceRenderNextFrame();
+        } else {
+          syncActorTransform(p);
+        }
         return;
       }
       if (!viewer || !viewer.splatMesh || p.sceneIdx == null) return;
@@ -5672,7 +5845,7 @@
       const p = placements[idx];
       if (!p) return;
       if (p.type === 'motion') {
-        removeActorFromScene(p);
+        await removeActorFromScene(p);
       } else if (p.sceneIdx != null && viewer) {
         try {
           await viewer.removeSplatScene(p.sceneIdx, false);
@@ -5837,7 +6010,7 @@
     async function clearAllPlacementsFromViewer() {
       stopMotionPreview();
       for (const p of placements) {
-        if (p.type === 'motion') removeActorFromScene(p);
+        if (p.type === 'motion') await removeActorFromScene(p);
       }
       placements.length = 0;
       selected = -1;
@@ -6047,7 +6220,7 @@
             motionFrames: motion.numFrames,
             currentFrame: 0,
           };
-          createActorObject(p, skin, motion);
+          await createActorObject(p, skin, motion);
           placements.push(p);
           kickOverlayRender();
           continue;
@@ -6557,7 +6730,7 @@
       get placementGizmoMode() { return placementGizmoMode; },
       pivot, transformControls, actorRootGroup, rigOverlayScene, viewer, THREE,
       togglePlacementGizmo, attachGizmo, applyPlacementGizmoDrag,
-      syncPlacementTransform, refreshActorMesh, kickOverlayRender,
+      syncPlacementTransform, refreshActorMesh, refreshMotionSplatCenters, kickOverlayRender,
       meshCentroidForPlacement, el,
     };
   </script>
