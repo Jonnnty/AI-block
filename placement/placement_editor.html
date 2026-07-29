@@ -240,6 +240,9 @@
     .scene-row.missing:hover { background: rgba(110, 40, 40, 0.55); }
     .scene-row.missing.active { background: rgba(100, 35, 35, 0.72); border-color: #c05050; }
     .scene-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .scene-dup-badge {
+      font-size: 10px; color: #8ab4ff; margin-left: 6px; flex-shrink: 0;
+    }
     .icon-btn {
       width: 24px; height: 24px; padding: 0; border-radius: 4px; background: transparent;
       border: 1px solid #444; color: #bbb; font-size: 12px; flex-shrink: 0;
@@ -573,6 +576,8 @@
       <section>
         <h2>已放置</h2>
         <div id="sceneList" class="scene-list"></div>
+        <button type="button" id="organizeDupBtn" class="secondary" style="margin-top:8px;width:100%">整理同名 / 修复鬼影</button>
+        <p class="hint">同名模型自动错开；修复播放 NPZ 后在原位置留下的巨大鬼影</p>
       </section>
       <section>
         <h2>默认参数</h2>
@@ -988,7 +993,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260729h';
+    const MODEL_LOAD_BUILD = '20260729j';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -1525,6 +1530,44 @@
           cur.z = pos.z;
         }
       }
+    }
+
+    function canonicalSiblingCount(p, list = placements) {
+      if (!p || p.missing) return 0;
+      const canon = canonicalPlacementAssetName(p.name).toLowerCase();
+      return list.filter((x) => !x.missing
+        && canonicalPlacementAssetName(x.name).toLowerCase() === canon).length;
+    }
+
+    /** 列表 N 条 → GPU N 个 scene；清 orphan + 重建 compact sceneIndex（修巨大鬼影树/人）。 */
+    async function removeUnownedSplatScenes() {
+      if (!viewer || !viewer.splatMesh) return 0;
+      let removed = 0;
+      for (let i = viewer.splatMesh.scenes.length - 1; i >= 0; i--) {
+        if (placementOwnsSceneIdx(i)) continue;
+        try {
+          await removeSplatSceneAt(i);
+          removed++;
+        } catch (err) {
+          console.warn('remove unowned splat scene failed', i, err);
+        }
+      }
+      return removed;
+    }
+
+    async function organizeSceneDuplicates() {
+      deoverlapCanonicalPlacements();
+      for (const p of placements) {
+        if (!p.missing) syncPlacementTransform(p);
+      }
+      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+      const removed = await removeUnownedSplatScenes();
+      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+      viewer && viewer.forceRenderNextFrame();
+      renderList();
+      status(removed > 0
+        ? `已整理同名模型 · 清除 ${removed} 个多余 GPU 场景 · 已修复渲染索引`
+        : '已整理同名模型 · 已修复渲染索引');
     }
 
     function placementAnchorFromItem(item, bounds, loadedPlacements = placements) {
@@ -3183,7 +3226,29 @@
       return offset;
     }
 
-    /** sceneIndexes 纹理必须与 compact 索引一致；库内 globalSplatIndexToSceneIndexMap 按 max 容量索引，motion 常被标成 PLY scene。 */
+    /** 库用 max-padded 索引填 sceneIndexes，draw 用 compact 索引 → 同一 PLY 会被大 scale 场景再画一遍（巨大鬼影树/人）。 */
+    function rebuildCompactSceneIndexTexture(sm) {
+      if (!sm || !sm.splatDataTextures) return;
+      const sceneIndexesDesc = sm.splatDataTextures.sceneIndexes;
+      if (!sceneIndexesDesc || !sceneIndexesDesc.data) return;
+      const idxData = sceneIndexesDesc.data;
+      const total = sm.getSplatCount();
+      if (total <= 0) return;
+      let offset = 0;
+      for (let s = 0; s < sm.scenes.length; s++) {
+        const count = sm.getScene(s).splatBuffer.getSplatCount();
+        for (let i = 0; i < count; i++) idxData[offset + i] = s;
+        offset += count;
+      }
+      const tex = sceneIndexesDesc.texture;
+      const texProps = sm.renderer && sm.renderer.properties.get(tex);
+      if (texProps && texProps.__webglTexture && typeof sm.updateDataTexture === 'function') {
+        sm.updateDataTexture(idxData, tex, sceneIndexesDesc.size, texProps, 1, 1, 1, 0, total - 1);
+      } else if (tex) {
+        tex.needsUpdate = true;
+      }
+    }
+
     function patchSceneIndexTextureRange(sm, globalStart, globalEnd, sceneIdx) {
       const sceneIndexesDesc = sm.splatDataTextures && sm.splatDataTextures.sceneIndexes;
       if (!sceneIndexesDesc || !sceneIndexesDesc.data) return;
@@ -3241,7 +3306,7 @@
         p.sceneIdx,
       );
       sm.updateDataTexturesFromBaseData(globalStart, globalEnd);
-      patchSceneIndexTextureRange(sm, globalStart, globalEnd, p.sceneIdx);
+      rebuildCompactSceneIndexTexture(sm);
       viewer.forceRenderNextFrame();
       } catch (err) {
         console.warn('refreshMotionSplatCenters failed', err);
@@ -3639,8 +3704,9 @@
         updateActorFrame(p, _n(p.currentFrame, 0));
         syncPlacementTransform(p);
         applyPlacementVisibility(p);
-        viewer && viewer.forceRenderNextFrame();
       }
+      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+      viewer && viewer.forceRenderNextFrame();
     }
 
     async function createActorObject(p, skin, motion) {
@@ -5720,6 +5786,7 @@
     async function addSplatBuffersKeepVisibility(splatBuffers, sceneOptions) {
       syncSceneOptionsFromPlacements();
       await viewer.addSplatBuffers(splatBuffers, sceneOptions, true, false, false, false, true);
+      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
       applyAllPlacementsVisibility();
     }
 
@@ -6267,9 +6334,11 @@
           + (i === selected ? ' active' : '')
           + (p.missing ? ' missing' : '');
         if (p.missing) row.title = p.missingReason || missingPlacementHint(p);
+        const dupN = canonicalSiblingCount(p);
+        const dupBadge = dupN > 1 ? `<span class="scene-dup-badge">同名×${dupN}</span>` : '';
         row.innerHTML = p.missing
-          ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : '缺少 PLY')}</span></span>`
-          : `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : ''}${p.name}</span>`;
+          ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : '缺少 PLY')}</span></span>${dupBadge}`
+          : `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : ''}${p.name}</span>${dupBadge}`;
         const vis = document.createElement('button');
         vis.type = 'button';
         vis.className = 'icon-btn visibility-btn';
@@ -6610,6 +6679,9 @@
       for (const p of placements) {
         if (!p.missing) syncPlacementTransform(p);
       }
+      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+      await removeUnownedSplatScenes();
+      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
       try {
         const shell = await ensureMotionSplatShell();
         if (shell) await reconcileMotionSplatScenes(shell);
@@ -6679,6 +6751,7 @@
     el('motionPlayBtn').onclick = () => startMotionPreview();
 
     el('importBtn').onclick = () => el('pickFile').click();
+    el('organizeDupBtn').onclick = () => organizeSceneDuplicates().catch(showError);
     el('pickFile').onchange = async () => {
       const files = [...(el('pickFile').files || [])];
       el('pickFile').value = '';
