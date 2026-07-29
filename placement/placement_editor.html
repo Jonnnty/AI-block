@@ -253,7 +253,99 @@
       display: inline-flex; align-items: center; justify-content: center; line-height: 0;
     }
     .icon-btn.visibility-btn svg { display: block; }
-    #pickFile { display: none; }
+    #pickPlyFile, #pickNpzFile { display: none; }
+    #timelineDock {
+      position: absolute; left: 12px; bottom: 12px; z-index: 8;
+      width: min(74vw, 980px); max-height: 44vh;
+      background: rgba(16, 16, 20, 0.95); border: 1px solid #484848;
+      border-radius: 10px; padding: 10px 12px 12px;
+      box-shadow: 0 10px 36px rgba(0, 0, 0, 0.48);
+      display: flex; flex-direction: column; gap: 8px; pointer-events: auto;
+    }
+    #timelineDock[hidden] { display: none !important; }
+    .tl-header {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
+    .tl-title { font-size: 12px; font-weight: 600; color: #e8d878; flex: 1; min-width: 100px; }
+    .tl-header label { flex-direction: row; align-items: center; gap: 6px; font-size: 11px; color: #aaa; }
+    .tl-header label input {
+      width: 56px; background: #252525; border: 1px solid #444; color: #eee;
+      padding: 3px 6px; border-radius: 4px; font-size: 11px;
+    }
+    .tl-header-btns { display: flex; gap: 6px; align-items: center; }
+    .tl-header-btns button { width: auto; padding: 5px 10px; font-size: 11px; }
+    .tl-close-btn {
+      width: 28px !important; height: 28px; padding: 0 !important; line-height: 1;
+      background: #333; border: 1px solid #555; border-radius: 6px;
+    }
+    .tl-rulers { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 32vh; }
+    .tl-row { display: flex; align-items: flex-start; gap: 8px; }
+    .tl-row-label {
+      width: 76px; flex-shrink: 0; font-size: 10px; color: #888; line-height: 22px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .tl-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .tl-track {
+      position: relative; height: 22px; border-radius: 4px;
+      background: #2a2618; border: 1px solid #4a4428;
+    }
+    .tl-row-camera .tl-track {
+      height: 26px; background: #1a2438; border-color: #3a5080; cursor: pointer;
+    }
+    .tl-ticks {
+      position: absolute; inset: 0; pointer-events: none; border-radius: 4px;
+      background: repeating-linear-gradient(
+        90deg,
+        transparent 0,
+        transparent calc(10% - 1px),
+        rgba(255, 255, 255, 0.14) calc(10% - 1px),
+        rgba(255, 255, 255, 0.14) 10%
+      );
+    }
+    .tl-time-labels {
+      display: flex; justify-content: space-between; font-size: 9px; color: #666; padding: 0 1px;
+    }
+    .tl-playhead {
+      position: absolute; top: -4px; bottom: -4px; width: 2px; background: #ffd54f;
+      transform: translateX(-1px); pointer-events: none; z-index: 4;
+      box-shadow: 0 0 6px rgba(255, 213, 79, 0.65);
+    }
+    .tl-segment {
+      position: absolute; top: 2px; bottom: 2px; border-radius: 3px;
+      background: rgba(0, 177, 64, 0.32); border: 1px solid rgba(0, 177, 64, 0.78);
+      min-width: 6px; z-index: 1;
+    }
+    .tl-segment-label {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 9px; color: #c8ffd8; pointer-events: none; white-space: nowrap; overflow: hidden;
+    }
+    .tl-handle {
+      position: absolute; top: -3px; bottom: -3px; width: 8px; margin-left: -4px;
+      background: #00b140; border: 1px solid #eaffef; border-radius: 2px;
+      cursor: ew-resize; z-index: 3; touch-action: none;
+    }
+    .tl-row-meta {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 10px; color: #888;
+    }
+    .tl-row-meta label { flex-direction: row; align-items: center; gap: 4px; font-size: 10px; }
+    .tl-row-meta input {
+      width: 44px; background: #252525; border: 1px solid #444; color: #eee;
+      padding: 2px 4px; border-radius: 3px; font-size: 10px;
+    }
+    .tl-row-del {
+      width: auto !important; padding: 0 6px !important; font-size: 12px !important;
+      background: transparent !important; color: #888 !important; border: none !important;
+    }
+    .tl-row-del:hover { color: #f88 !important; }
+    .tl-add-panel {
+      display: flex; flex-direction: column; gap: 4px; padding: 8px;
+      background: #222; border: 1px solid #444; border-radius: 6px; max-height: 140px; overflow-y: auto;
+    }
+    .tl-add-panel label {
+      flex-direction: row; align-items: center; gap: 6px; font-size: 11px; cursor: pointer;
+    }
+    .tl-add-panel[hidden] { display: none !important; }
+    .tl-clock-btn.active { background: #2d6cdf !important; color: #fff !important; }
     input[type=number] {
       background: #252525; border: 1px solid #444; color: #eee;
       padding: 5px 8px; border-radius: 4px; font-size: 12px; width: 100%;
@@ -487,6 +579,18 @@
     <div id="viewMain"></div>
     <div id="motionOverlay"></div>
     <div id="viewHelper"></div>
+    <div id="timelineDock" hidden>
+      <div class="tl-header">
+        <span class="tl-title" id="tlTitle">时间校准</span>
+        <label>轨迹时长 <input type="number" id="tlDuration" min="1" max="600" step="0.5" value="10" /> s</label>
+        <div class="tl-header-btns">
+          <button type="button" id="tlAddTrackBtn" class="secondary">+ 添加 NPZ</button>
+          <button type="button" id="tlCloseBtn" class="tl-close-btn secondary" title="关闭时间轴">×</button>
+        </div>
+      </div>
+      <div id="tlAddPanel" class="tl-add-panel" hidden></div>
+      <div id="tlRulers" class="tl-rulers"></div>
+    </div>
     <div id="rigPreviewFloat" hidden>
       <header>
         <span id="rigPreviewTitle">高斯渲染预览</span>
@@ -569,9 +673,13 @@
     <div id="modelsPanel">
       <section>
         <h2>导入模型</h2>
-        <input type="file" id="pickFile" accept=".ply,.npz" multiple hidden />
-        <button type="button" id="importBtn" class="secondary">选择 PLY / NPZ 文件</button>
-        <p class="hint">NPZ 为 Kimodo 动作，导入后显示素色 SOMA 人模</p>
+        <input type="file" id="pickPlyFile" accept=".ply" multiple hidden />
+        <input type="file" id="pickNpzFile" accept=".npz" multiple hidden />
+        <div class="row">
+          <button type="button" id="importPlyBtn" class="secondary">选择 PLY</button>
+          <button type="button" id="importNpzBtn" class="secondary">选择 NPZ</button>
+        </div>
+        <p class="hint">PLY 为场景模型 · NPZ 为 Kimodo 动作人模</p>
       </section>
       <section>
         <h2>已放置</h2>
@@ -689,7 +797,7 @@
             <label>渲染 FPS <span class="val" id="pathFpsVal">12</span>
               <input type="range" id="pathFps" min="6" max="30" step="1" value="12" />
             </label>
-            <p class="hint" id="rigCameraHint">相机与轨迹使用世界坐标；导入 NPZ 人模后，路径渲染会同步 4D 动作</p>
+            <p class="hint" id="rigCameraHint">相机轨迹可点 ⏱ 打开左下时间轴 · 叠加多条 NPZ 对齐路径刻度 · 用于 4D 渲染</p>
           </div>
         </section>
         <section class="rig-settings-panel">
@@ -991,7 +1099,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260729k';
+    const MODEL_LOAD_BUILD = '20260730a';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -1766,10 +1874,15 @@
     let renderCameraPose = null;
     /** @type {Array<{points:Array<{x:number,y:number,z:number,t:number}>}>} */
     let cameraPathSegments = [];
-    /** @type {Array<{id:string,name:string,markers:typeof cameraMarkers,segments:typeof cameraPathSegments,framesPerSeg:number,fps:number}>} */
+    /** @type {Array<{id:string,name:string,markers:typeof cameraMarkers,segments:typeof cameraPathSegments,framesPerSeg:number,fps:number,timelineDurationSec:number,motionTracks:Array}>} */
     let cameraPaths = [];
     let activePathId = null;
     let nextPathId = 1;
+    let nextMotionTrackId = 1;
+    /** @type {string|null} */
+    let timelineOpenPathId = null;
+    /** @type {{kind:string,trackId:string,startX:number,trackEl:HTMLElement}|null} */
+    let tlDragState = null;
     let markerDragFromIdx = -1;
     let selectedMarkerIdx = -1;
     let selectedCpSegIdx = -1;
@@ -2060,10 +2173,328 @@
         segments: [],
         framesPerSeg: 16,
         fps: 12,
+        timelineDurationSec: 10,
+        motionTracks: [],
       };
       return path;
     }
 
+    function getMotionPlacementByName(assetName) {
+      return placements.find((p) => p.type === 'motion' && !p.missing && p.name === assetName) || null;
+    }
+
+    function normalizeMotionTrack(raw) {
+      const p = getMotionPlacementByName(raw.assetName);
+      const fps = p && p.motion ? (p.motion.fps || 30) : 30;
+      const npzDur = p && p.motion ? Math.max(0.001, (p.motion.numFrames - 1) / fps) : 10;
+      const id = raw.id || `mt-${nextMotionTrackId++}`;
+      const m = /^mt-(\d+)$/.exec(id);
+      if (m) nextMotionTrackId = Math.max(nextMotionTrackId, parseInt(m[1], 10) + 1);
+      return {
+        id,
+        assetName: raw.assetName || '',
+        pathStartT: Math.max(0, Math.min(1, _n(raw.pathStartT, 0))),
+        pathEndT: Math.max(0, Math.min(1, _n(raw.pathEndT, 1))),
+        npzStartSec: Math.max(0, _n(raw.npzStartSec, 0)),
+        npzEndSec: Math.max(0, _n(raw.npzEndSec, npzDur)),
+      };
+    }
+
+    function ensurePathMotionTracks(path) {
+      if (!path) return;
+      if (!Array.isArray(path.motionTracks)) path.motionTracks = [];
+      path.timelineDurationSec = Math.max(1, _n(path.timelineDurationSec, 10));
+      path.motionTracks = path.motionTracks
+        .map((t) => normalizeMotionTrack(t))
+        .filter((t) => !!getMotionPlacementByName(t.assetName));
+      for (const t of path.motionTracks) {
+        if (t.pathEndT <= t.pathStartT) t.pathEndT = Math.min(1, t.pathStartT + 0.05);
+        if (t.npzEndSec < t.npzStartSec) t.npzEndSec = t.npzStartSec + 0.1;
+      }
+    }
+
+    function motionFrameFromTrack(pathT, track, motion) {
+      if (!track || !motion || motion.numFrames <= 1) return 0;
+      const fps = motion.fps || 30;
+      const p0 = Math.max(0, Math.min(1, track.pathStartT));
+      const p1 = Math.max(p0 + 0.001, Math.min(1, track.pathEndT));
+      const t = Math.max(0, Math.min(1, pathT));
+      if (t <= p0) {
+        return Math.min(motion.numFrames - 1, Math.max(0, Math.round(track.npzStartSec * fps)));
+      }
+      if (t >= p1) {
+        return Math.min(motion.numFrames - 1, Math.max(0, Math.round(track.npzEndSec * fps)));
+      }
+      const u = (t - p0) / (p1 - p0);
+      const sec = track.npzStartSec + u * (track.npzEndSec - track.npzStartSec);
+      return Math.min(motion.numFrames - 1, Math.max(0, Math.round(sec * fps)));
+    }
+
+    function getMotionFrameForPlacementAtPathT(p, pathT) {
+      const path = getActiveCameraPath();
+      if (path) ensurePathMotionTracks(path);
+      const track = path && (path.motionTracks || []).find((tr) => tr.assetName === p.name);
+      if (track && p.motion) return motionFrameFromTrack(pathT, track, p.motion);
+      const total = getActivePathTotalFrames();
+      const camFrame = Math.round(pathT * Math.max(0, total - 1));
+      return motionFrameForCameraFrame(camFrame, total, p.motion);
+    }
+
+    function getTimelinePath() {
+      return timelineOpenPathId
+        ? cameraPaths.find((p) => p.id === timelineOpenPathId) || null
+        : null;
+    }
+
+    function toggleTimelineForPath(pathId) {
+      if (timelineOpenPathId === pathId) {
+        closeTimelineDock();
+        return;
+      }
+      timelineOpenPathId = pathId;
+      if (activePathId !== pathId) selectCameraPath(pathId);
+      el('timelineDock').hidden = false;
+      el('tlAddPanel').hidden = true;
+      renderTimelineDock();
+      renderPathGroupList();
+    }
+
+    function closeTimelineDock() {
+      timelineOpenPathId = null;
+      el('timelineDock').hidden = true;
+      el('tlAddPanel').hidden = true;
+      renderPathGroupList();
+    }
+
+    function updateTimelinePlayhead() {
+      const playheads = document.querySelectorAll('#tlRulers .tl-playhead');
+      playheads.forEach((ph) => { ph.style.left = `${pathPinT * 100}%`; });
+    }
+
+    function renderTimelineDock() {
+      const path = getTimelinePath();
+      const dock = el('timelineDock');
+      const rulers = el('tlRulers');
+      if (!path || !dock || !rulers) return;
+      ensurePathMotionTracks(path);
+      el('tlTitle').textContent = `时间校准 · ${path.name}`;
+      el('tlDuration').value = String(path.timelineDurationSec);
+      rulers.innerHTML = '';
+
+      const camRow = document.createElement('div');
+      camRow.className = 'tl-row tl-row-camera';
+      camRow.innerHTML = '<span class="tl-row-label">相机轨迹</span>';
+      const camBody = document.createElement('div');
+      camBody.className = 'tl-row-body';
+      const camTrack = document.createElement('div');
+      camTrack.className = 'tl-track';
+      camTrack.innerHTML = '<div class="tl-ticks"></div><div class="tl-playhead"></div>';
+      camTrack.onclick = (e) => {
+        const rect = camTrack.getBoundingClientRect();
+        const t = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        pathSlidePlaying = false;
+        stopPathSlidePreview();
+        updatePathTransportUI();
+        applyPathPinAtGlobalT(t);
+        syncAllActorsForPathT(t);
+        kickOverlayRender();
+      };
+      const camLabels = document.createElement('div');
+      camLabels.className = 'tl-time-labels';
+      camLabels.innerHTML = `<span>0s</span><span>${path.timelineDurationSec.toFixed(1)}s · 路径 0→100%</span>`;
+      camBody.appendChild(camTrack);
+      camBody.appendChild(camLabels);
+      camRow.appendChild(camBody);
+      rulers.appendChild(camRow);
+
+      for (const track of path.motionTracks) {
+        const mp = getMotionPlacementByName(track.assetName);
+        if (!mp || !mp.motion) continue;
+        const fps = mp.motion.fps || 30;
+        const npzDur = (mp.motion.numFrames - 1) / fps;
+        const row = document.createElement('div');
+        row.className = 'tl-row tl-row-motion';
+        row.dataset.trackId = track.id;
+
+        const label = document.createElement('span');
+        label.className = 'tl-row-label';
+        label.title = track.assetName;
+        label.textContent = track.assetName.replace(/\.npz$/i, '');
+
+        const body = document.createElement('div');
+        body.className = 'tl-row-body';
+
+        const trackEl = document.createElement('div');
+        trackEl.className = 'tl-track';
+        trackEl.innerHTML = '<div class="tl-ticks"></div>';
+        const seg = document.createElement('div');
+        seg.className = 'tl-segment';
+        seg.style.left = `${track.pathStartT * 100}%`;
+        seg.style.width = `${Math.max(0.5, (track.pathEndT - track.pathStartT) * 100)}%`;
+        const segLabel = document.createElement('span');
+        segLabel.className = 'tl-segment-label';
+        segLabel.textContent = `${track.npzStartSec.toFixed(1)}s → ${track.npzEndSec.toFixed(1)}s`;
+        seg.appendChild(segLabel);
+        const hStart = document.createElement('div');
+        hStart.className = 'tl-handle tl-handle-start';
+        hStart.style.left = `${track.pathStartT * 100}%`;
+        hStart.title = '拖动：NPZ 起点对齐路径位置';
+        const hEnd = document.createElement('div');
+        hEnd.className = 'tl-handle tl-handle-end';
+        hEnd.style.left = `${track.pathEndT * 100}%`;
+        hEnd.title = '拖动：NPZ 终点对齐路径位置';
+        trackEl.appendChild(seg);
+        trackEl.appendChild(hStart);
+        trackEl.appendChild(hEnd);
+        bindTimelineHandleDrag(hStart, track.id, 'pathStartT', trackEl);
+        bindTimelineHandleDrag(hEnd, track.id, 'pathEndT', trackEl);
+
+        const meta = document.createElement('div');
+        meta.className = 'tl-row-meta';
+        meta.innerHTML = `
+          <label>路径起点% <input type="number" min="0" max="100" step="0.5" data-field="pathStartT" /></label>
+          <label>路径终点% <input type="number" min="0" max="100" step="0.5" data-field="pathEndT" /></label>
+          <label>NPZ 起点s <input type="number" min="0" max="${npzDur.toFixed(2)}" step="0.1" data-field="npzStartSec" /></label>
+          <label>NPZ 终点s <input type="number" min="0" max="${npzDur.toFixed(2)}" step="0.1" data-field="npzEndSec" /></label>
+          <span class="hint">全长 ${npzDur.toFixed(1)}s</span>
+          <button type="button" class="tl-row-del" title="移除此轨道">×</button>
+        `;
+        meta.querySelector('[data-field="pathStartT"]').value = (track.pathStartT * 100).toFixed(1);
+        meta.querySelector('[data-field="pathEndT"]').value = (track.pathEndT * 100).toFixed(1);
+        meta.querySelector('[data-field="npzStartSec"]').value = track.npzStartSec.toFixed(2);
+        meta.querySelector('[data-field="npzEndSec"]').value = track.npzEndSec.toFixed(2);
+        meta.querySelectorAll('input').forEach((inp) => {
+          inp.onchange = () => {
+            const field = inp.dataset.field;
+            let v = parseFloat(inp.value);
+            if (Number.isNaN(v)) return;
+            if (field === 'pathStartT' || field === 'pathEndT') v = Math.max(0, Math.min(100, v)) / 100;
+            else v = Math.max(0, Math.min(npzDur, v));
+            track[field] = v;
+            ensurePathMotionTracks(path);
+            syncActivePathFromState();
+            renderTimelineDock();
+            syncAllActorsForPathT(pathPinT);
+            kickOverlayRender();
+          };
+        });
+        meta.querySelector('.tl-row-del').onclick = () => {
+          path.motionTracks = path.motionTracks.filter((t) => t.id !== track.id);
+          syncActivePathFromState();
+          renderTimelineDock();
+          syncAllActorsForPathT(pathPinT);
+          kickOverlayRender();
+        };
+
+        body.appendChild(trackEl);
+        body.appendChild(meta);
+        row.appendChild(label);
+        row.appendChild(body);
+        rulers.appendChild(row);
+      }
+
+      updateTimelinePlayhead();
+    }
+
+    function bindTimelineHandleDrag(handleEl, trackId, field, trackEl) {
+      handleEl.onpointerdown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        tlDragState = { kind: field, trackId, startX: e.clientX, trackEl };
+        handleEl.setPointerCapture(e.pointerId);
+        handleEl.onpointermove = onTimelineHandleDrag;
+        handleEl.onpointerup = endTimelineHandleDrag;
+        handleEl.onpointercancel = endTimelineHandleDrag;
+      };
+    }
+
+    function onTimelineHandleDrag(e) {
+      if (!tlDragState) return;
+      const path = getTimelinePath();
+      if (!path) return;
+      const track = path.motionTracks.find((t) => t.id === tlDragState.trackId);
+      if (!track || !tlDragState.trackEl) return;
+      const rect = tlDragState.trackEl.getBoundingClientRect();
+      const t = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      if (tlDragState.kind === 'pathStartT') {
+        track.pathStartT = Math.min(t, track.pathEndT - 0.02);
+      } else {
+        track.pathEndT = Math.max(t, track.pathStartT + 0.02);
+      }
+      ensurePathMotionTracks(path);
+      syncActivePathFromState();
+      renderTimelineDock();
+      syncAllActorsForPathT(pathPinT);
+      kickOverlayRender();
+    }
+
+    function endTimelineHandleDrag(e) {
+      if (!tlDragState) return;
+      const handle = e.currentTarget;
+      handle.onpointermove = null;
+      handle.onpointerup = null;
+      handle.onpointercancel = null;
+      try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+      tlDragState = null;
+    }
+
+    function showTimelineAddPanel() {
+      const path = getTimelinePath();
+      const panel = el('tlAddPanel');
+      if (!path || !panel) return;
+      const existing = new Set((path.motionTracks || []).map((t) => t.assetName));
+      const motions = placements.filter((p) => p.type === 'motion' && !p.missing && !existing.has(p.name));
+      panel.innerHTML = '';
+      if (!motions.length) {
+        panel.innerHTML = '<span class="hint">暂无可添加的人模 NPZ（请先在模型页导入）</span>';
+        panel.hidden = false;
+        return;
+      }
+      for (const p of motions) {
+        const lb = document.createElement('label');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = p.name;
+        cb.dataset.asset = p.name;
+        lb.appendChild(cb);
+        lb.appendChild(document.createTextNode(p.name));
+        panel.appendChild(lb);
+      }
+      const confirm = document.createElement('button');
+      confirm.type = 'button';
+      confirm.className = 'secondary';
+      confirm.textContent = '确认添加选中';
+      confirm.style.marginTop = '6px';
+      confirm.onclick = () => {
+        const picked = [...panel.querySelectorAll('input[type=checkbox]:checked')].map((c) => c.dataset.asset);
+        for (const assetName of picked) addMotionTrackToPath(path, assetName);
+        panel.hidden = true;
+        syncActivePathFromState();
+        renderTimelineDock();
+        syncAllActorsForPathT(pathPinT);
+        kickOverlayRender();
+        status(picked.length ? `已添加 ${picked.length} 条 NPZ 时间轨` : '未选择 NPZ');
+      };
+      panel.appendChild(confirm);
+      panel.hidden = false;
+    }
+
+    function addMotionTrackToPath(path, assetName) {
+      const mp = getMotionPlacementByName(assetName);
+      if (!mp || !mp.motion) return;
+      ensurePathMotionTracks(path);
+      if (path.motionTracks.some((t) => t.assetName === assetName)) return;
+      const fps = mp.motion.fps || 30;
+      const npzDur = (mp.motion.numFrames - 1) / fps;
+      path.motionTracks.push(normalizeMotionTrack({
+        id: `mt-${nextMotionTrackId++}`,
+        assetName,
+        pathStartT: 0,
+        pathEndT: 1,
+        npzStartSec: Math.min(2, npzDur * 0.1),
+        npzEndSec: npzDur,
+      }));
+    }
     function clearPathVisuals() {
       if (pathRoot) {
         pathRoot.parent && pathRoot.parent.remove(pathRoot);
@@ -2104,6 +2535,8 @@
       }));
       path.framesPerSeg = pathFramesPerSeg;
       path.fps = pathFps;
+      path.timelineDurationSec = Math.max(1, _n(path.timelineDurationSec, 10));
+      ensurePathMotionTracks(path);
     }
 
     function loadActivePathToState() {
@@ -2124,6 +2557,8 @@
         cameraPathSegments = normalized.segments;
         pathFramesPerSeg = _n(path.framesPerSeg, 16);
         pathFps = _n(path.fps, 12);
+        path.timelineDurationSec = Math.max(1, _n(path.timelineDurationSec, 10));
+        ensurePathMotionTracks(path);
       }
       el('pathFrames').value = pathFramesPerSeg;
       el('pathFramesVal').textContent = pathFramesPerSeg;
@@ -2149,6 +2584,7 @@
       else stopPathSlidePreview();
       el('rigPreviewStatus').textContent = '需重新渲染';
       viewer && viewer.forceRenderNextFrame();
+      if (timelineOpenPathId === id) renderTimelineDock();
     }
 
     function renderPathGroupList() {
@@ -2171,8 +2607,18 @@
         countSpan.className = 'hint';
         countSpan.style.marginLeft = 'auto';
         countSpan.textContent = `${nodeCount} 机位`;
+        const clockBtn = document.createElement('button');
+        clockBtn.type = 'button';
+        clockBtn.className = 'icon-btn tl-clock-btn' + (timelineOpenPathId === path.id ? ' active' : '');
+        clockBtn.title = '时间轨迹校准';
+        clockBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+        clockBtn.onclick = (e) => {
+          e.stopPropagation();
+          toggleTimelineForPath(path.id);
+        };
         row.appendChild(nameSpan);
         row.appendChild(countSpan);
+        row.appendChild(clockBtn);
         row.onclick = () => selectCameraPath(path.id);
         list.appendChild(row);
       });
@@ -2221,7 +2667,9 @@
       syncActivePathFromState();
       const idx = cameraPaths.findIndex((p) => p.id === activePathId);
       if (idx < 0) return;
+      const deletedId = activePathId;
       cameraPaths.splice(idx, 1);
+      if (timelineOpenPathId === deletedId) closeTimelineDock();
       if (cameraPaths.length) {
         activePathId = cameraPaths[Math.max(0, idx - 1)].id;
         loadActivePathToState();
@@ -3071,6 +3519,8 @@
           })),
           framesPerSeg: _n(p.framesPerSeg, 16),
           fps: _n(p.fps, 12),
+          timelineDurationSec: Math.max(1, _n(p.timelineDurationSec, 10)),
+          motionTracks: (p.motionTracks || []).map((t) => normalizeMotionTrack(t)),
         }));
         for (const p of cameraPaths) {
           const m = /^path-(\d+)$/.exec(p.id);
@@ -3575,17 +4025,21 @@
     }
 
     function updateAllActorsForRenderFrame(f, totalFrames) {
+      const pathT = f / Math.max(1, totalFrames - 1);
       for (const p of placements) {
         if (p.type !== 'motion' || p.missing || !p.motion) continue;
-        const frame = motionFrameForCameraFrame(f, totalFrames, p.motion);
+        const frame = getMotionFrameForPlacementAtPathT(p, pathT);
         updateActorFrame(p, frame);
       }
     }
 
     function syncAllActorsForPathT(t) {
-      const total = getActivePathTotalFrames();
-      const camFrame = Math.round(t * Math.max(0, total - 1));
-      updateAllActorsForRenderFrame(camFrame, total);
+      for (const p of placements) {
+        if (p.type !== 'motion' || p.missing || !p.motion) continue;
+        const frame = getMotionFrameForPlacementAtPathT(p, t);
+        updateActorFrame(p, frame);
+      }
+      updateTimelinePlayhead();
     }
 
     function dismissPlacementGizmo() {
@@ -4034,6 +4488,7 @@
       const thumb = el('pathPinThumb');
       if (fill) fill.style.width = `${pct}%`;
       if (thumb) thumb.style.left = `${pct}%`;
+      updateTimelinePlayhead();
     }
 
     function syncShowFrustumUI() {
@@ -6404,6 +6859,15 @@
           segments: p.segments,
           framesPerSeg: p.framesPerSeg,
           fps: p.fps,
+          timelineDurationSec: _n(p.timelineDurationSec, 10),
+          motionTracks: (p.motionTracks || []).map((t) => ({
+            id: t.id,
+            assetName: t.assetName,
+            pathStartT: t.pathStartT,
+            pathEndT: t.pathEndT,
+            npzStartSec: t.npzStartSec,
+            npzEndSec: t.npzEndSec,
+          })),
         })),
         activePathId: activePathId || null,
         renderSettings: getRenderSettings(),
@@ -6464,6 +6928,7 @@
       markerGizmoMode = null;
       rigGizmoMode = null;
       placementGizmoMode = null;
+      closeTimelineDock();
       clearPathVisuals();
       renderMarkerList();
       renderPathGroupList();
@@ -6743,13 +7208,32 @@
     };
     el('motionPlayBtn').onclick = () => startMotionPreview();
 
-    el('importBtn').onclick = () => el('pickFile').click();
-    el('pickFile').onchange = async () => {
-      const files = [...(el('pickFile').files || [])];
-      el('pickFile').value = '';
+    el('importPlyBtn').onclick = () => el('pickPlyFile').click();
+    el('importNpzBtn').onclick = () => el('pickNpzFile').click();
+    el('pickPlyFile').onchange = async () => {
+      const files = [...(el('pickPlyFile').files || [])];
+      el('pickPlyFile').value = '';
       for (const f of files) {
         try { await addPlacementFromFile(f); } catch (e) { showError(e); }
       }
+    };
+    el('pickNpzFile').onchange = async () => {
+      const files = [...(el('pickNpzFile').files || [])];
+      el('pickNpzFile').value = '';
+      for (const f of files) {
+        try { await addMotionFromFile(f); } catch (e) { showError(e); }
+      }
+    };
+    el('tlCloseBtn').onclick = () => closeTimelineDock();
+    el('tlAddTrackBtn').onclick = () => showTimelineAddPanel();
+    el('tlDuration').onchange = () => {
+      const path = getTimelinePath();
+      if (!path) return;
+      const v = parseFloat(el('tlDuration').value);
+      if (Number.isNaN(v) || v < 1) return;
+      path.timelineDurationSec = v;
+      syncActivePathFromState();
+      renderTimelineDock();
     };
     el('viewBgSelect').onchange = (e) => applyViewBackground(e.target.value);
     function setSliderValueUnbounded(slider, v, silent = false) {
