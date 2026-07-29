@@ -738,7 +738,7 @@
       shellFrame,
       motionFrameForCameraFrame,
       motionDefaultScale,
-    } from './vendor/motion_actor.js?v=20260729f';
+    } from './vendor/motion_actor.js?v=20260729g';
 
 
     function _n(v, fb) { return v !== undefined && v !== null ? v : fb; }
@@ -1454,6 +1454,16 @@
       if (exact >= 0) return exact;
       return placements.findIndex((p) => p.missing
         && canonicalPlacementAssetName(p.name).toLowerCase() === lower);
+    }
+
+    /** Replace missing or already-loaded motion when importing the same NPZ again. */
+    function findMotionPlacementIndexForImport(fileName) {
+      const missingIdx = findMissingPlacementIndex(fileName);
+      if (missingIdx >= 0) return missingIdx;
+      const canon = canonicalPlacementAssetName(fileName).toLowerCase();
+      if (!canon.endsWith('.npz')) return -1;
+      return placements.findIndex((p) => p.type === 'motion' && !p.missing
+        && canonicalPlacementAssetName(p.name).toLowerCase() === canon);
     }
 
     function resolveImportAssetName(file) {
@@ -3276,6 +3286,16 @@
       p.motionHeight = motion.height;
     }
 
+    function removeActorMeshIfAny(p) {
+      if (p.root && actorRootGroup) {
+        actorRootGroup.remove(p.root);
+        p.mesh && p.mesh.geometry && p.mesh.geometry.dispose();
+        p.mesh && p.mesh.material && p.mesh.material.dispose();
+      }
+      p.root = null;
+      p.mesh = null;
+    }
+
     function createActorMeshObject(p, skin, motion) {
       initActorRootGroup();
       const geo = new THREE.BufferGeometry();
@@ -3312,6 +3332,7 @@
 
     async function createActorSplatObject(p, skin, motion, shell) {
       if (!viewer || !viewer.splatMesh) throw new Error('splat viewer 未就绪');
+      removeActorMeshIfAny(p);
       const anchor = motionAnchorArray(p, motion);
       const bindPoseVerts = shellFrame(shell, skin, motion, 0);
       const splatBuffer = buildMotionSplatBuffer(shell, bindPoseVerts, anchor);
@@ -3505,11 +3526,15 @@
 
     async function addMotionFromFile(file, loadToken = sessionResetToken) {
       if (!sceneReady) throw new Error('场景尚未就绪');
-      const { assetName, missingIdx } = resolveImportAssetName(file);
+      const normalizedName = (file && file.name && String(file.name).trim()) || 'motion.npz';
+      const replaceIdx = findMotionPlacementIndexForImport(normalizedName);
+      const assetName = replaceIdx >= 0
+        ? placements[replaceIdx].name
+        : uniquePlacementAssetName(normalizedName);
       let sourcePath = inferSourcePathForImport(file);
       if (!sourcePath) sourcePath = await guessAssetPathFromServer(file.name);
       sourcePath = inheritSourcePathForAsset(assetName, sourcePath);
-      status(missingIdx >= 0 ? `恢复人模 ${assetName}…` : `加载人模 ${assetName}…`);
+      status(replaceIdx >= 0 ? `更新人模 ${assetName}…` : `加载人模 ${assetName}…`);
       setLoadProgress(20, `解析 ${assetName}…`);
       let ab = fileCache.get(fileCacheKey(activeSceneId, assetName));
       if (!ab) {
@@ -3523,8 +3548,8 @@
       const motion = await buildMotionFromBuffer(ab);
       if (isSessionAborted(loadToken)) return;
       const skin = await ensureSomaSkin();
-      if (missingIdx >= 0) {
-        const p = placements[missingIdx];
+      if (replaceIdx >= 0) {
+        const p = placements[replaceIdx];
         await removeActorFromScene(p);
         p.missing = false;
         delete p.missingReason;
@@ -3532,13 +3557,15 @@
         p.motion = motion;
         p.motionFps = motion.fps;
         p.motionFrames = motion.numFrames;
-        p.center = [motion.anchor.x, motion.anchor.y, motion.anchor.z];
+        if (!Array.isArray(p.center) || p.center.length < 3) {
+          p.center = [motion.anchor.x, motion.anchor.y, motion.anchor.z];
+        }
         if (sourcePath) p.sourcePath = sourcePath;
         applyMotionDefaultScale(p, motion);
         await createActorObject(p, skin, motion);
-        selectPlacement(missingIdx);
+        selectPlacement(replaceIdx);
         hideLoadProgress();
-        status(`已恢复人模 ${assetName}`);
+        status(`已更新人模 ${assetName}`);
         renderList();
         return;
       }
@@ -6193,6 +6220,24 @@
       return sibling ? sibling.sourcePath : null;
     }
 
+    async function dedupeLoadedMotionPlacements() {
+      const keepByCanon = new Map();
+      for (let i = 0; i < placements.length; i++) {
+        const p = placements[i];
+        if (p.type !== 'motion' || p.missing) continue;
+        const key = canonicalPlacementAssetName(p.name).toLowerCase();
+        if (!keepByCanon.has(key)) {
+          keepByCanon.set(key, i);
+          continue;
+        }
+        await removeActorFromScene(p);
+        placements.splice(i, 1);
+        if (selected === i) selected = -1;
+        else if (selected > i) selected--;
+        i--;
+      }
+    }
+
     async function restorePlacements(saved, loadToken = sessionResetToken) {
       if (!Array.isArray(saved) || !saved.length) return;
       const missing = [];
@@ -6262,6 +6307,7 @@
             motionFrames: motion.numFrames,
             currentFrame: 0,
           };
+          applyMotionDefaultScale(p, motion);
           await createActorObject(p, skin, motion);
           placements.push(p);
           kickOverlayRender();
@@ -6300,6 +6346,7 @@
       for (const p of placements) {
         if (!p.missing && p.type !== 'motion') syncPlacementTransform(p);
       }
+      await dedupeLoadedMotionPlacements();
       renderList();
       const loadedCount = placements.filter((p) => !p.missing).length;
       if (missing.length) {
