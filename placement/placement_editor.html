@@ -988,7 +988,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260729f';
+    const MODEL_LOAD_BUILD = '20260729g';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -3165,6 +3165,7 @@
       }
     }
 
+    /** baseData / draw 使用 compact 索引（各 scene 的 getSplatCount 累加），不是 getMaxSplatCount。 */
     function getSceneGlobalSplatStart(sceneIdx) {
       if (!viewer || !viewer.splatMesh) return 0;
       let offset = 0;
@@ -3172,6 +3173,21 @@
         offset += viewer.splatMesh.getScene(i).splatBuffer.getSplatCount();
       }
       return offset;
+    }
+
+    /** sceneIndexes 纹理必须与 compact 索引一致；库内 globalSplatIndexToSceneIndexMap 按 max 容量索引，motion 常被标成 PLY scene。 */
+    function patchSceneIndexTextureRange(sm, globalStart, globalEnd, sceneIdx) {
+      const sceneIndexesDesc = sm.splatDataTextures && sm.splatDataTextures.sceneIndexes;
+      if (!sceneIndexesDesc || !sceneIndexesDesc.data) return;
+      const idxData = sceneIndexesDesc.data;
+      for (let gi = globalStart; gi <= globalEnd; gi++) idxData[gi] = sceneIdx;
+      const tex = sceneIndexesDesc.texture;
+      const texProps = sm.renderer && sm.renderer.properties.get(tex);
+      if (texProps && texProps.__webglTexture && typeof sm.updateDataTexture === 'function') {
+        sm.updateDataTexture(idxData, tex, sceneIndexesDesc.size, texProps, 1, 1, 1, globalStart, globalEnd);
+      } else if (tex) {
+        tex.needsUpdate = true;
+      }
     }
 
     function setSplatBufferLocalCenter(splatBuffer, localIdx, x, y, z) {
@@ -3196,24 +3212,27 @@
       const splatBuffer = sm.getScene(p.sceneIdx).splatBuffer;
       const count = splatBuffer.getSplatCount();
       const src = p._poseVerts;
-      const centers = baseData.centers;
       const globalStart = getSceneGlobalSplatStart(p.sceneIdx);
-      for (let i = 0; i < count; i++) {
-        const lx = src[i * 3];
-        const ly = src[i * 3 + 1];
-        const lz = src[i * 3 + 2];
-        setSplatBufferLocalCenter(splatBuffer, i, lx, ly, lz);
-        const gi = globalStart + i;
-        centers[gi * 3] = lx;
-        centers[gi * 3 + 1] = ly;
-        centers[gi * 3 + 2] = lz;
-      }
       const globalEnd = globalStart + count - 1;
-      sm.updateDataTexturesFromBaseData(globalStart, globalEnd);
-      if (sm.enableDistancesComputationOnGPU) {
-        const { centers: distCenters, sceneIndexes } = sm.getDataForDistancesComputation(globalStart, globalEnd);
-        sm.refreshGPUBuffersForDistancesComputation(distCenters, sceneIndexes, false);
+      if (globalEnd >= sm.getSplatCount()) {
+        console.warn('motion splat compact index out of range', {
+          sceneIdx: p.sceneIdx, globalStart, count, total: sm.getSplatCount(),
+        });
+        return;
       }
+      for (let i = 0; i < count; i++) {
+        setSplatBufferLocalCenter(splatBuffer, i, src[i * 3], src[i * 3 + 1], src[i * 3 + 2]);
+      }
+      sm.fillSplatDataArrays(
+        null, null, null, baseData.centers, null, null,
+        false,
+        undefined, undefined, undefined,
+        undefined, undefined,
+        globalStart,
+        p.sceneIdx,
+      );
+      sm.updateDataTexturesFromBaseData(globalStart, globalEnd);
+      patchSceneIndexTextureRange(sm, globalStart, globalEnd, p.sceneIdx);
       viewer.forceRenderNextFrame();
     }
 
