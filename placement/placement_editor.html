@@ -1456,16 +1456,6 @@
         && canonicalPlacementAssetName(p.name).toLowerCase() === lower);
     }
 
-    /** Replace missing or already-loaded motion when importing the same NPZ again. */
-    function findMotionPlacementIndexForImport(fileName) {
-      const missingIdx = findMissingPlacementIndex(fileName);
-      if (missingIdx >= 0) return missingIdx;
-      const canon = canonicalPlacementAssetName(fileName).toLowerCase();
-      if (!canon.endsWith('.npz')) return -1;
-      return placements.findIndex((p) => p.type === 'motion' && !p.missing
-        && canonicalPlacementAssetName(p.name).toLowerCase() === canon);
-    }
-
     function resolveImportAssetName(file) {
       const normalized = (file && file.name && String(file.name).trim()) || 'model.ply';
       const missingIdx = findMissingPlacementIndex(normalized);
@@ -3157,15 +3147,25 @@
       const src = p._poseVerts;
       const centers = baseData.centers;
       const globalStart = getSceneGlobalSplatStart(p.sceneIdx);
+      const s = p.scale;
+      const yaw = p.yaw_deg * Math.PI / 180;
+      const cos = Math.cos(yaw);
+      const sin = Math.sin(yaw);
+      const tx = p.x;
+      const ty = p.y;
+      const tz = p.z;
       for (let i = 0; i < count; i++) {
-        const lx = src[i * 3];
-        const ly = src[i * 3 + 1];
-        const lz = src[i * 3 + 2];
-        setSplatBufferLocalCenter(splatBuffer, i, lx, ly, lz);
+        const x = src[i * 3] * s;
+        const y = src[i * 3 + 1] * s;
+        const z = src[i * 3 + 2] * s;
+        const wx = cos * x - sin * y + tx;
+        const wy = sin * x + cos * y + ty;
+        const wz = z + tz;
+        setSplatBufferLocalCenter(splatBuffer, i, wx, wy, wz);
         const gi = globalStart + i;
-        centers[gi * 3] = lx;
-        centers[gi * 3 + 1] = ly;
-        centers[gi * 3 + 2] = lz;
+        centers[gi * 3] = wx;
+        centers[gi * 3 + 1] = wy;
+        centers[gi * 3 + 2] = wz;
       }
       const globalEnd = globalStart + count - 1;
       sm.updateDataTexturesFromBaseData(globalStart, globalEnd);
@@ -3174,6 +3174,51 @@
         sm.refreshGPUBuffersForDistancesComputation(distCenters, sceneIndexes, false);
       }
       viewer.forceRenderNextFrame();
+    }
+
+    function motionSplatSceneOpts(p) {
+      return {
+        position: [0, 0, 0],
+        rotation: [0, 0, 0, 1],
+        scale: [1, 1, 1],
+        splatAlphaRemovalThreshold: PLY_ALPHA,
+        visible: p.visible !== false,
+      };
+    }
+
+    function resetMotionSplatSceneTransform(p) {
+      if (!viewer || !viewer.splatMesh || p.sceneIdx == null) return;
+      const sm = viewer.splatMesh;
+      const scene = sm.getScene(p.sceneIdx);
+      scene.position.set(0, 0, 0);
+      scene.quaternion.identity();
+      scene.scale.set(1, 1, 1);
+      if (Array.isArray(sm.sceneOptions) && sm.sceneOptions[p.sceneIdx]) {
+        const opts = sm.sceneOptions[p.sceneIdx];
+        opts.position = [0, 0, 0];
+        opts.rotation = [0, 0, 0, 1];
+        opts.scale = [1, 1, 1];
+      }
+      sm.updateTransforms();
+    }
+
+    async function purgeOrphanMotionSplatScenes(shellSplatCount) {
+      if (!viewer || !viewer.splatMesh || !shellSplatCount) return;
+      const used = new Set(placements.filter((pl) => pl.sceneIdx != null).map((pl) => pl.sceneIdx));
+      const sm = viewer.splatMesh;
+      for (let i = sm.scenes.length - 1; i >= 0; i--) {
+        if (used.has(i)) continue;
+        const count = sm.getScene(i).splatBuffer.getSplatCount();
+        if (count !== shellSplatCount) continue;
+        try {
+          await viewer.removeSplatScene(i, false);
+          for (const pl of placements) {
+            if (pl.sceneIdx != null && pl.sceneIdx > i) pl.sceneIdx--;
+          }
+        } catch (err) {
+          console.warn('purge orphan motion splat failed', err);
+        }
+      }
     }
 
     function motionAnchorArray(p, motion) {
@@ -3338,7 +3383,8 @@
       const splatBuffer = buildMotionSplatBuffer(shell, bindPoseVerts, anchor);
       const sceneIdx = _n(viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
       try {
-        await addSplatBuffersKeepVisibility([splatBuffer], [placementOpts(p)]);
+        await purgeOrphanMotionSplatScenes(shell.numSplats);
+        await addSplatBuffersKeepVisibility([splatBuffer], [motionSplatSceneOpts(p)]);
         p.sceneIdx = sceneIdx;
         p.shell = shell;
         p.motion = motion;
@@ -3348,8 +3394,8 @@
         p.mesh = null;
         p._poseVerts = new Float32Array(shell.numSplats * 3);
         p.motionRender = 'splat';
+        resetMotionSplatSceneTransform(p);
         updateActorFrame(p, 0);
-        syncPlacementTransform(p);
         applyPlacementVisibility(p);
         viewer.forceRenderNextFrame();
       } catch (err) {
@@ -3373,15 +3419,15 @@
 
     async function createActorObject(p, skin, motion) {
       const shell = await ensureMotionSplatShell();
-      if (shell && viewer && viewer.splatMesh) {
-        try {
-          await createActorSplatObject(p, skin, motion, shell);
-          return null;
-        } catch (err) {
-          console.warn('motion splat 创建失败，回退 mesh 叠加层', err);
-        }
+      if (!shell) {
+        return createActorMeshObject(p, skin, motion);
       }
-      return createActorMeshObject(p, skin, motion);
+      if (!viewer || !viewer.splatMesh) {
+        throw new Error('motion splat shell 已加载，但 3D 查看器未就绪');
+      }
+      await createActorSplatObject(p, skin, motion, shell);
+      removeActorMeshIfAny(p);
+      return null;
     }
 
     /** LBS 顶点已是世界朝向的 pose；整体移动/旋转/缩放在 CPU 里做，避免 Three.js 父节点叠乘扭曲。 */
@@ -3526,15 +3572,11 @@
 
     async function addMotionFromFile(file, loadToken = sessionResetToken) {
       if (!sceneReady) throw new Error('场景尚未就绪');
-      const normalizedName = (file && file.name && String(file.name).trim()) || 'motion.npz';
-      const replaceIdx = findMotionPlacementIndexForImport(normalizedName);
-      const assetName = replaceIdx >= 0
-        ? placements[replaceIdx].name
-        : uniquePlacementAssetName(normalizedName);
+      const { assetName, missingIdx } = resolveImportAssetName(file);
       let sourcePath = inferSourcePathForImport(file);
       if (!sourcePath) sourcePath = await guessAssetPathFromServer(file.name);
       sourcePath = inheritSourcePathForAsset(assetName, sourcePath);
-      status(replaceIdx >= 0 ? `更新人模 ${assetName}…` : `加载人模 ${assetName}…`);
+      status(missingIdx >= 0 ? `恢复人模 ${assetName}…` : `加载人模 ${assetName}…`);
       setLoadProgress(20, `解析 ${assetName}…`);
       let ab = fileCache.get(fileCacheKey(activeSceneId, assetName));
       if (!ab) {
@@ -3548,8 +3590,8 @@
       const motion = await buildMotionFromBuffer(ab);
       if (isSessionAborted(loadToken)) return;
       const skin = await ensureSomaSkin();
-      if (replaceIdx >= 0) {
-        const p = placements[replaceIdx];
+      if (missingIdx >= 0) {
+        const p = placements[missingIdx];
         await removeActorFromScene(p);
         p.missing = false;
         delete p.missingReason;
@@ -3563,9 +3605,9 @@
         if (sourcePath) p.sourcePath = sourcePath;
         applyMotionDefaultScale(p, motion);
         await createActorObject(p, skin, motion);
-        selectPlacement(replaceIdx);
+        selectPlacement(missingIdx);
         hideLoadProgress();
-        status(`已更新人模 ${assetName}`);
+        status(`已恢复人模 ${assetName}`);
         renderList();
         return;
       }
@@ -5459,12 +5501,8 @@
     function syncPlacementTransform(p) {
       if (p.type === 'motion') {
         if (p.motionRender === 'splat' && p.sceneIdx != null && viewer && viewer.splatMesh) {
-          const scene = viewer.splatMesh.getScene(p.sceneIdx);
-          scene.position.set(p.x, p.y, p.z);
-          scene.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
-          scene.scale.set(p.scale, p.scale, p.scale);
-          viewer.splatMesh.updateTransforms();
-          viewer.forceRenderNextFrame();
+          resetMotionSplatSceneTransform(p);
+          refreshMotionSplatCenters(p);
         } else {
           syncActorTransform(p);
         }
@@ -6220,24 +6258,6 @@
       return sibling ? sibling.sourcePath : null;
     }
 
-    async function dedupeLoadedMotionPlacements() {
-      const keepByCanon = new Map();
-      for (let i = 0; i < placements.length; i++) {
-        const p = placements[i];
-        if (p.type !== 'motion' || p.missing) continue;
-        const key = canonicalPlacementAssetName(p.name).toLowerCase();
-        if (!keepByCanon.has(key)) {
-          keepByCanon.set(key, i);
-          continue;
-        }
-        await removeActorFromScene(p);
-        placements.splice(i, 1);
-        if (selected === i) selected = -1;
-        else if (selected > i) selected--;
-        i--;
-      }
-    }
-
     async function restorePlacements(saved, loadToken = sessionResetToken) {
       if (!Array.isArray(saved) || !saved.length) return;
       const missing = [];
@@ -6344,9 +6364,14 @@
         applyPlacementVisibility(p);
       }
       for (const p of placements) {
-        if (!p.missing && p.type !== 'motion') syncPlacementTransform(p);
+        if (!p.missing) syncPlacementTransform(p);
       }
-      await dedupeLoadedMotionPlacements();
+      try {
+        const shell = await ensureMotionSplatShell();
+        if (shell) await purgeOrphanMotionSplatScenes(shell.numSplats);
+      } catch (e) {
+        console.warn('purge orphan motion splat after restore failed', e);
+      }
       renderList();
       const loadedCount = placements.filter((p) => !p.missing).length;
       if (missing.length) {
