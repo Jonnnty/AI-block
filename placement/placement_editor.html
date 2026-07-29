@@ -988,7 +988,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260729b';
+    const MODEL_LOAD_BUILD = '20260729d';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -1473,12 +1473,58 @@
       return canonicalPlacementAssetName(name).toLowerCase() !== String(name || '').trim().toLowerCase();
     }
 
+    function siblingPlacementsByCanonical(name, list = placements) {
+      const canon = canonicalPlacementAssetName(name).toLowerCase();
+      return list.filter((p) => !p.missing
+        && canonicalPlacementAssetName(p.name).toLowerCase() === canon);
+    }
+
     function siblingPlacementByCanonical(name, list = placements) {
       const canon = canonicalPlacementAssetName(name).toLowerCase();
       return list.find((p) => !p.missing
         && canonicalPlacementAssetName(p.name).toLowerCase() === canon
         && p.name.toLowerCase() !== String(name || '').trim().toLowerCase())
         || list.find((p) => !p.missing && p.name.toLowerCase() === canon);
+    }
+
+    /** 同名模型第二次导入时默认错开一点，避免叠在同一位置看起来像「一大一小鬼影」。 */
+    function placementPositionBesideSibling(sibling, stepIdx = 1) {
+      const gap = 0.35;
+      return {
+        x: _n(sibling.x, 0) + gap * stepIdx,
+        y: _n(sibling.y, 0),
+        z: _n(sibling.z, defaultZ),
+      };
+    }
+
+    function positionsNearlyEqual(a, b, eps = 0.02) {
+      return Math.abs(_n(a.x, 0) - _n(b.x, 0)) < eps
+        && Math.abs(_n(a.y, 0) - _n(b.y, 0)) < eps
+        && Math.abs(_n(a.z, defaultZ) - _n(b.z, defaultZ)) < eps;
+    }
+
+    /** 恢复 scene2 等同名叠放：列表里有多份 canonical 相同且位置重合的，自动错开。 */
+    function deoverlapCanonicalPlacements(list = placements) {
+      const groups = new Map();
+      for (const p of list) {
+        if (p.missing) continue;
+        const key = canonicalPlacementAssetName(p.name).toLowerCase();
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(p);
+      }
+      for (const group of groups.values()) {
+        if (group.length < 2) continue;
+        group.sort((a, b) => a.name.localeCompare(b.name));
+        for (let i = 1; i < group.length; i++) {
+          const prev = group[i - 1];
+          const cur = group[i];
+          if (!positionsNearlyEqual(prev, cur)) continue;
+          const pos = placementPositionBesideSibling(prev, i);
+          cur.x = pos.x;
+          cur.y = pos.y;
+          cur.z = pos.z;
+        }
+      }
     }
 
     function placementAnchorFromItem(item, bounds, loadedPlacements = placements) {
@@ -3171,23 +3217,66 @@
       viewer.forceRenderNextFrame();
     }
 
-    /** 列表里有几个人模，场景里就只保留几个 2000 点 shell 场景；多余的（常见为旧导入残留）删掉。 */
+    function listMotionActorSceneIdxs() {
+      if (!viewer || !viewer.splatMesh || !Array.isArray(viewer.splatMesh.sceneOptions)) return [];
+      const sm = viewer.splatMesh;
+      const idxs = [];
+      for (let i = 0; i < sm.scenes.length; i++) {
+        if (sm.sceneOptions[i] && sm.sceneOptions[i].motionActor) idxs.push(i);
+      }
+      return idxs;
+    }
+
+    async function removeMotionActorSplatScenes(keepIdxSet = new Set()) {
+      if (!viewer || !viewer.splatMesh) return 0;
+      const removeIdxs = listMotionActorSceneIdxs().filter((i) => !keepIdxSet.has(i)).sort((a, b) => b - a);
+      let removed = 0;
+      for (const idx of removeIdxs) {
+        try {
+          await viewer.removeSplatScene(idx, false);
+          for (const pl of placements) {
+            if (pl.sceneIdx != null && pl.sceneIdx > idx) pl.sceneIdx--;
+          }
+          removed++;
+        } catch (err) {
+          console.warn('remove motion actor splat failed', err);
+        }
+      }
+      if (removed) viewer.forceRenderNextFrame();
+      return removed;
+    }
+
+    /** 列表里有几个人模，场景里就只保留几个 motionActor 场景；多余的（常见为旧导入残留）删掉。 */
     async function reconcileMotionSplatScenes(shell) {
       if (!viewer || !viewer.splatMesh || !shell) return;
       const shellCount = shell.numSplats;
       const sm = viewer.splatMesh;
       const motionPs = placements.filter((p) => p.type === 'motion' && !p.missing && p.motionRender === 'splat');
       if (!motionPs.length) return;
-      const motionSceneIdxs = [];
-      for (let i = 0; i < sm.scenes.length; i++) {
-        if (sm.getScene(i).splatBuffer.getSplatCount() === shellCount) {
-          motionSceneIdxs.push(i);
+
+      const used = new Set(motionPs.map((p) => p.sceneIdx).filter((i) => i != null));
+      // 清 legacy：无 motionActor 标记、2000 点、且未绑定列表项的 orphan shell
+      for (let i = sm.scenes.length - 1; i >= 0; i--) {
+        if (used.has(i)) continue;
+        const opts = sm.sceneOptions && sm.sceneOptions[i];
+        if (opts && opts.motionActor) continue;
+        if (sm.getScene(i).splatBuffer.getSplatCount() !== shellCount) continue;
+        try {
+          await viewer.removeSplatScene(i, false);
+          for (const pl of placements) {
+            if (pl.sceneIdx != null && pl.sceneIdx > i) pl.sceneIdx--;
+          }
+          modelLoadWarn('移除 legacy motion shell orphan', { removeIdx: i });
+        } catch (err) {
+          console.warn('remove legacy motion shell failed', err);
         }
       }
+
+      const motionSceneIdxs = listMotionActorSceneIdxs();
       const targetCount = motionPs.length;
       while (motionSceneIdxs.length > targetCount) {
-        const used = new Set(motionPs.map((p) => p.sceneIdx).filter((i) => i != null));
-        let removeIdx = motionSceneIdxs.find((i) => !used.has(i));
+        const usedNow = new Set(motionPs.map((p) => p.sceneIdx).filter((i) => i != null));
+        let removeIdx = motionSceneIdxs.find((i) => !usedNow.has(i));
         if (removeIdx == null) removeIdx = motionSceneIdxs[motionSceneIdxs.length - 1];
         try {
           await viewer.removeSplatScene(removeIdx, false);
@@ -3198,7 +3287,7 @@
             if (motionSceneIdxs[k] > removeIdx) motionSceneIdxs[k]--;
           }
           motionSceneIdxs.splice(motionSceneIdxs.indexOf(removeIdx), 1);
-          modelLoadWarn('移除多余 motion splat 场景', { removeIdx, targetCount, had: motionSceneIdxs.length + 1 });
+          modelLoadWarn('移除多余 motionActor 场景', { removeIdx, targetCount });
         } catch (err) {
           console.warn('reconcile motion splat failed', err);
           break;
@@ -3206,16 +3295,59 @@
       }
       for (let j = 0; j < motionPs.length; j++) {
         const p = motionPs[j];
-        if (j < motionSceneIdxs.length) {
+        if (!isValidSplatSceneIdx(p.sceneIdx) && j < motionSceneIdxs.length) {
           p.sceneIdx = motionSceneIdxs[j];
-          syncPlacementTransform(p);
         }
-      }
-      for (const p of motionPs) {
-        if (p.sceneIdx != null && p.motion) {
+        if (isValidSplatSceneIdx(p.sceneIdx)) {
+          syncPlacementTransform(p);
           updateActorFrame(p, _n(p.currentFrame, 0));
         }
       }
+    }
+
+    function motionActorSceneOpts(p) {
+      return { ...placementOpts(p), motionActor: true };
+    }
+
+    function diagMotionState() {
+      if (!viewer || !viewer.splatMesh) {
+        return { build: MODEL_LOAD_BUILD, ready: false, error: 'viewer 未就绪' };
+      }
+      const sm = viewer.splatMesh;
+      const motionPs = placements.filter((p) => p.type === 'motion' && !p.missing);
+      const motionScenes = listMotionActorSceneIdxs().map((i) => {
+        const scene = sm.getScene(i);
+        return {
+          idx: i,
+          scale: scene.scale.x,
+          splats: scene.splatBuffer.getSplatCount(),
+          pos: [scene.position.x, scene.position.y, scene.position.z],
+        };
+      });
+      const legacyShellScenes = [];
+      const shell = motionSplatShell;
+      if (shell) {
+        for (let i = 0; i < sm.scenes.length; i++) {
+          const opts = sm.sceneOptions && sm.sceneOptions[i];
+          if (opts && opts.motionActor) continue;
+          if (sm.getScene(i).splatBuffer.getSplatCount() === shell.numSplats) {
+            legacyShellScenes.push(i);
+          }
+        }
+      }
+      return {
+        build: MODEL_LOAD_BUILD,
+        ready: true,
+        motionPlacements: motionPs.length,
+        motionScenes,
+        legacyShellScenes,
+        meshOverlay: actorRootGroup ? actorRootGroup.children.length : 0,
+        placements: motionPs.map((p) => ({
+          name: p.name,
+          sceneIdx: p.sceneIdx,
+          motionRender: p.motionRender,
+        })),
+      };
     }
 
     function motionAnchorArray(p, motion) {
@@ -3380,7 +3512,13 @@
       const splatBuffer = buildMotionSplatBuffer(shell, bindPoseVerts, anchor);
       const sceneIdxBefore = _n(viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
       try {
-        await addSplatBuffersKeepVisibility([splatBuffer], [placementOpts(p)]);
+        const keepOthers = new Set(
+          placements
+            .filter((pl) => pl !== p && pl.type === 'motion' && !pl.missing && pl.sceneIdx != null)
+            .map((pl) => pl.sceneIdx),
+        );
+        await removeMotionActorSplatScenes(keepOthers);
+        await addSplatBuffersKeepVisibility([splatBuffer], [motionActorSceneOpts(p)]);
         p.sceneIdx = viewer.splatMesh.scenes.length - 1;
         if (p.sceneIdx < sceneIdxBefore) {
           throw new Error(`motion splat sceneIdx 异常: before=${sceneIdxBefore} after=${p.sceneIdx}`);
@@ -3622,11 +3760,16 @@
         renderList();
         return;
       }
+      const siblings = siblingPlacementsByCanonical(assetName);
+      const sibling = siblings[0] || null;
+      const spawnPos = sibling ? placementPositionBesideSibling(sibling, siblings.length) : null;
       const p = {
         type: 'motion',
         name: assetName,
         sourcePath: sourcePath || null,
-        x: 0, y: 0, z: defaultZ,
+        x: spawnPos ? spawnPos.x : 0,
+        y: spawnPos ? spawnPos.y : 0,
+        z: spawnPos ? spawnPos.z : defaultZ,
         scale: defaultScale,
         yaw_deg: 0,
         sceneIdx: null,
@@ -5871,10 +6014,15 @@
         visualAb, PLY_ALPHA, undefined, undefined, PLY_ALPHA, 0, false, 0,
       );
       if (isSessionAborted(loadToken)) return;
+      const siblings = siblingPlacementsByCanonical(assetName);
+      const sibling = siblings[0] || null;
+      const spawnPos = sibling ? placementPositionBesideSibling(sibling, siblings.length) : null;
       const p = {
         name: assetName,
         sourcePath: sourcePath || null,
-        x: 0, y: 0, z: defaultZ,
+        x: spawnPos ? spawnPos.x : 0,
+        y: spawnPos ? spawnPos.y : 0,
+        z: spawnPos ? spawnPos.z : defaultZ,
         scale: defaultScale,
         yaw_deg: 0,
         sceneIdx: null,
@@ -6346,6 +6494,7 @@
           applyMotionDefaultScale(p, motion);
           await createActorObject(p, skin, motion);
           placements.push(p);
+          await finalizeMotionPlacement(p, await ensureMotionSplatShell());
           kickOverlayRender();
           continue;
         }
@@ -6379,6 +6528,7 @@
         syncPlacementTransform(p);
         applyPlacementVisibility(p);
       }
+      deoverlapCanonicalPlacements();
       for (const p of placements) {
         if (!p.missing) syncPlacementTransform(p);
       }
@@ -6858,11 +7008,18 @@
       get placements() { return placements; },
       get selected() { return selected; },
       get placementGizmoMode() { return placementGizmoMode; },
-      pivot, transformControls, actorRootGroup, rigOverlayScene, viewer, THREE,
+      get viewer() { return viewer; },
+      get pivot() { return pivot; },
+      get transformControls() { return transformControls; },
+      get actorRootGroup() { return actorRootGroup; },
+      get rigOverlayScene() { return rigOverlayScene; },
+      THREE,
+      diagMotion: diagMotionState,
       togglePlacementGizmo, attachGizmo, applyPlacementGizmoDrag,
       syncPlacementTransform, refreshActorMesh, refreshMotionSplatCenters, kickOverlayRender,
       meshCentroidForPlacement, el,
     };
+    window.diagMotion = () => diagMotionState();
   </script>
 </body>
 </html>
