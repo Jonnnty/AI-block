@@ -738,7 +738,7 @@
       shellFrame,
       motionFrameForCameraFrame,
       motionDefaultScale,
-    } from './vendor/motion_actor.js?v=20260729e';
+    } from './vendor/motion_actor.js?v=20260729f';
 
 
     function _n(v, fb) { return v !== undefined && v !== null ? v : fb; }
@@ -3140,19 +3140,28 @@
     function refreshMotionSplatCenters(p) {
       if (!viewer || !viewer.splatMesh || p.sceneIdx == null || !p._poseVerts) return;
       const sm = viewer.splatMesh;
+      const baseData = sm.splatDataTextures && sm.splatDataTextures.baseData;
+      if (!baseData || !baseData.centers) return;
       const splatBuffer = sm.getScene(p.sceneIdx).splatBuffer;
       const count = splatBuffer.getSplatCount();
       const src = p._poseVerts;
-      for (let i = 0; i < count; i++) {
-        setSplatBufferLocalCenter(splatBuffer, i, src[i * 3], src[i * 3 + 1], src[i * 3 + 2]);
-      }
+      const centers = baseData.centers;
       const globalStart = getSceneGlobalSplatStart(p.sceneIdx);
+      for (let i = 0; i < count; i++) {
+        const lx = src[i * 3];
+        const ly = src[i * 3 + 1];
+        const lz = src[i * 3 + 2];
+        setSplatBufferLocalCenter(splatBuffer, i, lx, ly, lz);
+        const gi = globalStart + i;
+        centers[gi * 3] = lx;
+        centers[gi * 3 + 1] = ly;
+        centers[gi * 3 + 2] = lz;
+      }
       const globalEnd = globalStart + count - 1;
-      sm.updateBaseDataFromSplatBuffers(globalStart, globalEnd);
       sm.updateDataTexturesFromBaseData(globalStart, globalEnd);
       if (sm.enableDistancesComputationOnGPU) {
-        const { centers, sceneIndexes } = sm.getDataForDistancesComputation(globalStart, globalEnd);
-        sm.refreshGPUBuffersForDistancesComputation(centers, sceneIndexes, false);
+        const { centers: distCenters, sceneIndexes } = sm.getDataForDistancesComputation(globalStart, globalEnd);
+        sm.refreshGPUBuffersForDistancesComputation(distCenters, sceneIndexes, false);
       }
       viewer.forceRenderNextFrame();
     }
@@ -3307,20 +3316,38 @@
       const bindPoseVerts = shellFrame(shell, skin, motion, 0);
       const splatBuffer = buildMotionSplatBuffer(shell, bindPoseVerts, anchor);
       const sceneIdx = _n(viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
-      await addSplatBuffersKeepVisibility([splatBuffer], [placementOpts(p)]);
-      p.sceneIdx = sceneIdx;
-      p.motionRender = 'splat';
-      p.shell = shell;
-      p.motion = motion;
-      p.motionFps = motion.fps;
-      p.motionFrames = motion.numFrames;
-      p.root = null;
-      p.mesh = null;
-      p._poseVerts = new Float32Array(shell.numSplats * 3);
-      updateActorFrame(p, 0);
-      syncPlacementTransform(p);
-      applyPlacementVisibility(p);
-      viewer.forceRenderNextFrame();
+      try {
+        await addSplatBuffersKeepVisibility([splatBuffer], [placementOpts(p)]);
+        p.sceneIdx = sceneIdx;
+        p.shell = shell;
+        p.motion = motion;
+        p.motionFps = motion.fps;
+        p.motionFrames = motion.numFrames;
+        p.root = null;
+        p.mesh = null;
+        p._poseVerts = new Float32Array(shell.numSplats * 3);
+        p.motionRender = 'splat';
+        updateActorFrame(p, 0);
+        syncPlacementTransform(p);
+        applyPlacementVisibility(p);
+        viewer.forceRenderNextFrame();
+      } catch (err) {
+        if (viewer && p.sceneIdx === sceneIdx) {
+          try {
+            await viewer.removeSplatScene(sceneIdx, false);
+            for (const other of placements) {
+              if (other !== p && other.sceneIdx != null && other.sceneIdx > sceneIdx) other.sceneIdx--;
+            }
+          } catch (cleanupErr) {
+            console.warn('motion splat rollback failed', cleanupErr);
+          }
+        }
+        p.sceneIdx = null;
+        p.shell = null;
+        p._poseVerts = null;
+        p.motionRender = null;
+        throw err;
+      }
     }
 
     async function createActorObject(p, skin, motion) {
