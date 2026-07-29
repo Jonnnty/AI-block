@@ -4741,10 +4741,12 @@
 
     function togglePlacementGizmo(mode) {
       if (selected < 0) return;
-      placementGizmoMode = mode;
+      placementGizmoMode = placementGizmoMode === mode ? null : mode;
       updatePlacementGizmoUI();
       attachGizmo();
-      status(mode === 'translate' ? '移动模式' : '旋转模式');
+      status(placementGizmoMode
+        ? (placementGizmoMode === 'translate' ? '移动模式' : '旋转模式')
+        : 'Gizmo 已关闭');
     }
 
     function toggleRigGizmo(mode) {
