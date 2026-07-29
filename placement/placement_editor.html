@@ -253,7 +253,13 @@
       display: inline-flex; align-items: center; justify-content: center; line-height: 0;
     }
     .icon-btn.visibility-btn svg { display: block; }
-    #pickPlyFile, #pickNpzFile { display: none; }
+    #pickFile { display: none; }
+    .list-subhead {
+      font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: .04em;
+      margin: 10px 0 4px;
+    }
+    .list-subhead:first-of-type { margin-top: 2px; }
+    .scene-list-empty { font-size: 11px; color: #555; padding: 6px 8px; font-style: italic; }
     #timelineDock {
       position: absolute; left: 12px; bottom: 12px; z-index: 8;
       width: min(74vw, 980px); max-height: 44vh;
@@ -673,17 +679,16 @@
     <div id="modelsPanel">
       <section>
         <h2>导入模型</h2>
-        <input type="file" id="pickPlyFile" accept=".ply" multiple hidden />
-        <input type="file" id="pickNpzFile" accept=".npz" multiple hidden />
-        <div class="row">
-          <button type="button" id="importPlyBtn" class="secondary">选择 PLY</button>
-          <button type="button" id="importNpzBtn" class="secondary">选择 NPZ</button>
-        </div>
-        <p class="hint">PLY 为场景模型 · NPZ 为 Kimodo 动作人模</p>
+        <input type="file" id="pickFile" accept=".ply,.npz" multiple hidden />
+        <button type="button" id="importBtn" class="secondary">选择 PLY / NPZ 文件</button>
+        <p class="hint">NPZ 为 Kimodo 动作，导入后显示素色 SOMA 人模</p>
       </section>
       <section>
         <h2>已放置</h2>
-        <div id="sceneList" class="scene-list"></div>
+        <div class="list-subhead">PLY 场景</div>
+        <div id="sceneListPly" class="scene-list"></div>
+        <div class="list-subhead">NPZ 人模</div>
+        <div id="sceneListNpz" class="scene-list"></div>
       </section>
       <section>
         <h2>默认参数</h2>
@@ -1099,7 +1104,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260730a';
+    const MODEL_LOAD_BUILD = '20260730b';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -6779,35 +6784,63 @@
       return true;
     }
 
+    function appendPlacementRow(listEl, p, i) {
+      const row = document.createElement('div');
+      row.className = 'scene-row'
+        + (i === selected ? ' active' : '')
+        + (p.missing ? ' missing' : '');
+      if (p.missing) row.title = p.missingReason || missingPlacementHint(p);
+      const dupN = canonicalSiblingCount(p);
+      const dupBadge = dupN > 1 ? `<span class="scene-dup-badge">同名×${dupN}</span>` : '';
+      row.innerHTML = p.missing
+        ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : '缺少 PLY')}</span></span>${dupBadge}`
+        : `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : ''}${p.name}</span>${dupBadge}`;
+      const vis = document.createElement('button');
+      vis.type = 'button';
+      vis.className = 'icon-btn visibility-btn';
+      vis.innerHTML = visibilityBtnHtml(p.visible);
+      vis.title = p.visible === false ? '点击显示' : '点击隐藏';
+      vis.disabled = !!p.missing;
+      vis.onclick = (e) => { e.stopPropagation(); togglePlacementVisibility(i); };
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'icon-btn'; del.textContent = '×';
+      del.onclick = (e) => { e.stopPropagation(); removePlacement(i).catch(showError); };
+      row.appendChild(vis);
+      row.appendChild(del);
+      row.onclick = () => selectPlacement(i);
+      listEl.appendChild(row);
+    }
+
     function renderList() {
-      const list = el('sceneList');
-      list.innerHTML = '';
+      const plyList = el('sceneListPly');
+      const npzList = el('sceneListNpz');
+      if (!plyList || !npzList) return;
+      plyList.innerHTML = '';
+      npzList.innerHTML = '';
+      let plyCount = 0;
+      let npzCount = 0;
       placements.forEach((p, i) => {
-        const row = document.createElement('div');
-        row.className = 'scene-row'
-          + (i === selected ? ' active' : '')
-          + (p.missing ? ' missing' : '');
-        if (p.missing) row.title = p.missingReason || missingPlacementHint(p);
-        const dupN = canonicalSiblingCount(p);
-        const dupBadge = dupN > 1 ? `<span class="scene-dup-badge">同名×${dupN}</span>` : '';
-        row.innerHTML = p.missing
-          ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : '缺少 PLY')}</span></span>${dupBadge}`
-          : `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : ''}${p.name}</span>${dupBadge}`;
-        const vis = document.createElement('button');
-        vis.type = 'button';
-        vis.className = 'icon-btn visibility-btn';
-        vis.innerHTML = visibilityBtnHtml(p.visible);
-        vis.title = p.visible === false ? '点击显示' : '点击隐藏';
-        vis.disabled = !!p.missing;
-        vis.onclick = (e) => { e.stopPropagation(); togglePlacementVisibility(i); };
-        const del = document.createElement('button');
-        del.type = 'button'; del.className = 'icon-btn'; del.textContent = '×';
-        del.onclick = (e) => { e.stopPropagation(); removePlacement(i).catch(showError); };
-        row.appendChild(vis);
-        row.appendChild(del);
-        row.onclick = () => selectPlacement(i);
-        list.appendChild(row);
+        const isMotion = p.type === 'motion';
+        if (isMotion) {
+          appendPlacementRow(npzList, p, i);
+          npzCount++;
+        } else {
+          appendPlacementRow(plyList, p, i);
+          plyCount++;
+        }
       });
+      if (!plyCount) {
+        const empty = document.createElement('div');
+        empty.className = 'scene-list-empty';
+        empty.textContent = '暂无 PLY';
+        plyList.appendChild(empty);
+      }
+      if (!npzCount) {
+        const empty = document.createElement('div');
+        empty.className = 'scene-list-empty';
+        empty.textContent = '暂无 NPZ';
+        npzList.appendChild(empty);
+      }
     }
 
     function placementsToJson() {
@@ -7208,20 +7241,12 @@
     };
     el('motionPlayBtn').onclick = () => startMotionPreview();
 
-    el('importPlyBtn').onclick = () => el('pickPlyFile').click();
-    el('importNpzBtn').onclick = () => el('pickNpzFile').click();
-    el('pickPlyFile').onchange = async () => {
-      const files = [...(el('pickPlyFile').files || [])];
-      el('pickPlyFile').value = '';
+    el('importBtn').onclick = () => el('pickFile').click();
+    el('pickFile').onchange = async () => {
+      const files = [...(el('pickFile').files || [])];
+      el('pickFile').value = '';
       for (const f of files) {
         try { await addPlacementFromFile(f); } catch (e) { showError(e); }
-      }
-    };
-    el('pickNpzFile').onchange = async () => {
-      const files = [...(el('pickNpzFile').files || [])];
-      el('pickNpzFile').value = '';
-      for (const f of files) {
-        try { await addMotionFromFile(f); } catch (e) { showError(e); }
       }
     };
     el('tlCloseBtn').onclick = () => closeTimelineDock();
