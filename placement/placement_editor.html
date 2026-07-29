@@ -1104,7 +1104,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260730b';
+    const MODEL_LOAD_BUILD = '20260730c';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -2271,6 +2271,114 @@
       renderPathGroupList();
     }
 
+    function getNpzDurationSec(assetName) {
+      const mp = getMotionPlacementByName(assetName);
+      if (!mp || !mp.motion) return 10;
+      const fps = mp.motion.fps || 30;
+      return (mp.motion.numFrames - 1) / fps;
+    }
+
+    function parseTimelineMetaValue(field, raw, npzDur) {
+      let v = parseFloat(String(raw).trim());
+      if (Number.isNaN(v)) return null;
+      if (field === 'pathStartT' || field === 'pathEndT') return Math.max(0, Math.min(100, v)) / 100;
+      return Math.max(0, Math.min(npzDur, v));
+    }
+
+    function flushTimelineInputs() {
+      const path = getTimelinePath();
+      if (!path) return;
+      document.querySelectorAll('#tlRulers .tl-row-motion').forEach((row) => {
+        const trackId = row.dataset.trackId;
+        const track = path.motionTracks.find((t) => t.id === trackId);
+        if (!track) return;
+        const npzDur = getNpzDurationSec(track.assetName);
+        row.querySelectorAll('.tl-row-meta input[data-field]').forEach((inp) => {
+          const field = inp.dataset.field;
+          const v = parseTimelineMetaValue(field, inp.value, npzDur);
+          if (v != null) track[field] = v;
+        });
+      });
+      const durInp = el('tlDuration');
+      if (durInp && document.activeElement !== durInp) {
+        const v = parseFloat(durInp.value);
+        if (!Number.isNaN(v) && v >= 1) path.timelineDurationSec = v;
+      }
+      ensurePathMotionTracks(path);
+      syncActivePathFromState();
+    }
+
+    function syncTimelineMetaInputsFromTrack(trackId) {
+      const path = getTimelinePath();
+      if (!path) return;
+      const track = path.motionTracks.find((t) => t.id === trackId);
+      const row = document.querySelector(`#tlRulers .tl-row-motion[data-track-id="${trackId}"]`);
+      if (!track || !row) return;
+      const setVal = (field, val) => {
+        const inp = row.querySelector(`.tl-row-meta input[data-field="${field}"]`);
+        if (inp && document.activeElement !== inp) inp.value = val;
+      };
+      setVal('pathStartT', (track.pathStartT * 100).toFixed(1));
+      setVal('pathEndT', (track.pathEndT * 100).toFixed(1));
+      setVal('npzStartSec', track.npzStartSec.toFixed(2));
+      setVal('npzEndSec', track.npzEndSec.toFixed(2));
+    }
+
+    function refreshTimelineTrackVisuals(trackId) {
+      const path = getTimelinePath();
+      if (!path) return;
+      const track = path.motionTracks.find((t) => t.id === trackId);
+      const row = document.querySelector(`#tlRulers .tl-row-motion[data-track-id="${trackId}"]`);
+      if (!track || !row) return;
+      const seg = row.querySelector('.tl-segment');
+      const segLabel = row.querySelector('.tl-segment-label');
+      const hStart = row.querySelector('.tl-handle-start');
+      const hEnd = row.querySelector('.tl-handle-end');
+      if (seg) {
+        seg.style.left = `${track.pathStartT * 100}%`;
+        seg.style.width = `${Math.max(0.5, (track.pathEndT - track.pathStartT) * 100)}%`;
+      }
+      if (segLabel) segLabel.textContent = `${track.npzStartSec.toFixed(1)}s → ${track.npzEndSec.toFixed(1)}s`;
+      if (hStart) hStart.style.left = `${track.pathStartT * 100}%`;
+      if (hEnd) hEnd.style.left = `${track.pathEndT * 100}%`;
+    }
+
+    function refreshTimelineDurationLabels() {
+      const path = getTimelinePath();
+      if (!path) return;
+      const camLabels = document.querySelector('#tlRulers .tl-row-camera .tl-time-labels');
+      if (camLabels) {
+        camLabels.innerHTML = `<span>0s</span><span>${path.timelineDurationSec.toFixed(1)}s · 路径 0→100%</span>`;
+      }
+    }
+
+    function commitTimelineTrackField(trackId, field, rawValue) {
+      const path = getTimelinePath();
+      if (!path) return;
+      const track = path.motionTracks.find((t) => t.id === trackId);
+      if (!track) return;
+      const npzDur = getNpzDurationSec(track.assetName);
+      const v = parseTimelineMetaValue(field, rawValue, npzDur);
+      if (v == null) return;
+      track[field] = v;
+      ensurePathMotionTracks(path);
+      syncActivePathFromState();
+      refreshTimelineTrackVisuals(trackId);
+      syncTimelineMetaInputsFromTrack(trackId);
+      syncAllActorsForPathT(pathPinT);
+      kickOverlayRender();
+    }
+
+    function bindTimelineMetaInputs(meta, trackId) {
+      meta.querySelectorAll('input[data-field]').forEach((inp) => {
+        const commit = () => commitTimelineTrackField(trackId, inp.dataset.field, inp.value);
+        inp.addEventListener('change', commit);
+        inp.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); inp.blur(); commit(); }
+        });
+      });
+    }
+
     function updateTimelinePlayhead() {
       const playheads = document.querySelectorAll('#tlRulers .tl-playhead');
       playheads.forEach((ph) => { ph.style.left = `${pathPinT * 100}%`; });
@@ -2281,9 +2389,13 @@
       const dock = el('timelineDock');
       const rulers = el('tlRulers');
       if (!path || !dock || !rulers) return;
+      flushTimelineInputs();
       ensurePathMotionTracks(path);
       el('tlTitle').textContent = `时间校准 · ${path.name}`;
-      el('tlDuration').value = String(path.timelineDurationSec);
+      const durInp = el('tlDuration');
+      if (durInp && document.activeElement !== durInp) {
+        durInp.value = String(path.timelineDurationSec);
+      }
       rulers.innerHTML = '';
 
       const camRow = document.createElement('div');
@@ -2295,6 +2407,8 @@
       camTrack.className = 'tl-track';
       camTrack.innerHTML = '<div class="tl-ticks"></div><div class="tl-playhead"></div>';
       camTrack.onclick = (e) => {
+        if (e.target.closest('.tl-row-meta input')) return;
+        flushTimelineInputs();
         const rect = camTrack.getBoundingClientRect();
         const t = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
         pathSlidePlaying = false;
@@ -2368,22 +2482,9 @@
         meta.querySelector('[data-field="pathEndT"]').value = (track.pathEndT * 100).toFixed(1);
         meta.querySelector('[data-field="npzStartSec"]').value = track.npzStartSec.toFixed(2);
         meta.querySelector('[data-field="npzEndSec"]').value = track.npzEndSec.toFixed(2);
-        meta.querySelectorAll('input').forEach((inp) => {
-          inp.onchange = () => {
-            const field = inp.dataset.field;
-            let v = parseFloat(inp.value);
-            if (Number.isNaN(v)) return;
-            if (field === 'pathStartT' || field === 'pathEndT') v = Math.max(0, Math.min(100, v)) / 100;
-            else v = Math.max(0, Math.min(npzDur, v));
-            track[field] = v;
-            ensurePathMotionTracks(path);
-            syncActivePathFromState();
-            renderTimelineDock();
-            syncAllActorsForPathT(pathPinT);
-            kickOverlayRender();
-          };
-        });
+        bindTimelineMetaInputs(meta, track.id);
         meta.querySelector('.tl-row-del').onclick = () => {
+          flushTimelineInputs();
           path.motionTracks = path.motionTracks.filter((t) => t.id !== track.id);
           syncActivePathFromState();
           renderTimelineDock();
@@ -2428,7 +2529,8 @@
       }
       ensurePathMotionTracks(path);
       syncActivePathFromState();
-      renderTimelineDock();
+      refreshTimelineTrackVisuals(tlDragState.trackId);
+      syncTimelineMetaInputsFromTrack(tlDragState.trackId);
       syncAllActorsForPathT(pathPinT);
       kickOverlayRender();
     }
@@ -7258,7 +7360,7 @@
       if (Number.isNaN(v) || v < 1) return;
       path.timelineDurationSec = v;
       syncActivePathFromState();
-      renderTimelineDock();
+      refreshTimelineDurationLabels();
     };
     el('viewBgSelect').onchange = (e) => applyViewBackground(e.target.value);
     function setSliderValueUnbounded(slider, v, silent = false) {
