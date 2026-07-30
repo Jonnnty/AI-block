@@ -475,10 +475,20 @@
       font-weight: 700; cursor: text; line-height: 1.35;
     }
     .pose-add-sec-val:hover { background: rgba(255, 255, 255, 0.16); }
+    .pose-add-sec-slot {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 1.5em; vertical-align: baseline;
+    }
     .pose-add-sec-input {
-      width: 3.2em; padding: 2px 4px; margin: 0 2px; font-size: 13px; font-weight: 700;
-      text-align: center; border-radius: 4px;
-      background: #252525; border: 1px solid rgba(255, 195, 70, 0.55); color: #ffe08a;
+      width: 2.4em; padding: 0 2px; margin: 0 1px; font-size: 13px; font-weight: 700;
+      text-align: center; border-radius: 4px; line-height: 1.35;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 195, 70, 0.55); color: #ffe08a;
+      -moz-appearance: textfield;
+    }
+    .pose-add-sec-input::-webkit-outer-spin-button,
+    .pose-add-sec-input::-webkit-inner-spin-button {
+      -webkit-appearance: none; margin: 0;
     }
     .pose-add-btn:hover {
       background: rgba(255, 205, 90, 0.2); border-color: rgba(255, 195, 70, 0.42); color: #e8c878;
@@ -822,14 +832,12 @@
           <div id="addMarkerTimedWrap" class="pose-add-timed-wrap" hidden>
             <button type="button" id="addMarkerBtnTimed" class="pose-add-btn pose-add-btn-timed">
               <span>＋ 在 </span>
-              <span class="pose-add-sec-val" id="addMarkerSecVal" title="点击修改秒数（整数）">0</span>
+              <span class="pose-add-sec-slot">
+                <span class="pose-add-sec-val" id="addMarkerSecVal" title="点击修改秒数（整数）">0</span>
+                <input type="number" id="addMarkerSecInput" class="pose-add-sec-input" hidden min="0" step="1" />
+              </span>
               <span>s 添加机位</span>
             </button>
-            <div id="addMarkerSecEditRow" class="pose-add-btn pose-add-btn-timed" hidden>
-              <span>＋ 在 </span>
-              <input type="number" id="addMarkerSecInput" class="pose-add-sec-input" min="0" step="1" />
-              <span>s 添加机位</span>
-            </div>
           </div>
         </div>
         <div id="markerList" class="marker-list"></div>
@@ -2264,15 +2272,13 @@
       const useTime = pathUsesTimeAxis(path);
       const simpleBtn = el('addMarkerBtn');
       const timedWrap = el('addMarkerTimedWrap');
-      const timedBtn = el('addMarkerBtnTimed');
-      const editRow = el('addMarkerSecEditRow');
       const val = el('addMarkerSecVal');
+      const input = el('addMarkerSecInput');
       if (!simpleBtn || !timedWrap) return;
       simpleBtn.hidden = useTime;
       timedWrap.hidden = !useTime;
-      if (timedBtn) timedBtn.hidden = false;
-      if (editRow) editRow.hidden = true;
       if (val) val.hidden = false;
+      if (input) input.hidden = true;
       if (useTime) syncAddMarkerTargetSecFromPathPin();
     }
 
@@ -2284,30 +2290,36 @@
       const path = getActiveCameraPath();
       if (!pathUsesTimeAxis(path)) return;
       const input = el('addMarkerSecInput');
-      const timedBtn = el('addMarkerBtnTimed');
-      const editRow = el('addMarkerSecEditRow');
-      if (!input || !timedBtn || !editRow) return;
+      const val = el('addMarkerSecVal');
+      if (!input || !val || !input.hidden) return;
       const maxSec = getMaxMarkerSec(path);
       input.min = '0';
       input.max = String(maxSec);
       input.step = '1';
       input.value = String(addMarkerTargetSec);
-      timedBtn.hidden = true;
-      editRow.hidden = false;
+      val.hidden = true;
+      input.hidden = false;
       input.focus();
       input.select();
     }
 
+    function cancelAddMarkerSecEdit() {
+      const input = el('addMarkerSecInput');
+      const val = el('addMarkerSecVal');
+      if (!input || !val) return;
+      input.hidden = true;
+      val.hidden = false;
+    }
+
     function commitAddMarkerSecEdit() {
       const input = el('addMarkerSecInput');
-      const timedBtn = el('addMarkerBtnTimed');
-      const editRow = el('addMarkerSecEditRow');
-      if (!input || !timedBtn || !editRow || editRow.hidden) return;
+      const val = el('addMarkerSecVal');
+      if (!input || !val || input.hidden) return;
       const v = parseInt(input.value, 10);
       if (!Number.isNaN(v)) applyAddMarkerTargetSec(v);
-      editRow.hidden = true;
-      timedBtn.hidden = false;
-      updateAddMarkerUI();
+      input.hidden = true;
+      val.hidden = false;
+      updateAddMarkerSecDisplay();
     }
 
     function updateAddMarkerBtnLabel() {
@@ -8180,8 +8192,12 @@
     el('exportJsonBtn').onclick = () => exportConfigJson();
     el('clearBtn').onclick = () => clearEditorSession().catch(showError);
     el('addMarkerBtn').onclick = () => addCameraMarker();
-    el('addMarkerBtnTimed').onclick = () => addCameraMarker();
+    el('addMarkerBtnTimed').onclick = (e) => {
+      if (e.target.closest('#addMarkerSecVal') || e.target.closest('#addMarkerSecInput')) return;
+      addCameraMarker();
+    };
     el('addMarkerSecVal').onclick = (e) => startAddMarkerSecEdit(e);
+    el('addMarkerSecInput').addEventListener('click', (e) => e.stopPropagation());
     el('addMarkerSecInput').addEventListener('change', () => commitAddMarkerSecEdit());
     el('addMarkerSecInput').addEventListener('blur', () => commitAddMarkerSecEdit());
     el('addMarkerSecInput').addEventListener('keydown', (e) => {
@@ -8190,12 +8206,7 @@
         commitAddMarkerSecEdit();
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        const timedBtn = el('addMarkerBtnTimed');
-        const editRow = el('addMarkerSecEditRow');
-        if (timedBtn && editRow) {
-          editRow.hidden = true;
-          timedBtn.hidden = false;
-        }
+        cancelAddMarkerSecEdit();
       }
     });
     el('addPathGroupBtn').onclick = () => addCameraPathGroup();
