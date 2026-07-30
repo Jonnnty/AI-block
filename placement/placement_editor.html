@@ -352,6 +352,11 @@
       cursor: grab; touch-action: none; z-index: 2; min-width: 12px;
     }
     .tl-npz-bar.dragging { cursor: grabbing; }
+    .tl-npz-bar.snap-flash {
+      border-color: #fff;
+      box-shadow: 0 0 0 1px #fff, 0 0 10px rgba(255, 255, 255, 0.75);
+      transition: box-shadow 0.05s ease-out, border-color 0.05s ease-out;
+    }
     .tl-npz-bar-label {
       position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       font-size: 9px; color: #c8ffd8; pointer-events: none; white-space: nowrap;
@@ -2244,6 +2249,86 @@
     }
 
     const TL_PX_PER_SEC = 80;
+    const TL_SNAP_THRESHOLD_SEC = 0.12;
+
+    function trySnapSecToWhole(sec) {
+      const nearest = Math.round(sec);
+      if (Math.abs(sec - nearest) <= TL_SNAP_THRESHOLD_SEC) {
+        return { snapped: true, value: nearest };
+      }
+      return { snapped: false, value: sec };
+    }
+
+    function snapCamOffsetForNpzMove(track, rawCamOffsetSec) {
+      const npzDur = getNpzDurationSec(track.assetName);
+      const span = npzDur * track.npzScale;
+      const rawStart = rawCamOffsetSec;
+      const rawEnd = rawStart + span;
+      const startTry = trySnapSecToWhole(rawStart);
+      const endTry = trySnapSecToWhole(rawEnd);
+      if (startTry.snapped && endTry.snapped) {
+        const pickStart = Math.abs(rawStart - startTry.value) <= Math.abs(rawEnd - endTry.value);
+        if (pickStart) {
+          return { camOffsetSec: startTry.value, snappedSec: startTry.value, edge: 'start' };
+        }
+        return { camOffsetSec: endTry.value - span, snappedSec: endTry.value, edge: 'end' };
+      }
+      if (startTry.snapped) {
+        return { camOffsetSec: startTry.value, snappedSec: startTry.value, edge: 'start' };
+      }
+      if (endTry.snapped) {
+        return { camOffsetSec: endTry.value - span, snappedSec: endTry.value, edge: 'end' };
+      }
+      return { camOffsetSec: rawCamOffsetSec, snappedSec: null, edge: null };
+    }
+
+    function snapCamSecForNpzEnd(rawCamSec) {
+      const endTry = trySnapSecToWhole(rawCamSec);
+      if (endTry.snapped) {
+        return { camSec: endTry.value, snappedSec: endTry.value, edge: 'end' };
+      }
+      return { camSec: rawCamSec, snappedSec: null, edge: null };
+    }
+
+    let tlSnapAudioCtx = null;
+    function playTimelineSnapTick(edge) {
+      try {
+        if (!tlSnapAudioCtx) {
+          tlSnapAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = tlSnapAudioCtx;
+        if (ctx.state === 'suspended') ctx.resume();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = edge === 'start' ? 920 : 740;
+        gain.gain.setValueAtTime(0.07, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0008, ctx.currentTime + 0.035);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.035);
+      } catch (_) { /* ignore audio failures */ }
+    }
+
+    function emitTimelineSnapFeedback(barEl, snappedSec, edge, dragState) {
+      if (snappedSec == null || !edge) {
+        dragState.lastSnapKey = null;
+        if (barEl) barEl.classList.remove('snap-flash');
+        return;
+      }
+      const snapKey = `${edge}:${snappedSec}`;
+      if (dragState.lastSnapKey !== snapKey) {
+        dragState.lastSnapKey = snapKey;
+        playTimelineSnapTick(edge);
+        if (navigator.vibrate) navigator.vibrate(8);
+      }
+      if (barEl) {
+        barEl.classList.add('snap-flash');
+        clearTimeout(dragState.snapFlashTimer);
+        dragState.snapFlashTimer = setTimeout(() => barEl.classList.remove('snap-flash'), 120);
+      }
+    }
 
     function migrateMotionTrackRaw(raw, timelineDurationSec) {
       const id = raw.id || `mt-${nextMotionTrackId++}`;
@@ -2524,6 +2609,8 @@
           grabNpzSec,
           canvasEl,
           contentWidthSec,
+          lastSnapKey: null,
+          snapFlashTimer: 0,
         };
         barEl.setPointerCapture(e.pointerId);
         const onMove = (ev) => {
@@ -2531,12 +2618,18 @@
           const liveTrack = getTimelineTrackById(trackId);
           if (!liveTrack) return;
           const camSec = camSecFromTimelineClientX(ev.clientX, canvasEl, contentWidthSec);
-          liveTrack.camOffsetSec = camSec - grabNpzSec * liveTrack.npzScale;
+          const rawCamOffsetSec = camSec - grabNpzSec * liveTrack.npzScale;
+          const snapped = snapCamOffsetForNpzMove(liveTrack, rawCamOffsetSec);
+          liveTrack.camOffsetSec = snapped.camOffsetSec;
+          emitTimelineSnapFeedback(barEl, snapped.snappedSec, snapped.edge, tlDragState);
           refreshTimelineTrackVisuals(trackId);
           scheduleTimelineDragPreview();
         };
         const onUp = (ev) => {
-          barEl.classList.remove('dragging');
+          barEl.classList.remove('dragging', 'snap-flash');
+          if (tlDragState && tlDragState.snapFlashTimer) {
+            clearTimeout(tlDragState.snapFlashTimer);
+          }
           barEl.releasePointerCapture(ev.pointerId);
           barEl.removeEventListener('pointermove', onMove);
           barEl.removeEventListener('pointerup', onUp);
@@ -2558,17 +2651,31 @@
         if (!track || !track.scaleDragEnabled) return;
         const npzDur = getNpzDurationSec(track.assetName);
         handleEl.setPointerCapture(e.pointerId);
-        tlDragState = { kind: 'npz-scale', trackId, canvasEl, contentWidthSec };
+        const barEl = handleEl.closest('.tl-npz-bar');
+        tlDragState = {
+          kind: 'npz-scale',
+          trackId,
+          canvasEl,
+          contentWidthSec,
+          lastSnapKey: null,
+          snapFlashTimer: 0,
+        };
         const onMove = (ev) => {
           if (!tlDragState || tlDragState.kind !== 'npz-scale') return;
           const liveTrack = getTimelineTrackById(trackId);
           if (!liveTrack) return;
           const camSec = camSecFromTimelineClientX(ev.clientX, canvasEl, contentWidthSec);
-          liveTrack.npzScale = Math.max(0.05, Math.min(20, (camSec - liveTrack.camOffsetSec) / npzDur));
+          const snapped = snapCamSecForNpzEnd(camSec);
+          liveTrack.npzScale = Math.max(0.05, Math.min(20, (snapped.camSec - liveTrack.camOffsetSec) / npzDur));
+          emitTimelineSnapFeedback(barEl, snapped.snappedSec, snapped.edge, tlDragState);
           refreshTimelineTrackVisuals(trackId);
           scheduleTimelineDragPreview();
         };
         const onUp = (ev) => {
+          if (barEl) barEl.classList.remove('snap-flash');
+          if (tlDragState && tlDragState.snapFlashTimer) {
+            clearTimeout(tlDragState.snapFlashTimer);
+          }
           handleEl.releasePointerCapture(ev.pointerId);
           handleEl.removeEventListener('pointermove', onMove);
           handleEl.removeEventListener('pointerup', onUp);
