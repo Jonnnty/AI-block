@@ -284,63 +284,79 @@
       width: 28px !important; height: 28px; padding: 0 !important; line-height: 1;
       background: #333; border: 1px solid #555; border-radius: 6px;
     }
-    .tl-rulers { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 32vh; }
+    .tl-rulers { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; max-height: 34vh; }
     .tl-row { display: flex; align-items: flex-start; gap: 8px; }
     .tl-row-label {
       width: 76px; flex-shrink: 0; font-size: 10px; color: #888; line-height: 22px;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-top: 2px;
     }
-    .tl-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-    .tl-track {
-      position: relative; height: 22px; border-radius: 4px;
-      background: #2a2618; border: 1px solid #4a4428;
+    .tl-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .tl-scroll-viewport {
+      overflow-x: auto; overflow-y: hidden; width: 100%;
+      border-radius: 4px; background: #141414; border: 1px solid #333;
     }
-    .tl-row-camera .tl-track {
-      height: 26px; background: #1a2438; border-color: #3a5080; cursor: pointer;
+    .tl-scroll-content { position: relative; min-height: 28px; }
+    .tl-track-canvas { position: relative; height: 28px; }
+    .tl-row-camera .tl-track-canvas { height: 30px; cursor: pointer; }
+    .tl-camera-bar {
+      position: absolute; top: 3px; bottom: 3px; left: 0;
+      background: #1a2438; border: 1px solid #3a5080; border-radius: 4px;
     }
-    .tl-ticks {
-      position: absolute; inset: 0; pointer-events: none; border-radius: 4px;
+    .tl-grid-bg {
+      position: absolute; inset: 0; pointer-events: none;
       background: repeating-linear-gradient(
         90deg,
         transparent 0,
-        transparent calc(10% - 1px),
-        rgba(255, 255, 255, 0.14) calc(10% - 1px),
-        rgba(255, 255, 255, 0.14) 10%
+        transparent calc(var(--tl-sec-w, 80px) - 1px),
+        rgba(255, 255, 255, 0.1) calc(var(--tl-sec-w, 80px) - 1px),
+        rgba(255, 255, 255, 0.1) var(--tl-sec-w, 80px)
       );
+    }
+    .tl-sec-label {
+      position: absolute; top: -1px; font-size: 8px; color: #666; transform: translateX(-50%);
+      pointer-events: none; white-space: nowrap;
+    }
+    .tl-playhead {
+      position: absolute; top: 0; bottom: 0; width: 2px; background: #ffd54f;
+      transform: translateX(-1px); pointer-events: none; z-index: 5;
+      box-shadow: 0 0 6px rgba(255, 213, 79, 0.65);
+    }
+    .tl-npz-bar {
+      position: absolute; top: 3px; bottom: 3px; border-radius: 4px;
+      background: rgba(0, 177, 64, 0.34); border: 1px solid rgba(0, 177, 64, 0.85);
+      cursor: grab; touch-action: none; z-index: 2; min-width: 12px;
+    }
+    .tl-npz-bar.dragging { cursor: grabbing; }
+    .tl-npz-bar-label {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 9px; color: #c8ffd8; pointer-events: none; white-space: nowrap;
+    }
+    .tl-npz-zero {
+      position: absolute; left: 0; top: -2px; bottom: -2px; width: 3px;
+      background: #fff; border-radius: 1px; pointer-events: none; z-index: 1;
+    }
+    .tl-handle-end {
+      position: absolute; right: -4px; top: -4px; bottom: -4px; width: 8px;
+      background: #00b140; border: 1px solid #eaffef; border-radius: 2px;
+      cursor: ew-resize; z-index: 3; touch-action: none;
+    }
+    .tl-handle-end[hidden] { display: none !important; }
+    .tl-row-tools {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      font-size: 10px; color: #888;
+    }
+    .tl-row-tools label { flex-direction: row; align-items: center; gap: 4px; font-size: 10px; cursor: pointer; }
+    .tl-row-tools .tl-scale-input {
+      width: 48px; background: #252525; border: 1px solid #444; color: #eee;
+      padding: 2px 4px; border-radius: 3px; font-size: 10px;
     }
     .tl-time-labels {
       display: flex; justify-content: space-between; font-size: 9px; color: #666; padding: 0 1px;
     }
-    .tl-playhead {
-      position: absolute; top: -4px; bottom: -4px; width: 2px; background: #ffd54f;
-      transform: translateX(-1px); pointer-events: none; z-index: 4;
-      box-shadow: 0 0 6px rgba(255, 213, 79, 0.65);
-    }
-    .tl-segment {
-      position: absolute; top: 2px; bottom: 2px; border-radius: 3px;
-      background: rgba(0, 177, 64, 0.32); border: 1px solid rgba(0, 177, 64, 0.78);
-      min-width: 6px; z-index: 1;
-    }
-    .tl-segment-label {
-      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      font-size: 9px; color: #c8ffd8; pointer-events: none; white-space: nowrap; overflow: hidden;
-    }
-    .tl-handle {
-      position: absolute; top: -3px; bottom: -3px; width: 8px; margin-left: -4px;
-      background: #00b140; border: 1px solid #eaffef; border-radius: 2px;
-      cursor: ew-resize; z-index: 3; touch-action: none;
-    }
-    .tl-row-meta {
-      display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 10px; color: #888;
-    }
-    .tl-row-meta label { flex-direction: row; align-items: center; gap: 4px; font-size: 10px; }
-    .tl-row-meta input {
-      width: 44px; background: #252525; border: 1px solid #444; color: #eee;
-      padding: 2px 4px; border-radius: 3px; font-size: 10px;
-    }
     .tl-row-del {
       width: auto !important; padding: 0 6px !important; font-size: 12px !important;
       background: transparent !important; color: #888 !important; border: none !important;
+      margin-left: auto;
     }
     .tl-row-del:hover { color: #f88 !important; }
     .tl-add-panel {
@@ -1104,7 +1120,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260730c';
+    const MODEL_LOAD_BUILD = '20260730d';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -2188,21 +2204,42 @@
       return placements.find((p) => p.type === 'motion' && !p.missing && p.name === assetName) || null;
     }
 
-    function normalizeMotionTrack(raw) {
-      const p = getMotionPlacementByName(raw.assetName);
-      const fps = p && p.motion ? (p.motion.fps || 30) : 30;
-      const npzDur = p && p.motion ? Math.max(0.001, (p.motion.numFrames - 1) / fps) : 10;
+    const TL_PX_PER_SEC = 80;
+
+    function migrateMotionTrackRaw(raw, timelineDurationSec) {
       const id = raw.id || `mt-${nextMotionTrackId++}`;
       const m = /^mt-(\d+)$/.exec(id);
       if (m) nextMotionTrackId = Math.max(nextMotionTrackId, parseInt(m[1], 10) + 1);
+      if (raw.camOffsetSec != null && raw.npzScale != null) {
+        return {
+          id,
+          assetName: raw.assetName || '',
+          camOffsetSec: _n(raw.camOffsetSec, 0),
+          npzScale: Math.max(0.05, _n(raw.npzScale, 1)),
+          scaleDragEnabled: !!raw.scaleDragEnabled,
+        };
+      }
+      const D = Math.max(1, timelineDurationSec);
+      const camStart = Math.max(0, Math.min(1, _n(raw.pathStartT, 0))) * D;
+      const camEnd = Math.max(0, Math.min(1, _n(raw.pathEndT, 1))) * D;
+      const npzStart = Math.max(0, _n(raw.npzStartSec, 0));
+      const npzEnd = Math.max(npzStart + 0.001, _n(raw.npzEndSec, npzStart + 1));
+      const npzSpan = npzEnd - npzStart;
+      const camSpan = Math.max(0.001, camEnd - camStart);
+      const npzScale = camSpan / npzSpan;
       return {
         id,
         assetName: raw.assetName || '',
-        pathStartT: Math.max(0, Math.min(1, _n(raw.pathStartT, 0))),
-        pathEndT: Math.max(0, Math.min(1, _n(raw.pathEndT, 1))),
-        npzStartSec: Math.max(0, _n(raw.npzStartSec, 0)),
-        npzEndSec: Math.max(0, _n(raw.npzEndSec, npzDur)),
+        camOffsetSec: camStart - npzStart * npzScale,
+        npzScale,
+        scaleDragEnabled: false,
       };
+    }
+
+    function normalizeMotionTrack(raw, timelineDurationSec = 10) {
+      const t = migrateMotionTrackRaw(raw, timelineDurationSec);
+      t.npzScale = Math.max(0.05, Math.min(20, t.npzScale));
+      return t;
     }
 
     function ensurePathMotionTracks(path) {
@@ -2210,39 +2247,301 @@
       if (!Array.isArray(path.motionTracks)) path.motionTracks = [];
       path.timelineDurationSec = Math.max(1, _n(path.timelineDurationSec, 10));
       path.motionTracks = path.motionTracks
-        .map((t) => normalizeMotionTrack(t))
+        .map((t) => normalizeMotionTrack(t, path.timelineDurationSec))
         .filter((t) => !!getMotionPlacementByName(t.assetName));
-      for (const t of path.motionTracks) {
-        if (t.pathEndT <= t.pathStartT) t.pathEndT = Math.min(1, t.pathStartT + 0.05);
-        if (t.npzEndSec < t.npzStartSec) t.npzEndSec = t.npzStartSec + 0.1;
-      }
     }
 
-    function motionFrameFromTrack(pathT, track, motion) {
+    function motionFrameFromTrack(pathT, track, motion, timelineDurationSec) {
       if (!track || !motion || motion.numFrames <= 1) return 0;
       const fps = motion.fps || 30;
-      const p0 = Math.max(0, Math.min(1, track.pathStartT));
-      const p1 = Math.max(p0 + 0.001, Math.min(1, track.pathEndT));
-      const t = Math.max(0, Math.min(1, pathT));
-      if (t <= p0) {
-        return Math.min(motion.numFrames - 1, Math.max(0, Math.round(track.npzStartSec * fps)));
-      }
-      if (t >= p1) {
-        return Math.min(motion.numFrames - 1, Math.max(0, Math.round(track.npzEndSec * fps)));
-      }
-      const u = (t - p0) / (p1 - p0);
-      const sec = track.npzStartSec + u * (track.npzEndSec - track.npzStartSec);
-      return Math.min(motion.numFrames - 1, Math.max(0, Math.round(sec * fps)));
+      const camSec = Math.max(0, Math.min(1, pathT)) * Math.max(1, timelineDurationSec);
+      const npzSec = (camSec - track.camOffsetSec) / Math.max(0.05, track.npzScale);
+      return Math.min(motion.numFrames - 1, Math.max(0, Math.round(npzSec * fps)));
     }
 
     function getMotionFrameForPlacementAtPathT(p, pathT) {
       const path = getActiveCameraPath();
       if (path) ensurePathMotionTracks(path);
       const track = path && (path.motionTracks || []).find((tr) => tr.assetName === p.name);
-      if (track && p.motion) return motionFrameFromTrack(pathT, track, p.motion);
+      if (track && p.motion) {
+        return motionFrameFromTrack(pathT, track, p.motion, path.timelineDurationSec);
+      }
       const total = getActivePathTotalFrames();
       const camFrame = Math.round(pathT * Math.max(0, total - 1));
       return motionFrameForCameraFrame(camFrame, total, p.motion);
+    }
+
+    function getTimelineContentWidthSec(path) {
+      let maxSec = path.timelineDurationSec;
+      for (const t of path.motionTracks || []) {
+        const npzDur = getNpzDurationSec(t.assetName);
+        maxSec = Math.max(maxSec, t.camOffsetSec + npzDur * t.npzScale);
+      }
+      return Math.max(path.timelineDurationSec, maxSec * 1.02 + 0.5);
+    }
+
+    function camSecFromTimelineClientX(clientX, canvasEl, contentWidthSec) {
+      const viewport = canvasEl.closest('.tl-scroll-viewport');
+      if (!viewport) return 0;
+      const vRect = viewport.getBoundingClientRect();
+      const x = clientX - vRect.left + viewport.scrollLeft;
+      const contentW = contentWidthSec * TL_PX_PER_SEC;
+      return Math.max(0, Math.min(contentWidthSec, (x / contentW) * contentWidthSec));
+    }
+
+    function syncTimelineScroll(source) {
+      const sl = source.scrollLeft;
+      document.querySelectorAll('#timelineDock .tl-scroll-viewport').forEach((v) => {
+        if (v !== source) v.scrollLeft = sl;
+      });
+    }
+
+    function addTimelineSecondLabels(container, durationSec) {
+      container.innerHTML = '';
+      const max = Math.ceil(durationSec);
+      for (let s = 0; s <= max; s++) {
+        const lab = document.createElement('span');
+        lab.className = 'tl-sec-label';
+        lab.style.left = `${s * TL_PX_PER_SEC}px`;
+        lab.textContent = `${s}s`;
+        container.appendChild(lab);
+      }
+    }
+
+    function flushTimelineInputs() {
+      const path = getTimelinePath();
+      if (!path) return;
+      document.querySelectorAll('#tlRulers .tl-row-motion').forEach((row) => {
+        const trackId = row.dataset.trackId;
+        const track = path.motionTracks.find((t) => t.id === trackId);
+        if (!track) return;
+        const scaleInp = row.querySelector('.tl-scale-input');
+        const scaleChk = row.querySelector('.tl-scale-check');
+        if (scaleChk) track.scaleDragEnabled = scaleChk.checked;
+        if (scaleInp && document.activeElement !== scaleInp) {
+          const v = parseFloat(scaleInp.value);
+          if (!Number.isNaN(v)) track.npzScale = Math.max(0.05, Math.min(20, v));
+        } else if (scaleInp && document.activeElement === scaleInp) {
+          const v = parseFloat(scaleInp.value);
+          if (!Number.isNaN(v)) track.npzScale = Math.max(0.05, Math.min(20, v));
+        }
+      });
+      const durInp = el('tlDuration');
+      if (durInp && document.activeElement !== durInp) {
+        const v = parseFloat(durInp.value);
+        if (!Number.isNaN(v) && v >= 1) path.timelineDurationSec = v;
+      }
+      ensurePathMotionTracks(path);
+      syncActivePathFromState();
+    }
+
+    function refreshTimelineTrackVisuals(trackId) {
+      const path = getTimelinePath();
+      if (!path) return;
+      const track = path.motionTracks.find((t) => t.id === trackId);
+      const row = document.querySelector(`#tlRulers .tl-row-motion[data-track-id="${trackId}"]`);
+      if (!track || !row) return;
+      const npzDur = getNpzDurationSec(track.assetName);
+      const contentSec = getTimelineContentWidthSec(path);
+      const content = row.querySelector('.tl-scroll-content');
+      if (content) content.style.width = `${contentSec * TL_PX_PER_SEC}px`;
+      const bar = row.querySelector('.tl-npz-bar');
+      const endHandle = row.querySelector('.tl-handle-end');
+      const label = row.querySelector('.tl-npz-bar-label');
+      const scaleInp = row.querySelector('.tl-scale-input');
+      const scaleChk = row.querySelector('.tl-scale-check');
+      const leftPx = track.camOffsetSec * TL_PX_PER_SEC;
+      const widthPx = Math.max(12, npzDur * track.npzScale * TL_PX_PER_SEC);
+      if (bar) {
+        bar.style.left = `${leftPx}px`;
+        bar.style.width = `${widthPx}px`;
+      }
+      if (label) {
+        label.textContent = `${npzDur.toFixed(1)}s · ×${track.npzScale.toFixed(2)} · 0s@${track.camOffsetSec.toFixed(1)}s`;
+      }
+      if (scaleInp && document.activeElement !== scaleInp) {
+        scaleInp.value = track.npzScale.toFixed(2);
+      }
+      if (scaleChk) scaleChk.checked = !!track.scaleDragEnabled;
+      if (endHandle) endHandle.hidden = !track.scaleDragEnabled;
+    }
+
+    function refreshTimelineLayout() {
+      const path = getTimelinePath();
+      if (!path) return;
+      const contentSec = getTimelineContentWidthSec(path);
+      const contentPx = `${contentSec * TL_PX_PER_SEC}px`;
+      document.querySelectorAll('#tlRulers .tl-scroll-content').forEach((c) => {
+        c.style.width = contentPx;
+        c.style.setProperty('--tl-sec-w', `${TL_PX_PER_SEC}px`);
+      });
+      const camBar = document.querySelector('#tlRulers .tl-camera-bar');
+      if (camBar) camBar.style.width = `${path.timelineDurationSec * TL_PX_PER_SEC}px`;
+      document.querySelectorAll('#tlRulers .tl-sec-labels').forEach((lab) => {
+        addTimelineSecondLabels(lab, contentSec);
+      });
+      for (const t of path.motionTracks) refreshTimelineTrackVisuals(t.id);
+      updateTimelinePlayhead();
+      refreshTimelineDurationLabels();
+    }
+
+    function refreshTimelineDurationLabels() {
+      const path = getTimelinePath();
+      if (!path) return;
+      const camLabels = document.querySelector('#tlRulers .tl-row-camera .tl-time-labels');
+      if (camLabels) {
+        camLabels.innerHTML = `<span>0s</span><span>相机 ${path.timelineDurationSec.toFixed(1)}s · 路径 0→100%</span>`;
+      }
+    }
+
+    function updateTimelinePlayhead() {
+      const path = getTimelinePath();
+      if (!path) return;
+      const playhead = document.querySelector('#tlRulers .tl-playhead');
+      if (!playhead) return;
+      playhead.style.left = `${pathPinT * path.timelineDurationSec * TL_PX_PER_SEC}px`;
+    }
+
+    function bindNpzBarDrag(barEl, trackId, canvasEl, contentWidthSec) {
+      barEl.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('.tl-handle-end')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const path = getTimelinePath();
+        if (!path) return;
+        const track = path.motionTracks.find((t) => t.id === trackId);
+        if (!track) return;
+        const barRect = barEl.getBoundingClientRect();
+        const grabNpzSec = Math.max(0, Math.min(
+          getNpzDurationSec(track.assetName),
+          ((e.clientX - barRect.left) / Math.max(1, barRect.width)) * getNpzDurationSec(track.assetName),
+        ));
+        barEl.classList.add('dragging');
+        tlDragState = {
+          kind: 'npz-move',
+          trackId,
+          grabNpzSec,
+          canvasEl,
+          contentWidthSec,
+        };
+        barEl.setPointerCapture(e.pointerId);
+        const onMove = (ev) => {
+          if (!tlDragState || tlDragState.kind !== 'npz-move') return;
+          const camSec = camSecFromTimelineClientX(ev.clientX, canvasEl, contentWidthSec);
+          track.camOffsetSec = camSec - grabNpzSec * track.npzScale;
+          ensurePathMotionTracks(path);
+          syncActivePathFromState();
+          refreshTimelineTrackVisuals(trackId);
+          refreshTimelineLayout();
+          syncAllActorsForPathT(pathPinT);
+          kickOverlayRender();
+        };
+        const onUp = (ev) => {
+          barEl.classList.remove('dragging');
+          barEl.releasePointerCapture(ev.pointerId);
+          barEl.removeEventListener('pointermove', onMove);
+          barEl.removeEventListener('pointerup', onUp);
+          barEl.removeEventListener('pointercancel', onUp);
+          tlDragState = null;
+        };
+        barEl.addEventListener('pointermove', onMove);
+        barEl.addEventListener('pointerup', onUp);
+        barEl.addEventListener('pointercancel', onUp);
+      });
+    }
+
+    function bindNpzScaleDrag(handleEl, trackId, canvasEl, contentWidthSec) {
+      handleEl.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const path = getTimelinePath();
+        if (!path) return;
+        const track = path.motionTracks.find((t) => t.id === trackId);
+        if (!track || !track.scaleDragEnabled) return;
+        const npzDur = getNpzDurationSec(track.assetName);
+        handleEl.setPointerCapture(e.pointerId);
+        tlDragState = { kind: 'npz-scale', trackId, canvasEl, contentWidthSec };
+        const onMove = (ev) => {
+          if (!tlDragState || tlDragState.kind !== 'npz-scale') return;
+          const camSec = camSecFromTimelineClientX(ev.clientX, canvasEl, contentWidthSec);
+          track.npzScale = Math.max(0.05, Math.min(20, (camSec - track.camOffsetSec) / npzDur));
+          ensurePathMotionTracks(path);
+          syncActivePathFromState();
+          refreshTimelineTrackVisuals(trackId);
+          refreshTimelineLayout();
+          syncAllActorsForPathT(pathPinT);
+          kickOverlayRender();
+        };
+        const onUp = (ev) => {
+          handleEl.releasePointerCapture(ev.pointerId);
+          handleEl.removeEventListener('pointermove', onMove);
+          handleEl.removeEventListener('pointerup', onUp);
+          handleEl.removeEventListener('pointercancel', onUp);
+          tlDragState = null;
+        };
+        handleEl.addEventListener('pointermove', onMove);
+        handleEl.addEventListener('pointerup', onUp);
+        handleEl.addEventListener('pointercancel', onUp);
+      });
+    }
+
+    function bindTimelineScaleControls(row, track) {
+      const scaleInp = row.querySelector('.tl-scale-input');
+      const scaleChk = row.querySelector('.tl-scale-check');
+      const commitScale = () => {
+        const path = getTimelinePath();
+        if (!path) return;
+        const v = parseFloat(scaleInp.value);
+        if (!Number.isNaN(v)) track.npzScale = Math.max(0.05, Math.min(20, v));
+        track.scaleDragEnabled = scaleChk.checked;
+        ensurePathMotionTracks(path);
+        syncActivePathFromState();
+        refreshTimelineTrackVisuals(track.id);
+        refreshTimelineLayout();
+        syncAllActorsForPathT(pathPinT);
+        kickOverlayRender();
+      };
+      scaleInp.addEventListener('change', commitScale);
+      scaleInp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); scaleInp.blur(); commitScale(); }
+      });
+      scaleChk.addEventListener('change', () => {
+        track.scaleDragEnabled = scaleChk.checked;
+        refreshTimelineTrackVisuals(track.id);
+      });
+    }
+
+    function buildTimelineScrollRow(className, labelText, contentSec) {
+      const row = document.createElement('div');
+      row.className = `tl-row ${className}`;
+      const label = document.createElement('span');
+      label.className = 'tl-row-label';
+      label.textContent = labelText;
+      const body = document.createElement('div');
+      body.className = 'tl-row-body';
+      const viewport = document.createElement('div');
+      viewport.className = 'tl-scroll-viewport';
+      viewport.addEventListener('scroll', () => syncTimelineScroll(viewport));
+      const content = document.createElement('div');
+      content.className = 'tl-scroll-content';
+      content.style.width = `${contentSec * TL_PX_PER_SEC}px`;
+      content.style.setProperty('--tl-sec-w', `${TL_PX_PER_SEC}px`);
+      const canvas = document.createElement('div');
+      canvas.className = 'tl-track-canvas';
+      const grid = document.createElement('div');
+      grid.className = 'tl-grid-bg';
+      canvas.appendChild(grid);
+      const secLabels = document.createElement('div');
+      secLabels.className = 'tl-sec-labels';
+      secLabels.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
+      addTimelineSecondLabels(secLabels, contentSec);
+      canvas.appendChild(secLabels);
+      content.appendChild(canvas);
+      viewport.appendChild(content);
+      body.appendChild(viewport);
+      row.appendChild(label);
+      row.appendChild(body);
+      return { row, viewport, content, canvas, secLabels };
     }
 
     function getTimelinePath() {
@@ -2278,112 +2577,6 @@
       return (mp.motion.numFrames - 1) / fps;
     }
 
-    function parseTimelineMetaValue(field, raw, npzDur) {
-      let v = parseFloat(String(raw).trim());
-      if (Number.isNaN(v)) return null;
-      if (field === 'pathStartT' || field === 'pathEndT') return Math.max(0, Math.min(100, v)) / 100;
-      return Math.max(0, Math.min(npzDur, v));
-    }
-
-    function flushTimelineInputs() {
-      const path = getTimelinePath();
-      if (!path) return;
-      document.querySelectorAll('#tlRulers .tl-row-motion').forEach((row) => {
-        const trackId = row.dataset.trackId;
-        const track = path.motionTracks.find((t) => t.id === trackId);
-        if (!track) return;
-        const npzDur = getNpzDurationSec(track.assetName);
-        row.querySelectorAll('.tl-row-meta input[data-field]').forEach((inp) => {
-          const field = inp.dataset.field;
-          const v = parseTimelineMetaValue(field, inp.value, npzDur);
-          if (v != null) track[field] = v;
-        });
-      });
-      const durInp = el('tlDuration');
-      if (durInp && document.activeElement !== durInp) {
-        const v = parseFloat(durInp.value);
-        if (!Number.isNaN(v) && v >= 1) path.timelineDurationSec = v;
-      }
-      ensurePathMotionTracks(path);
-      syncActivePathFromState();
-    }
-
-    function syncTimelineMetaInputsFromTrack(trackId) {
-      const path = getTimelinePath();
-      if (!path) return;
-      const track = path.motionTracks.find((t) => t.id === trackId);
-      const row = document.querySelector(`#tlRulers .tl-row-motion[data-track-id="${trackId}"]`);
-      if (!track || !row) return;
-      const setVal = (field, val) => {
-        const inp = row.querySelector(`.tl-row-meta input[data-field="${field}"]`);
-        if (inp && document.activeElement !== inp) inp.value = val;
-      };
-      setVal('pathStartT', (track.pathStartT * 100).toFixed(1));
-      setVal('pathEndT', (track.pathEndT * 100).toFixed(1));
-      setVal('npzStartSec', track.npzStartSec.toFixed(2));
-      setVal('npzEndSec', track.npzEndSec.toFixed(2));
-    }
-
-    function refreshTimelineTrackVisuals(trackId) {
-      const path = getTimelinePath();
-      if (!path) return;
-      const track = path.motionTracks.find((t) => t.id === trackId);
-      const row = document.querySelector(`#tlRulers .tl-row-motion[data-track-id="${trackId}"]`);
-      if (!track || !row) return;
-      const seg = row.querySelector('.tl-segment');
-      const segLabel = row.querySelector('.tl-segment-label');
-      const hStart = row.querySelector('.tl-handle-start');
-      const hEnd = row.querySelector('.tl-handle-end');
-      if (seg) {
-        seg.style.left = `${track.pathStartT * 100}%`;
-        seg.style.width = `${Math.max(0.5, (track.pathEndT - track.pathStartT) * 100)}%`;
-      }
-      if (segLabel) segLabel.textContent = `${track.npzStartSec.toFixed(1)}s → ${track.npzEndSec.toFixed(1)}s`;
-      if (hStart) hStart.style.left = `${track.pathStartT * 100}%`;
-      if (hEnd) hEnd.style.left = `${track.pathEndT * 100}%`;
-    }
-
-    function refreshTimelineDurationLabels() {
-      const path = getTimelinePath();
-      if (!path) return;
-      const camLabels = document.querySelector('#tlRulers .tl-row-camera .tl-time-labels');
-      if (camLabels) {
-        camLabels.innerHTML = `<span>0s</span><span>${path.timelineDurationSec.toFixed(1)}s · 路径 0→100%</span>`;
-      }
-    }
-
-    function commitTimelineTrackField(trackId, field, rawValue) {
-      const path = getTimelinePath();
-      if (!path) return;
-      const track = path.motionTracks.find((t) => t.id === trackId);
-      if (!track) return;
-      const npzDur = getNpzDurationSec(track.assetName);
-      const v = parseTimelineMetaValue(field, rawValue, npzDur);
-      if (v == null) return;
-      track[field] = v;
-      ensurePathMotionTracks(path);
-      syncActivePathFromState();
-      refreshTimelineTrackVisuals(trackId);
-      syncTimelineMetaInputsFromTrack(trackId);
-      syncAllActorsForPathT(pathPinT);
-      kickOverlayRender();
-    }
-
-    function bindTimelineMetaInputs(meta, trackId) {
-      meta.querySelectorAll('input[data-field]').forEach((inp) => {
-        const commit = () => commitTimelineTrackField(trackId, inp.dataset.field, inp.value);
-        inp.addEventListener('change', commit);
-        inp.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') { e.preventDefault(); inp.blur(); commit(); }
-        });
-      });
-    }
-
-    function updateTimelinePlayhead() {
-      const playheads = document.querySelectorAll('#tlRulers .tl-playhead');
-      playheads.forEach((ph) => { ph.style.left = `${pathPinT * 100}%`; });
-    }
-
     function renderTimelineDock() {
       const path = getTimelinePath();
       const dock = el('timelineDock');
@@ -2391,6 +2584,7 @@
       if (!path || !dock || !rulers) return;
       flushTimelineInputs();
       ensurePathMotionTracks(path);
+      const contentSec = getTimelineContentWidthSec(path);
       el('tlTitle').textContent = `时间校准 · ${path.name}`;
       const durInp = el('tlDuration');
       if (durInp && document.activeElement !== durInp) {
@@ -2398,19 +2592,18 @@
       }
       rulers.innerHTML = '';
 
-      const camRow = document.createElement('div');
-      camRow.className = 'tl-row tl-row-camera';
-      camRow.innerHTML = '<span class="tl-row-label">相机轨迹</span>';
-      const camBody = document.createElement('div');
-      camBody.className = 'tl-row-body';
-      const camTrack = document.createElement('div');
-      camTrack.className = 'tl-track';
-      camTrack.innerHTML = '<div class="tl-ticks"></div><div class="tl-playhead"></div>';
-      camTrack.onclick = (e) => {
-        if (e.target.closest('.tl-row-meta input')) return;
+      const cam = buildTimelineScrollRow('tl-row-camera', '相机轨迹', contentSec);
+      const camBar = document.createElement('div');
+      camBar.className = 'tl-camera-bar';
+      camBar.style.width = `${path.timelineDurationSec * TL_PX_PER_SEC}px`;
+      const playhead = document.createElement('div');
+      playhead.className = 'tl-playhead';
+      cam.canvas.appendChild(camBar);
+      cam.canvas.appendChild(playhead);
+      cam.canvas.onclick = (e) => {
         flushTimelineInputs();
-        const rect = camTrack.getBoundingClientRect();
-        const t = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const camSec = camSecFromTimelineClientX(e.clientX, cam.canvas, contentSec);
+        const t = Math.max(0, Math.min(1, camSec / path.timelineDurationSec));
         pathSlidePlaying = false;
         stopPathSlidePreview();
         updatePathTransportUI();
@@ -2420,70 +2613,46 @@
       };
       const camLabels = document.createElement('div');
       camLabels.className = 'tl-time-labels';
-      camLabels.innerHTML = `<span>0s</span><span>${path.timelineDurationSec.toFixed(1)}s · 路径 0→100%</span>`;
-      camBody.appendChild(camTrack);
-      camBody.appendChild(camLabels);
-      camRow.appendChild(camBody);
-      rulers.appendChild(camRow);
+      camLabels.innerHTML = `<span>0s</span><span>相机 ${path.timelineDurationSec.toFixed(1)}s · 路径 0→100%</span>`;
+      cam.row.querySelector('.tl-row-body').appendChild(camLabels);
+      rulers.appendChild(cam.row);
 
       for (const track of path.motionTracks) {
         const mp = getMotionPlacementByName(track.assetName);
         if (!mp || !mp.motion) continue;
-        const fps = mp.motion.fps || 30;
-        const npzDur = (mp.motion.numFrames - 1) / fps;
-        const row = document.createElement('div');
-        row.className = 'tl-row tl-row-motion';
-        row.dataset.trackId = track.id;
+        const npzDur = getNpzDurationSec(track.assetName);
+        const shortName = track.assetName.replace(/\.npz$/i, '');
+        const motionRow = buildTimelineScrollRow('tl-row-motion', shortName, contentSec);
+        motionRow.row.dataset.trackId = track.id;
+        motionRow.row.querySelector('.tl-row-label').title = track.assetName;
 
-        const label = document.createElement('span');
-        label.className = 'tl-row-label';
-        label.title = track.assetName;
-        label.textContent = track.assetName.replace(/\.npz$/i, '');
+        const bar = document.createElement('div');
+        bar.className = 'tl-npz-bar';
+        bar.title = '拖动 NPZ 条卡位：拖 0s 白线或条上任意时刻对准相机刻度';
+        const zero = document.createElement('div');
+        zero.className = 'tl-npz-zero';
+        const barLabel = document.createElement('span');
+        barLabel.className = 'tl-npz-bar-label';
+        const endHandle = document.createElement('div');
+        endHandle.className = 'tl-handle-end';
+        endHandle.title = '勾选缩放后拖动尾部调整 NPZ 时间倍率';
+        bar.appendChild(zero);
+        bar.appendChild(barLabel);
+        bar.appendChild(endHandle);
+        motionRow.canvas.appendChild(bar);
+        bindNpzBarDrag(bar, track.id, motionRow.canvas, contentSec);
+        bindNpzScaleDrag(endHandle, track.id, motionRow.canvas, contentSec);
 
-        const body = document.createElement('div');
-        body.className = 'tl-row-body';
-
-        const trackEl = document.createElement('div');
-        trackEl.className = 'tl-track';
-        trackEl.innerHTML = '<div class="tl-ticks"></div>';
-        const seg = document.createElement('div');
-        seg.className = 'tl-segment';
-        seg.style.left = `${track.pathStartT * 100}%`;
-        seg.style.width = `${Math.max(0.5, (track.pathEndT - track.pathStartT) * 100)}%`;
-        const segLabel = document.createElement('span');
-        segLabel.className = 'tl-segment-label';
-        segLabel.textContent = `${track.npzStartSec.toFixed(1)}s → ${track.npzEndSec.toFixed(1)}s`;
-        seg.appendChild(segLabel);
-        const hStart = document.createElement('div');
-        hStart.className = 'tl-handle tl-handle-start';
-        hStart.style.left = `${track.pathStartT * 100}%`;
-        hStart.title = '拖动：NPZ 起点对齐路径位置';
-        const hEnd = document.createElement('div');
-        hEnd.className = 'tl-handle tl-handle-end';
-        hEnd.style.left = `${track.pathEndT * 100}%`;
-        hEnd.title = '拖动：NPZ 终点对齐路径位置';
-        trackEl.appendChild(seg);
-        trackEl.appendChild(hStart);
-        trackEl.appendChild(hEnd);
-        bindTimelineHandleDrag(hStart, track.id, 'pathStartT', trackEl);
-        bindTimelineHandleDrag(hEnd, track.id, 'pathEndT', trackEl);
-
-        const meta = document.createElement('div');
-        meta.className = 'tl-row-meta';
-        meta.innerHTML = `
-          <label>路径起点% <input type="number" min="0" max="100" step="0.5" data-field="pathStartT" /></label>
-          <label>路径终点% <input type="number" min="0" max="100" step="0.5" data-field="pathEndT" /></label>
-          <label>NPZ 起点s <input type="number" min="0" max="${npzDur.toFixed(2)}" step="0.1" data-field="npzStartSec" /></label>
-          <label>NPZ 终点s <input type="number" min="0" max="${npzDur.toFixed(2)}" step="0.1" data-field="npzEndSec" /></label>
-          <span class="hint">全长 ${npzDur.toFixed(1)}s</span>
+        const tools = document.createElement('div');
+        tools.className = 'tl-row-tools';
+        tools.innerHTML = `
+          <label><input type="checkbox" class="tl-scale-check" /> 缩放</label>
+          <label>×<input type="number" class="tl-scale-input" min="0.05" max="20" step="0.05" value="${track.npzScale.toFixed(2)}" /></label>
+          <span class="hint">NPZ ${npzDur.toFixed(1)}s</span>
           <button type="button" class="tl-row-del" title="移除此轨道">×</button>
         `;
-        meta.querySelector('[data-field="pathStartT"]').value = (track.pathStartT * 100).toFixed(1);
-        meta.querySelector('[data-field="pathEndT"]').value = (track.pathEndT * 100).toFixed(1);
-        meta.querySelector('[data-field="npzStartSec"]').value = track.npzStartSec.toFixed(2);
-        meta.querySelector('[data-field="npzEndSec"]').value = track.npzEndSec.toFixed(2);
-        bindTimelineMetaInputs(meta, track.id);
-        meta.querySelector('.tl-row-del').onclick = () => {
+        tools.querySelector('.tl-scale-check').checked = !!track.scaleDragEnabled;
+        tools.querySelector('.tl-row-del').onclick = () => {
           flushTimelineInputs();
           path.motionTracks = path.motionTracks.filter((t) => t.id !== track.id);
           syncActivePathFromState();
@@ -2491,58 +2660,13 @@
           syncAllActorsForPathT(pathPinT);
           kickOverlayRender();
         };
-
-        body.appendChild(trackEl);
-        body.appendChild(meta);
-        row.appendChild(label);
-        row.appendChild(body);
-        rulers.appendChild(row);
+        bindTimelineScaleControls(motionRow.row, track);
+        motionRow.row.querySelector('.tl-row-body').appendChild(tools);
+        rulers.appendChild(motionRow.row);
+        refreshTimelineTrackVisuals(track.id);
       }
 
       updateTimelinePlayhead();
-    }
-
-    function bindTimelineHandleDrag(handleEl, trackId, field, trackEl) {
-      handleEl.onpointerdown = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        tlDragState = { kind: field, trackId, startX: e.clientX, trackEl };
-        handleEl.setPointerCapture(e.pointerId);
-        handleEl.onpointermove = onTimelineHandleDrag;
-        handleEl.onpointerup = endTimelineHandleDrag;
-        handleEl.onpointercancel = endTimelineHandleDrag;
-      };
-    }
-
-    function onTimelineHandleDrag(e) {
-      if (!tlDragState) return;
-      const path = getTimelinePath();
-      if (!path) return;
-      const track = path.motionTracks.find((t) => t.id === tlDragState.trackId);
-      if (!track || !tlDragState.trackEl) return;
-      const rect = tlDragState.trackEl.getBoundingClientRect();
-      const t = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      if (tlDragState.kind === 'pathStartT') {
-        track.pathStartT = Math.min(t, track.pathEndT - 0.02);
-      } else {
-        track.pathEndT = Math.max(t, track.pathStartT + 0.02);
-      }
-      ensurePathMotionTracks(path);
-      syncActivePathFromState();
-      refreshTimelineTrackVisuals(tlDragState.trackId);
-      syncTimelineMetaInputsFromTrack(tlDragState.trackId);
-      syncAllActorsForPathT(pathPinT);
-      kickOverlayRender();
-    }
-
-    function endTimelineHandleDrag(e) {
-      if (!tlDragState) return;
-      const handle = e.currentTarget;
-      handle.onpointermove = null;
-      handle.onpointerup = null;
-      handle.onpointercancel = null;
-      try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
-      tlDragState = null;
     }
 
     function showTimelineAddPanel() {
@@ -2596,11 +2720,10 @@
       path.motionTracks.push(normalizeMotionTrack({
         id: `mt-${nextMotionTrackId++}`,
         assetName,
-        pathStartT: 0,
-        pathEndT: 1,
-        npzStartSec: Math.min(2, npzDur * 0.1),
-        npzEndSec: npzDur,
-      }));
+        camOffsetSec: 0,
+        npzScale: 1,
+        scaleDragEnabled: false,
+      }, path.timelineDurationSec));
     }
     function clearPathVisuals() {
       if (pathRoot) {
@@ -3627,7 +3750,7 @@
           framesPerSeg: _n(p.framesPerSeg, 16),
           fps: _n(p.fps, 12),
           timelineDurationSec: Math.max(1, _n(p.timelineDurationSec, 10)),
-          motionTracks: (p.motionTracks || []).map((t) => normalizeMotionTrack(t)),
+          motionTracks: (p.motionTracks || []).map((t) => normalizeMotionTrack(t, Math.max(1, _n(p.timelineDurationSec, 10)))),
         }));
         for (const p of cameraPaths) {
           const m = /^path-(\d+)$/.exec(p.id);
@@ -6998,10 +7121,9 @@
           motionTracks: (p.motionTracks || []).map((t) => ({
             id: t.id,
             assetName: t.assetName,
-            pathStartT: t.pathStartT,
-            pathEndT: t.pathEndT,
-            npzStartSec: t.npzStartSec,
-            npzEndSec: t.npzEndSec,
+            camOffsetSec: t.camOffsetSec,
+            npzScale: t.npzScale,
+            scaleDragEnabled: !!t.scaleDragEnabled,
           })),
         })),
         activePathId: activePathId || null,
@@ -7360,7 +7482,7 @@
       if (Number.isNaN(v) || v < 1) return;
       path.timelineDurationSec = v;
       syncActivePathFromState();
-      refreshTimelineDurationLabels();
+      refreshTimelineLayout();
     };
     el('viewBgSelect').onchange = (e) => applyViewBackground(e.target.value);
     function setSliderValueUnbounded(slider, v, silent = false) {
