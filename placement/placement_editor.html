@@ -463,6 +463,23 @@
       color: #d4b56a;
       box-shadow: none;
     }
+    .pose-add-timed-wrap { width: 100%; }
+    .pose-add-btn-timed {
+      display: flex; align-items: center; justify-content: center; gap: 0;
+      flex-wrap: wrap;
+    }
+    .pose-add-sec-val {
+      display: inline-block; min-width: 1.4em; padding: 0 4px; margin: 0 1px;
+      border-radius: 4px; background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 195, 70, 0.45); color: #ffe08a;
+      font-weight: 700; cursor: text; line-height: 1.35;
+    }
+    .pose-add-sec-val:hover { background: rgba(255, 255, 255, 0.16); }
+    .pose-add-sec-input {
+      width: 3.2em; padding: 2px 4px; margin: 0 2px; font-size: 13px; font-weight: 700;
+      text-align: center; border-radius: 4px;
+      background: #252525; border: 1px solid rgba(255, 195, 70, 0.55); color: #ffe08a;
+    }
     .pose-add-btn:hover {
       background: rgba(255, 205, 90, 0.2); border-color: rgba(255, 195, 70, 0.42); color: #e8c878;
       filter: none;
@@ -802,6 +819,18 @@
         </div>
         <div class="pose-add-wrap">
           <button type="button" id="addMarkerBtn" class="pose-add-btn">＋ 当前机位</button>
+          <div id="addMarkerTimedWrap" class="pose-add-timed-wrap" hidden>
+            <button type="button" id="addMarkerBtnTimed" class="pose-add-btn pose-add-btn-timed">
+              <span>＋ 在 </span>
+              <span class="pose-add-sec-val" id="addMarkerSecVal" title="点击修改秒数（整数）">0</span>
+              <span>s 添加机位</span>
+            </button>
+            <div id="addMarkerSecEditRow" class="pose-add-btn pose-add-btn-timed" hidden>
+              <span>＋ 在 </span>
+              <input type="number" id="addMarkerSecInput" class="pose-add-sec-input" min="0" step="1" />
+              <span>s 添加机位</span>
+            </div>
+          </div>
         </div>
         <div id="markerList" class="marker-list"></div>
         <div id="pathPinSliderWrap" class="path-pin-block" hidden>
@@ -1969,6 +1998,7 @@
     let pathFramesPerSeg = 16;
     let pathFps = 12;
     let pathPinT = 0;
+    let addMarkerTargetSec = 0;
     let pathSlidePlaying = false;
 
     const _tmpEuler = new THREE.Euler();
@@ -2191,10 +2221,97 @@
       return pathPinT * Math.max(1, dur);
     }
 
+    function pathUsesTimeAxis(path) {
+      if (!path) return false;
+      return !!(path.timeAxisEnabled || pathHasTimelineTracks(path));
+    }
+
+    function getMaxMarkerSec(path) {
+      if (!path) return 10;
+      return Math.max(0, Math.floor(Math.max(1, _n(path.timelineDurationSec, 10))));
+    }
+
+    function updateAddMarkerSecDisplay() {
+      const val = el('addMarkerSecVal');
+      if (val) val.textContent = String(addMarkerTargetSec);
+    }
+
+    function syncAddMarkerTargetSecFromPathPin() {
+      const path = getActiveCameraPath();
+      const maxSec = getMaxMarkerSec(path);
+      addMarkerTargetSec = Math.max(0, Math.min(maxSec, Math.round(currentPathCamSec())));
+      updateAddMarkerSecDisplay();
+    }
+
+    function applyAddMarkerTargetSec(sec) {
+      const path = getActiveCameraPath();
+      if (!path) return;
+      const maxSec = getMaxMarkerSec(path);
+      addMarkerTargetSec = Math.max(0, Math.min(maxSec, Math.round(sec)));
+      const dur = Math.max(1, path.timelineDurationSec);
+      pathPinT = maxSec > 0 ? Math.min(1, addMarkerTargetSec / dur) : 0;
+      syncPathPinUI();
+      if (cameraMarkers.length >= 2) applyPathPinPosition();
+      else {
+        syncAllActorsForPathT(pathPinT);
+        viewer && viewer.forceRenderNextFrame();
+      }
+      updateAddMarkerSecDisplay();
+    }
+
+    function updateAddMarkerUI() {
+      const path = getActiveCameraPath();
+      const useTime = pathUsesTimeAxis(path);
+      const simpleBtn = el('addMarkerBtn');
+      const timedWrap = el('addMarkerTimedWrap');
+      const timedBtn = el('addMarkerBtnTimed');
+      const editRow = el('addMarkerSecEditRow');
+      const val = el('addMarkerSecVal');
+      if (!simpleBtn || !timedWrap) return;
+      simpleBtn.hidden = useTime;
+      timedWrap.hidden = !useTime;
+      if (timedBtn) timedBtn.hidden = false;
+      if (editRow) editRow.hidden = true;
+      if (val) val.hidden = false;
+      if (useTime) syncAddMarkerTargetSecFromPathPin();
+    }
+
+    function startAddMarkerSecEdit(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      const path = getActiveCameraPath();
+      if (!pathUsesTimeAxis(path)) return;
+      const input = el('addMarkerSecInput');
+      const timedBtn = el('addMarkerBtnTimed');
+      const editRow = el('addMarkerSecEditRow');
+      if (!input || !timedBtn || !editRow) return;
+      const maxSec = getMaxMarkerSec(path);
+      input.min = '0';
+      input.max = String(maxSec);
+      input.step = '1';
+      input.value = String(addMarkerTargetSec);
+      timedBtn.hidden = true;
+      editRow.hidden = false;
+      input.focus();
+      input.select();
+    }
+
+    function commitAddMarkerSecEdit() {
+      const input = el('addMarkerSecInput');
+      const timedBtn = el('addMarkerBtnTimed');
+      const editRow = el('addMarkerSecEditRow');
+      if (!input || !timedBtn || !editRow || editRow.hidden) return;
+      const v = parseInt(input.value, 10);
+      if (!Number.isNaN(v)) applyAddMarkerTargetSec(v);
+      editRow.hidden = true;
+      timedBtn.hidden = false;
+      updateAddMarkerUI();
+    }
+
     function updateAddMarkerBtnLabel() {
-      const btn = el('addMarkerBtn');
-      if (!btn) return;
-      btn.textContent = `＋ 在 ${currentPathCamSec().toFixed(1)}s 添加机位`;
+      updateAddMarkerUI();
     }
 
     function applyMarkerToRig(m) {
@@ -2306,6 +2423,7 @@
         fps: 12,
         timelineDurationSec: 10,
         motionTracks: [],
+        timeAxisEnabled: false,
       };
       return path;
     }
@@ -2855,7 +2973,10 @@
         syncActivePathFromState();
       }
       timelineOpenPathId = pathId;
+      const path = cameraPaths.find((p) => p.id === pathId);
+      if (path) path.timeAxisEnabled = true;
       if (activePathId !== pathId) selectCameraPath(pathId);
+      else updateAddMarkerUI();
       el('timelineDock').hidden = false;
       el('tlAddPanel').hidden = true;
       renderTimelineDock();
@@ -2866,6 +2987,7 @@
       const path = getTimelinePath();
       flushOpenTimelineDomToPath(true);
       if (path) {
+        path.timeAxisEnabled = true;
         normalizePathMotionTracksInPlace(path, false);
         syncActivePathFromState();
       }
@@ -2873,6 +2995,7 @@
       el('timelineDock').hidden = true;
       el('tlAddPanel').hidden = true;
       renderPathGroupList();
+      updateAddMarkerUI();
     }
 
     function toggleTimelineForPath(pathId) {
@@ -3040,6 +3163,7 @@
       if (!mp || !mp.motion) return;
       ensurePathMotionTracks(path);
       if (path.motionTracks.some((t) => t.assetName === assetName)) return;
+      path.timeAxisEnabled = true;
       const fps = mp.motion.fps || 30;
       const npzDur = (mp.motion.numFrames - 1) / fps;
       path.motionTracks.push(normalizeMotionTrack({
@@ -3167,8 +3291,8 @@
         countSpan.textContent = `${nodeCount} 机位`;
         const clockBtn = document.createElement('button');
         clockBtn.type = 'button';
-        clockBtn.className = 'icon-btn tl-clock-btn' + (timelineOpenPathId === path.id ? ' active' : '');
-        clockBtn.title = timelineOpenPathId === path.id ? '时间轴已展开' : '打开时间校准';
+        clockBtn.className = 'icon-btn tl-clock-btn' + ((timelineOpenPathId === path.id || pathUsesTimeAxis(path)) ? ' active' : '');
+        clockBtn.title = timelineOpenPathId === path.id ? '时间轴已展开' : (pathUsesTimeAxis(path) ? '打开时间校准' : '启用时间校准');
         clockBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
         clockBtn.onclick = (e) => {
           e.stopPropagation();
@@ -4079,6 +4203,7 @@
           fps: _n(p.fps, 12),
           timelineDurationSec: Math.max(1, _n(p.timelineDurationSec, 10)),
           motionTracks: (p.motionTracks || []).map((t) => normalizeMotionTrack(t, Math.max(1, _n(p.timelineDurationSec, 10)))),
+          timeAxisEnabled: !!(p.timeAxisEnabled || (p.motionTracks && p.motionTracks.length)),
         }));
         for (const p of cameraPaths) {
           const m = /^path-(\d+)$/.exec(p.id);
@@ -5068,7 +5193,10 @@
       if (fill) fill.style.width = `${pct}%`;
       if (thumb) thumb.style.left = `${pct}%`;
       updateTimelinePlayhead();
-      updateAddMarkerBtnLabel();
+      if (pathUsesTimeAxis(getActiveCameraPath())) {
+        syncAddMarkerTargetSecFromPathPin();
+      }
+      updateAddMarkerUI();
     }
 
     function syncShowFrustumUI() {
@@ -5713,6 +5841,7 @@
       if (!cameraMarkers.length) return;
       const path = getActiveCameraPath();
       const dur = path ? path.timelineDurationSec : 10;
+      const showSec = pathUsesTimeAxis(path);
       cameraMarkers.forEach((m, i) => {
         const row = document.createElement('div');
         row.className = 'marker-row' + (i === selectedMarkerIdx ? ' active' : '');
@@ -5721,9 +5850,9 @@
         const isStart = i === 0;
         const isEnd = i === cameraMarkers.length - 1 && cameraMarkers.length > 1;
         const dotClass = isStart ? 'start' : (isEnd ? 'end' : 'mid');
-        const secLabel = markerCamSecLabel(m, dur);
+        const secLabel = showSec ? ` · ${markerCamSecLabel(m, dur)}s` : '';
         const dragHandle = markersUsePathT() ? '' : '<span class="drag-handle">⋮⋮</span>';
-        row.innerHTML = `${dragHandle}<span class="marker-dot ${dotClass}"></span><span class="scene-name">#${i + 1} · ${secLabel}s</span>`;
+        row.innerHTML = `${dragHandle}<span class="marker-dot ${dotClass}"></span><span class="scene-name">#${i + 1}${secLabel}</span>`;
         row.addEventListener('dragstart', (e) => {
           markerDragFromIdx = i;
           row.classList.add('dragging');
@@ -5895,13 +6024,22 @@
     function addCameraMarker() {
       if (!rigOpen) { status('请先打开渲染摄像机'); return; }
       ensureActiveCameraPathForEdit();
+      const path = getActiveCameraPath();
+      const useTimeAxis = pathUsesTimeAxis(path);
+      if (useTimeAxis) {
+        applyAddMarkerTargetSec(addMarkerTargetSec);
+      }
       if (cameraMarkers.length >= 2) {
         applyPathPinPosition();
       }
       const marker = markerFromRig();
-      marker.pathT = pathPinT;
-      if (cameraMarkers.length) {
-        insertMarkerByPathT(marker);
+      if (useTimeAxis) {
+        marker.pathT = pathPinT;
+        if (cameraMarkers.length) {
+          insertMarkerByPathT(marker);
+        } else {
+          cameraMarkers.push(marker);
+        }
       } else {
         cameraMarkers.push(marker);
       }
@@ -5916,7 +6054,9 @@
         renderMarkerList();
         attachGizmo();
         playPathSlide();
-        status(`已添加 ${markerCamSecLabel(marker)}s 机位 · 共 ${cameraMarkers.length} 个`);
+        status(useTimeAxis
+          ? `已添加 ${markerCamSecLabel(marker)}s 机位 · 共 ${cameraMarkers.length} 个`
+          : `${cameraMarkers.length} 机位 · 路径预览中`);
       } else {
         selectedMarkerIdx = -1;
         selectedCpSegIdx = -1;
@@ -5928,11 +6068,13 @@
         el('gizmoRotateRig').classList.remove('active');
         renderMarkerList();
         attachGizmo();
-        status(`已添加 #1 · ${markerCamSecLabel(marker)}s · 继续移动后 ＋`);
+        status(useTimeAxis
+          ? `已添加 #1 · ${markerCamSecLabel(marker)}s · 继续移动后 ＋`
+          : '已添加 #1 · 移动后继续 ＋');
       }
       syncActivePathFromState();
       renderPathGroupList();
-      updateAddMarkerBtnLabel();
+      updateAddMarkerUI();
       el('rigPreviewStatus').textContent = '需重新渲染';
     }
 
@@ -7539,6 +7681,7 @@
           framesPerSeg: p.framesPerSeg,
           fps: p.fps,
           timelineDurationSec: _n(p.timelineDurationSec, 10),
+          timeAxisEnabled: !!p.timeAxisEnabled,
           motionTracks: (p.motionTracks || []).map((t) => ({
             id: t.id,
             assetName: t.assetName,
@@ -7916,6 +8059,8 @@
       path.timelineDurationSec = v;
       syncActivePathFromState();
       refreshTimelineLayout();
+      if (pathUsesTimeAxis(path)) applyAddMarkerTargetSec(addMarkerTargetSec);
+      updateAddMarkerUI();
     };
     el('viewBgSelect').onchange = (e) => applyViewBackground(e.target.value);
     function setSliderValueUnbounded(slider, v, silent = false) {
@@ -8035,6 +8180,24 @@
     el('exportJsonBtn').onclick = () => exportConfigJson();
     el('clearBtn').onclick = () => clearEditorSession().catch(showError);
     el('addMarkerBtn').onclick = () => addCameraMarker();
+    el('addMarkerBtnTimed').onclick = () => addCameraMarker();
+    el('addMarkerSecVal').onclick = (e) => startAddMarkerSecEdit(e);
+    el('addMarkerSecInput').addEventListener('change', () => commitAddMarkerSecEdit());
+    el('addMarkerSecInput').addEventListener('blur', () => commitAddMarkerSecEdit());
+    el('addMarkerSecInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commitAddMarkerSecEdit();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        const timedBtn = el('addMarkerBtnTimed');
+        const editRow = el('addMarkerSecEditRow');
+        if (timedBtn && editRow) {
+          editRow.hidden = true;
+          timedBtn.hidden = false;
+        }
+      }
+    });
     el('addPathGroupBtn').onclick = () => addCameraPathGroup();
     el('deletePathGroupBtn').onclick = () => deleteCameraPathGroup();
     el('confirmKeypointBtn').onclick = () => confirmPathKeypoint();
