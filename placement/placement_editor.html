@@ -4423,9 +4423,13 @@
       reconcileSceneRenderState().catch((e) => console.warn('reconcile after motion stop failed', e));
     }
 
-    function applyMotionDefaultScale(p, motion) {
-      p.scale = motionDefaultScale(motion, defaultScale);
+    function applyMotionScale(p, motion, savedScale) {
       p.motionHeight = motion.height;
+      if (savedScale != null && Number.isFinite(Number(savedScale))) {
+        p.scale = Number(savedScale);
+        return;
+      }
+      p.scale = motionDefaultScale(motion, defaultScale);
     }
 
     function removeActorMeshIfAny(p) {
@@ -4721,7 +4725,7 @@
           p.center = [motion.anchor.x, motion.anchor.y, motion.anchor.z];
         }
         if (sourcePath) p.sourcePath = sourcePath;
-        applyMotionDefaultScale(p, motion);
+        applyMotionScale(p, motion, p.motionScaleExplicit ? p.scale : null);
         await createActorObject(p, skin, motion);
         await finalizeMotionPlacement(p, await ensureMotionSplatShell());
         selectPlacement(missingIdx);
@@ -4750,7 +4754,7 @@
         motionFrames: motion.numFrames,
         currentFrame: 0,
       };
-      applyMotionDefaultScale(p, motion);
+      applyMotionScale(p, motion, null);
       await createActorObject(p, skin, motion);
       placements.push(p);
       await finalizeMotionPlacement(p, await ensureMotionSplatShell());
@@ -7472,6 +7476,7 @@
             missingReason: missingReasonText,
             x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
             scale: _n(item.scale, defaultScale),
+            motionScaleExplicit: item.scale != null,
             yaw_deg: _n(item.yaw_deg, 0),
             sceneIdx: null,
             visible: item.visible !== false,
@@ -7495,6 +7500,7 @@
             sourcePath: configSourcePath || item.sourcePath || await idbGetSceneSourcePath(activeSceneId, name) || null,
             x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
             scale: _n(item.scale, defaultScale),
+            motionScaleExplicit: item.scale != null,
             yaw_deg: _n(item.yaw_deg, 0),
             sceneIdx: null,
             visible: item.visible !== false,
@@ -7506,7 +7512,7 @@
             motionFrames: motion.numFrames,
             currentFrame: 0,
           };
-          applyMotionDefaultScale(p, motion);
+          applyMotionScale(p, motion, item.scale != null ? item.scale : null);
           await createActorObject(p, skin, motion);
           placements.push(p);
           await finalizeMotionPlacement(p, await ensureMotionSplatShell());
