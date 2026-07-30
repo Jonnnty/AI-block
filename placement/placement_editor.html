@@ -288,6 +288,10 @@
     .tl-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
     .tl-row-label-col {
       width: 88px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px;
+      position: relative; z-index: 6; pointer-events: auto;
+    }
+    .tl-row-tools-compact input[type=checkbox] {
+      width: 14px; height: 14px; margin: 0; flex-shrink: 0; cursor: pointer; pointer-events: auto;
     }
     .tl-row-label {
       font-size: 10px; color: #888; line-height: 1.3;
@@ -295,8 +299,9 @@
     }
     .tl-row-tools-compact {
       display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: #888;
+      position: relative; z-index: 8; pointer-events: auto;
     }
-    .tl-row-tools-compact label { flex-direction: row; align-items: center; gap: 4px; cursor: pointer; }
+    .tl-row-tools-compact label { flex-direction: row; align-items: center; gap: 4px; cursor: pointer; pointer-events: auto; }
     .tl-row-tools-compact .tl-scale-input {
       width: 100%; background: #252525; border: 1px solid #444; color: #eee;
       padding: 2px 4px; border-radius: 3px; font-size: 10px;
@@ -1146,7 +1151,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260730e';
+    const MODEL_LOAD_BUILD = '20260730i';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -2236,7 +2241,11 @@
       const id = raw.id || `mt-${nextMotionTrackId++}`;
       const m = /^mt-(\d+)$/.exec(id);
       if (m) nextMotionTrackId = Math.max(nextMotionTrackId, parseInt(m[1], 10) + 1);
-      if (raw.camOffsetSec != null && raw.npzScale != null) {
+      const hasModernFields = raw
+        && typeof raw === 'object'
+        && Number.isFinite(Number(raw.camOffsetSec))
+        && Number.isFinite(Number(raw.npzScale));
+      if (hasModernFields) {
         return {
           id,
           assetName: raw.assetName || '',
@@ -2272,9 +2281,43 @@
       if (!path) return;
       if (!Array.isArray(path.motionTracks)) path.motionTracks = [];
       path.timelineDurationSec = Math.max(1, _n(path.timelineDurationSec, 10));
-      path.motionTracks = path.motionTracks
-        .map((t) => normalizeMotionTrack(t, path.timelineDurationSec))
-        .filter((t) => !!getMotionPlacementByName(t.assetName));
+      path.motionTracks = path.motionTracks.filter((t) => {
+        if (!getMotionPlacementByName(t.assetName)) return false;
+        const normalized = normalizeMotionTrack(t, path.timelineDurationSec);
+        t.id = normalized.id;
+        t.assetName = normalized.assetName;
+        t.camOffsetSec = normalized.camOffsetSec;
+        t.npzScale = normalized.npzScale;
+        t.scaleDragEnabled = normalized.scaleDragEnabled;
+        return true;
+      });
+    }
+
+    function getTimelineTrackById(trackId) {
+      const path = getTimelinePath();
+      if (!path) return null;
+      return path.motionTracks.find((t) => t.id === trackId) || null;
+    }
+
+    let tlDragPreviewRaf = 0;
+    function scheduleTimelineDragPreview() {
+      if (tlDragPreviewRaf) return;
+      tlDragPreviewRaf = requestAnimationFrame(() => {
+        tlDragPreviewRaf = 0;
+        syncAllActorsForPathT(pathPinT);
+        kickOverlayRender();
+      });
+    }
+
+    function commitTimelineDragState(trackId) {
+      const path = getTimelinePath();
+      if (!path) return;
+      ensurePathMotionTracks(path);
+      syncActivePathFromState();
+      if (trackId) refreshTimelineTrackVisuals(trackId, { syncControls: true });
+      refreshTimelineLayout();
+      syncAllActorsForPathT(pathPinT);
+      kickOverlayRender();
     }
 
     function motionFrameFromTrack(pathT, track, motion, timelineDurationSec) {
@@ -2335,9 +2378,9 @@
       }
     }
 
-    function flushTimelineInputs(force = false) {
+    function flushOpenTimelineDomToPath(force = false) {
       const path = getTimelinePath();
-      if (!path) return;
+      if (!path) return null;
       document.querySelectorAll('#tlRulers .tl-row-motion').forEach((row) => {
         const trackId = row.dataset.trackId;
         const track = path.motionTracks.find((t) => t.id === trackId);
@@ -2356,16 +2399,30 @@
         if (!Number.isNaN(v) && v >= 1) path.timelineDurationSec = v;
       }
       ensurePathMotionTracks(path);
+      return path;
+    }
+
+    function flushTimelineInputs(force = false) {
+      const path = flushOpenTimelineDomToPath(force);
+      if (!path) return;
       syncActivePathFromState();
     }
 
     function flushAllTimelineStateBeforeSave() {
-      flushTimelineInputs(true);
-      for (const p of cameraPaths) ensurePathMotionTracks(p);
+      if (timelineOpenPathId) flushOpenTimelineDomToPath(true);
       syncActivePathFromState();
+      for (const p of cameraPaths) ensurePathMotionTracks(p);
     }
 
-    function refreshTimelineTrackVisuals(trackId) {
+    function updateTimelineScaleHandle(row, track) {
+      if (!row || !track) return;
+      const endHandle = row.querySelector('.tl-handle-end');
+      if (!endHandle) return;
+      endHandle.classList.toggle('scale-on', !!track.scaleDragEnabled);
+      endHandle.classList.toggle('scale-off', !track.scaleDragEnabled);
+    }
+
+    function refreshTimelineTrackVisuals(trackId, opts = {}) {
       const path = getTimelinePath();
       if (!path) return;
       const track = path.motionTracks.find((t) => t.id === trackId);
@@ -2376,10 +2433,7 @@
       const content = row.querySelector('.tl-scroll-content');
       if (content) content.style.width = `${contentSec * TL_PX_PER_SEC}px`;
       const bar = row.querySelector('.tl-npz-bar');
-      const endHandle = row.querySelector('.tl-handle-end');
       const label = row.querySelector('.tl-npz-bar-label');
-      const scaleInp = row.querySelector('.tl-scale-input');
-      const scaleChk = row.querySelector('.tl-scale-check');
       const leftPx = track.camOffsetSec * TL_PX_PER_SEC;
       const widthPx = Math.max(12, npzDur * track.npzScale * TL_PX_PER_SEC);
       if (bar) {
@@ -2389,13 +2443,16 @@
       if (label) {
         label.textContent = `${npzDur.toFixed(1)}s · ×${track.npzScale.toFixed(2)} · 0s@${track.camOffsetSec.toFixed(1)}s`;
       }
-      if (scaleInp && document.activeElement !== scaleInp) {
-        scaleInp.value = track.npzScale.toFixed(2);
-      }
-      if (scaleChk) scaleChk.checked = !!track.scaleDragEnabled;
-      if (endHandle) {
-        endHandle.classList.toggle('scale-on', !!track.scaleDragEnabled);
-        endHandle.classList.toggle('scale-off', !track.scaleDragEnabled);
+      updateTimelineScaleHandle(row, track);
+      if (opts.syncControls) {
+        const scaleInp = row.querySelector('.tl-scale-input');
+        const scaleChk = row.querySelector('.tl-scale-check');
+        if (scaleInp && document.activeElement !== scaleInp) {
+          scaleInp.value = track.npzScale.toFixed(2);
+        }
+        if (scaleChk && document.activeElement !== scaleChk) {
+          scaleChk.checked = !!track.scaleDragEnabled;
+        }
       }
     }
 
@@ -2442,7 +2499,7 @@
         e.stopPropagation();
         const path = getTimelinePath();
         if (!path) return;
-        const track = path.motionTracks.find((t) => t.id === trackId);
+        const track = getTimelineTrackById(trackId);
         if (!track) return;
         const barRect = barEl.getBoundingClientRect();
         const grabNpzSec = Math.max(0, Math.min(
@@ -2460,14 +2517,12 @@
         barEl.setPointerCapture(e.pointerId);
         const onMove = (ev) => {
           if (!tlDragState || tlDragState.kind !== 'npz-move') return;
+          const liveTrack = getTimelineTrackById(trackId);
+          if (!liveTrack) return;
           const camSec = camSecFromTimelineClientX(ev.clientX, canvasEl, contentWidthSec);
-          track.camOffsetSec = camSec - grabNpzSec * track.npzScale;
-          ensurePathMotionTracks(path);
-          syncActivePathFromState();
+          liveTrack.camOffsetSec = camSec - grabNpzSec * liveTrack.npzScale;
           refreshTimelineTrackVisuals(trackId);
-          refreshTimelineLayout();
-          syncAllActorsForPathT(pathPinT);
-          kickOverlayRender();
+          scheduleTimelineDragPreview();
         };
         const onUp = (ev) => {
           barEl.classList.remove('dragging');
@@ -2476,6 +2531,7 @@
           barEl.removeEventListener('pointerup', onUp);
           barEl.removeEventListener('pointercancel', onUp);
           tlDragState = null;
+          commitTimelineDragState(trackId);
         };
         barEl.addEventListener('pointermove', onMove);
         barEl.addEventListener('pointerup', onUp);
@@ -2487,23 +2543,19 @@
       handleEl.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const path = getTimelinePath();
-        if (!path) return;
-        const track = path.motionTracks.find((t) => t.id === trackId);
+        const track = getTimelineTrackById(trackId);
         if (!track || !track.scaleDragEnabled) return;
         const npzDur = getNpzDurationSec(track.assetName);
         handleEl.setPointerCapture(e.pointerId);
         tlDragState = { kind: 'npz-scale', trackId, canvasEl, contentWidthSec };
         const onMove = (ev) => {
           if (!tlDragState || tlDragState.kind !== 'npz-scale') return;
+          const liveTrack = getTimelineTrackById(trackId);
+          if (!liveTrack) return;
           const camSec = camSecFromTimelineClientX(ev.clientX, canvasEl, contentWidthSec);
-          track.npzScale = Math.max(0.05, Math.min(20, (camSec - track.camOffsetSec) / npzDur));
-          ensurePathMotionTracks(path);
-          syncActivePathFromState();
+          liveTrack.npzScale = Math.max(0.05, Math.min(20, (camSec - liveTrack.camOffsetSec) / npzDur));
           refreshTimelineTrackVisuals(trackId);
-          refreshTimelineLayout();
-          syncAllActorsForPathT(pathPinT);
-          kickOverlayRender();
+          scheduleTimelineDragPreview();
         };
         const onUp = (ev) => {
           handleEl.releasePointerCapture(ev.pointerId);
@@ -2511,6 +2563,7 @@
           handleEl.removeEventListener('pointerup', onUp);
           handleEl.removeEventListener('pointercancel', onUp);
           tlDragState = null;
+          commitTimelineDragState(trackId);
         };
         handleEl.addEventListener('pointermove', onMove);
         handleEl.addEventListener('pointerup', onUp);
@@ -2518,30 +2571,50 @@
       });
     }
 
-    function bindTimelineScaleControls(row, track) {
+    function bindTimelineScaleControls(row, trackId) {
       const scaleInp = row.querySelector('.tl-scale-input');
       const scaleChk = row.querySelector('.tl-scale-check');
-      const commitScale = () => {
+      const tools = row.querySelector('.tl-row-tools-compact');
+      const stopBubble = (e) => e.stopPropagation();
+      if (tools) {
+        tools.addEventListener('mousedown', stopBubble);
+        tools.addEventListener('pointerdown', stopBubble);
+        tools.addEventListener('click', stopBubble);
+      }
+      if (scaleChk) {
+        scaleChk.addEventListener('mousedown', stopBubble);
+        scaleChk.addEventListener('pointerdown', stopBubble);
+        scaleChk.addEventListener('click', stopBubble);
+      }
+      if (scaleInp) {
+        scaleInp.addEventListener('mousedown', stopBubble);
+        scaleInp.addEventListener('pointerdown', stopBubble);
+        scaleInp.addEventListener('click', stopBubble);
+      }
+      const applyScaleFromControls = (refreshLayout = false) => {
         const path = getTimelinePath();
-        if (!path) return;
+        const track = getTimelineTrackById(trackId);
+        if (!path || !track || !scaleInp || !scaleChk) return;
         const v = parseFloat(scaleInp.value);
         if (!Number.isNaN(v)) track.npzScale = Math.max(0.05, Math.min(20, v));
         track.scaleDragEnabled = scaleChk.checked;
         ensurePathMotionTracks(path);
-        syncActivePathFromState();
-        refreshTimelineTrackVisuals(track.id);
-        refreshTimelineLayout();
+        refreshTimelineTrackVisuals(trackId);
+        if (refreshLayout) refreshTimelineLayout();
         syncAllActorsForPathT(pathPinT);
         kickOverlayRender();
       };
-      scaleInp.addEventListener('change', commitScale);
+      scaleInp.addEventListener('input', () => applyScaleFromControls(false));
+      scaleInp.addEventListener('change', () => applyScaleFromControls(true));
       scaleInp.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); scaleInp.blur(); commitScale(); }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          applyScaleFromControls(true);
+          scaleInp.blur();
+        }
       });
-      scaleChk.addEventListener('change', () => {
-        track.scaleDragEnabled = scaleChk.checked;
-        refreshTimelineTrackVisuals(track.id);
-      });
+      scaleChk.addEventListener('change', () => applyScaleFromControls(false));
+      scaleChk.addEventListener('input', () => applyScaleFromControls(false));
     }
 
     function buildTimelineScrollRow(className, labelColHtml, contentSec) {
@@ -2588,6 +2661,10 @@
         closeTimelineDock();
         return;
       }
+      if (timelineOpenPathId != null) {
+        flushOpenTimelineDomToPath(true);
+        syncActivePathFromState();
+      }
       timelineOpenPathId = pathId;
       if (activePathId !== pathId) selectCameraPath(pathId);
       el('timelineDock').hidden = false;
@@ -2597,7 +2674,9 @@
     }
 
     function closeTimelineDock() {
-      flushTimelineInputs(true);
+      const path = getTimelinePath();
+      flushOpenTimelineDomToPath(true);
+      if (path) ensurePathMotionTracks(path);
       timelineOpenPathId = null;
       el('timelineDock').hidden = true;
       el('tlAddPanel').hidden = true;
@@ -2616,7 +2695,6 @@
       const dock = el('timelineDock');
       const rulers = el('tlRulers');
       if (!path || !dock || !rulers) return;
-      flushTimelineInputs(true);
       ensurePathMotionTracks(path);
       const contentSec = getTimelineContentWidthSec(path);
       el('tlTitle').textContent = `时间校准 · ${path.name}`;
@@ -2639,7 +2717,11 @@
       cam.canvas.appendChild(camBar);
       cam.canvas.appendChild(playhead);
       cam.canvas.onclick = (e) => {
-        flushTimelineInputs(true);
+        const durInp = el('tlDuration');
+        if (durInp && document.activeElement !== durInp) {
+          const v = parseFloat(durInp.value);
+          if (!Number.isNaN(v) && v >= 1) path.timelineDurationSec = v;
+        }
         const camSec = camSecFromTimelineClientX(e.clientX, cam.canvas, contentSec);
         const t = Math.max(0, Math.min(1, camSec / path.timelineDurationSec));
         pathSlidePlaying = false;
@@ -2703,9 +2785,9 @@
           syncAllActorsForPathT(pathPinT);
           kickOverlayRender();
         };
-        bindTimelineScaleControls(motionRow.row, track);
+        bindTimelineScaleControls(motionRow.row, track.id);
         rulers.appendChild(motionRow.row);
-        refreshTimelineTrackVisuals(track.id);
+        refreshTimelineTrackVisuals(track.id, { syncControls: true });
       }
 
       updateTimelinePlayhead();
@@ -2844,7 +2926,7 @@
 
     function selectCameraPath(id) {
       if (id === activePathId) return;
-      flushTimelineInputs(true);
+      if (timelineOpenPathId) flushOpenTimelineDomToPath(true);
       syncActivePathFromState();
       activePathId = id;
       loadActivePathToState();
@@ -7164,8 +7246,8 @@
           motionTracks: (p.motionTracks || []).map((t) => ({
             id: t.id,
             assetName: t.assetName,
-            camOffsetSec: t.camOffsetSec,
-            npzScale: t.npzScale,
+            camOffsetSec: _n(t.camOffsetSec, 0),
+            npzScale: Math.max(0.05, _n(t.npzScale, 1)),
             scaleDragEnabled: !!t.scaleDragEnabled,
           })),
         })),
@@ -7286,10 +7368,12 @@
       await persistScenesStore();
       renderSceneManagerUI();
       const camNote = data.cameraPaths.length ? `${data.cameraPaths.length} 条轨迹` : '无相机轨迹';
+      const trackCount = data.cameraPaths.reduce((n, p) => n + (p.motionTracks && p.motionTracks.length || 0), 0);
+      const trackNote = trackCount ? ` · ${trackCount} 条 NPZ 时间轴` : '';
       const modeNote = hostMode === 'static'
         ? (isRemoteGithubEditor() ? '到浏览器（在线版）' : '到浏览器')
         : '到 placements.json';
-      status(`已保存「${scene.name}」${modeNote} · ${data.placements.length} 模型 · ${camNote}`);
+      status(`已保存「${scene.name}」${modeNote} · ${data.placements.length} 模型 · ${camNote}${trackNote}`);
     }
 
     async function checkSaveApiHealth() {

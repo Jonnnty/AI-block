@@ -27,11 +27,13 @@ def sync_placements_from_downloads() -> bool:
     downloads = Path.home() / "Downloads" / "placements.json"
     if not downloads.is_file():
         return False
+    if PLACEMENTS.exists():
+        # Never overwrite an existing repo/local save — only bootstrap when missing.
+        return False
     try:
-        if not PLACEMENTS.exists() or downloads.stat().st_mtime > PLACEMENTS.stat().st_mtime:
-            PLACEMENTS.write_bytes(downloads.read_bytes())
-            print(f"[sync] 已从 Downloads 同步 placements.json → {PLACEMENTS}")
-            return True
+        PLACEMENTS.write_bytes(downloads.read_bytes())
+        print(f"[sync] 已从 Downloads 同步 placements.json → {PLACEMENTS}")
+        return True
     except OSError as e:
         print(f"[sync] placements.json 同步失败: {e}")
     return False
