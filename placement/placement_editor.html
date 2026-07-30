@@ -283,7 +283,9 @@
     .tl-close-btn {
       width: 28px !important; height: 28px; padding: 0 !important; line-height: 1;
       background: #333; border: 1px solid #555; border-radius: 6px;
+      display: inline-flex; align-items: center; justify-content: center;
     }
+    .tl-close-btn svg { display: block; }
     .tl-rulers { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; max-height: 34vh; }
     .tl-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
     .tl-row-label-col {
@@ -642,7 +644,7 @@
         <label>轨迹时长 <input type="number" id="tlDuration" min="1" max="600" step="0.5" value="10" /> s</label>
         <div class="tl-header-btns">
           <button type="button" id="tlAddTrackBtn" class="secondary">+ 添加 NPZ</button>
-          <button type="button" id="tlCloseBtn" class="tl-close-btn secondary" title="关闭时间轴">×</button>
+          <button type="button" id="tlCloseBtn" class="tl-close-btn secondary" title="收起时间轴（保存当前设置）"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
         </div>
       </div>
       <p class="hint" style="margin:0;font-size:11px;line-height:1.45">相机条与各 NPZ 各占一行 · 勾选「缩放」后可拖 NPZ 条尾部</p>
@@ -2042,7 +2044,11 @@
       const yaw_deg = _n(m.yaw_deg, _n(m.yaw, 0));
       const pitch_deg = _n(m.pitch_deg, _n(m.pitch, 0));
       const roll_deg = _n(m.roll_deg, _n(m.roll, 0));
-      return createScenePose(m.x, m.y, m.z, yaw_deg, pitch_deg, roll_deg, _n(m.scale, 1));
+      const pose = createScenePose(m.x, m.y, m.z, yaw_deg, pitch_deg, roll_deg, _n(m.scale, 1));
+      if (m.pathT != null && Number.isFinite(Number(m.pathT))) {
+        pose.pathT = Math.max(0, Math.min(1, Number(m.pathT)));
+      }
+      return pose;
     }
 
     function poseUsesCameraEuler(pose) {
@@ -2121,6 +2127,74 @@
     function markerFromRig() {
       syncPoseFromRig(renderCameraPose);
       return { ...renderCameraPose };
+    }
+
+    function markerPathT(m, fallbackIdx = 0, total = 1) {
+      if (m && m.pathT != null && Number.isFinite(Number(m.pathT))) {
+        return Math.max(0, Math.min(1, Number(m.pathT)));
+      }
+      return total > 1 ? fallbackIdx / (total - 1) : 0;
+    }
+
+    function markersUsePathT() {
+      return cameraMarkers.length >= 2
+        && cameraMarkers.every((m) => m.pathT != null && Number.isFinite(Number(m.pathT)));
+    }
+
+    function ensureMarkersPathT() {
+      const n = cameraMarkers.length;
+      if (!n) return;
+      for (let i = 0; i < n; i++) {
+        if (cameraMarkers[i].pathT == null || !Number.isFinite(Number(cameraMarkers[i].pathT))) {
+          cameraMarkers[i].pathT = n > 1 ? i / (n - 1) : 0;
+        } else {
+          cameraMarkers[i].pathT = Math.max(0, Math.min(1, Number(cameraMarkers[i].pathT)));
+        }
+      }
+      sortMarkersByPathT();
+    }
+
+    function sortMarkersByPathT() {
+      if (cameraMarkers.length < 2) return;
+      const n = cameraMarkers.length;
+      const order = cameraMarkers.map((m, i) => ({ i, t: markerPathT(m, i, n) }))
+        .sort((a, b) => a.t - b.t || a.i - b.i)
+        .map((x) => x.i);
+      if (order.every((idx, i) => idx === i)) return;
+      const oldMarkers = cameraMarkers.slice();
+      cameraMarkers = order.map((idx) => oldMarkers[idx]);
+      rebuildPathSegments();
+    }
+
+    function insertMarkerByPathT(marker) {
+      marker.pathT = Math.max(0, Math.min(1, _n(marker.pathT, pathPinT)));
+      let insertIdx = cameraMarkers.length;
+      for (let i = 0; i < cameraMarkers.length; i++) {
+        if (marker.pathT < markerPathT(cameraMarkers[i], i, cameraMarkers.length + 1) - 1e-9) {
+          insertIdx = i;
+          break;
+        }
+      }
+      cameraMarkers.splice(insertIdx, 0, marker);
+      rebuildPathSegments();
+    }
+
+    function markerCamSecLabel(m, timelineDurationSec = 10) {
+      const idx = cameraMarkers.indexOf(m);
+      const t = markerPathT(m, Math.max(0, idx), Math.max(2, cameraMarkers.length));
+      return (t * Math.max(1, timelineDurationSec)).toFixed(1);
+    }
+
+    function currentPathCamSec() {
+      const path = getActiveCameraPath();
+      const dur = path ? path.timelineDurationSec : 10;
+      return pathPinT * Math.max(1, dur);
+    }
+
+    function updateAddMarkerBtnLabel() {
+      const btn = el('addMarkerBtn');
+      if (!btn) return;
+      btn.textContent = `＋ 在 ${currentPathCamSec().toFixed(1)}s 添加机位`;
     }
 
     function applyMarkerToRig(m) {
@@ -2774,11 +2848,8 @@
         : null;
     }
 
-    function toggleTimelineForPath(pathId) {
-      if (timelineOpenPathId === pathId) {
-        closeTimelineDock();
-        return;
-      }
+    function openTimelineForPath(pathId) {
+      if (timelineOpenPathId === pathId) return;
       if (timelineOpenPathId != null) {
         flushOpenTimelineDomToPath(true);
         syncActivePathFromState();
@@ -2791,14 +2862,26 @@
       renderPathGroupList();
     }
 
-    function closeTimelineDock() {
+    function collapseTimelineDock() {
       const path = getTimelinePath();
       flushOpenTimelineDomToPath(true);
-      if (path) normalizePathMotionTracksInPlace(path, false);
+      if (path) {
+        normalizePathMotionTracksInPlace(path, false);
+        syncActivePathFromState();
+      }
       timelineOpenPathId = null;
       el('timelineDock').hidden = true;
       el('tlAddPanel').hidden = true;
       renderPathGroupList();
+    }
+
+    function toggleTimelineForPath(pathId) {
+      if (timelineOpenPathId === pathId) return;
+      openTimelineForPath(pathId);
+    }
+
+    function closeTimelineDock() {
+      collapseTimelineDock();
     }
 
     function getNpzDurationSec(assetName) {
@@ -3027,6 +3110,7 @@
         );
         cameraMarkers = normalized.markers;
         cameraPathSegments = normalized.segments;
+        ensureMarkersPathT();
         pathFramesPerSeg = _n(path.framesPerSeg, 16);
         pathFps = _n(path.fps, 12);
         path.timelineDurationSec = Math.max(1, _n(path.timelineDurationSec, 10));
@@ -3040,6 +3124,7 @@
       selectedCpSegIdx = -1;
       selectedCpPointIdx = -1;
       pendingPathCp = null;
+      updateAddMarkerBtnLabel();
     }
 
     function selectCameraPath(id) {
@@ -3083,11 +3168,11 @@
         const clockBtn = document.createElement('button');
         clockBtn.type = 'button';
         clockBtn.className = 'icon-btn tl-clock-btn' + (timelineOpenPathId === path.id ? ' active' : '');
-        clockBtn.title = '时间轨迹校准';
+        clockBtn.title = timelineOpenPathId === path.id ? '时间轴已展开' : '打开时间校准';
         clockBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
         clockBtn.onclick = (e) => {
           e.stopPropagation();
-          toggleTimelineForPath(path.id);
+          openTimelineForPath(path.id);
         };
         row.appendChild(nameSpan);
         row.appendChild(countSpan);
@@ -4016,6 +4101,10 @@
 
     function reorderMarkers(fromIdx, toIdx) {
       if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) return;
+      if (markersUsePathT()) {
+        status('机位已按时间戳排序，请拖时间轴添加机位');
+        return;
+      }
       const [m] = cameraMarkers.splice(fromIdx, 1);
       cameraMarkers.splice(toIdx, 0, m);
       cameraPathSegments = [];
@@ -4953,20 +5042,33 @@
     }
 
     function globalTFromSegmentHit(segIdx, localT) {
+      if (cameraMarkers.length < 2) return 0;
+      if (markersUsePathT()) {
+        const a = cameraMarkers[segIdx];
+        const b = cameraMarkers[segIdx + 1];
+        const t0 = markerPathT(a, segIdx, cameraMarkers.length);
+        const t1 = markerPathT(b, segIdx + 1, cameraMarkers.length);
+        return t0 + localT * (t1 - t0);
+      }
       const segs = cameraMarkers.length - 1;
-      if (segs <= 0) return 0;
       return (segIdx + localT) / segs;
     }
 
     function syncPathPinUI() {
       const pct = pathPinT * 100;
       el('pathPinT').value = pct;
-      el('pathPinTVal').textContent = `${pct.toFixed(1)}%`;
+      const path = getActiveCameraPath();
+      const dur = path ? path.timelineDurationSec : 10;
+      const sec = currentPathCamSec();
+      el('pathPinTVal').textContent = markersUsePathT() || path
+        ? `${sec.toFixed(1)}s · ${pct.toFixed(1)}%`
+        : `${pct.toFixed(1)}%`;
       const fill = el('pathPinFill');
       const thumb = el('pathPinThumb');
       if (fill) fill.style.width = `${pct}%`;
       if (thumb) thumb.style.left = `${pct}%`;
       updateTimelinePlayhead();
+      updateAddMarkerBtnLabel();
     }
 
     function syncShowFrustumUI() {
@@ -5533,7 +5635,34 @@
     function samplePathAt(globalT) {
       const segs = cameraMarkers.length - 1;
       if (segs <= 0) return null;
-      const f = globalT * segs;
+      const t = Math.max(0, Math.min(1, globalT));
+      if (markersUsePathT()) {
+        const firstT = markerPathT(cameraMarkers[0], 0, cameraMarkers.length);
+        const lastT = markerPathT(cameraMarkers[segs], segs, cameraMarkers.length);
+        if (t <= firstT + 1e-9) return markerToSample(cameraMarkers[0]);
+        if (t >= lastT - 1e-9) return markerToSample(cameraMarkers[segs]);
+        let segIdx = 0;
+        for (let i = 0; i < segs; i++) {
+          const t0 = markerPathT(cameraMarkers[i], i, cameraMarkers.length);
+          const t1 = markerPathT(cameraMarkers[i + 1], i + 1, cameraMarkers.length);
+          if (t >= t0 - 1e-9 && t <= t1 + 1e-9) {
+            segIdx = i;
+            break;
+          }
+        }
+        const t0 = markerPathT(cameraMarkers[segIdx], segIdx, cameraMarkers.length);
+        const t1 = markerPathT(cameraMarkers[segIdx + 1], segIdx + 1, cameraMarkers.length);
+        const span = Math.max(1e-9, t1 - t0);
+        const localT = Math.max(0, Math.min(1, (t - t0) / span));
+        if (localT <= 1e-10) return markerToSample(cameraMarkers[segIdx]);
+        if (localT >= 1 - 1e-10) return markerToSample(cameraMarkers[segIdx + 1]);
+        sampleSegmentLocal(segIdx, localT, _tmpVecPos);
+        poseToQuaternion(normalizeMarkerPose(cameraMarkers[segIdx]), _tmpQuatA);
+        poseToQuaternion(normalizeMarkerPose(cameraMarkers[segIdx + 1]), _tmpQuatB);
+        _tmpQuatOut.copy(_tmpQuatA).slerp(_tmpQuatB, localT);
+        return { position: _tmpVecPos.clone(), quaternion: _tmpQuatOut.clone() };
+      }
+      const f = t * segs;
       const segIdx = Math.min(segs - 1, Math.floor(f));
       const localT = f - segIdx;
       if (localT <= 1e-10) return markerToSample(cameraMarkers[segIdx]);
@@ -5582,15 +5711,19 @@
       const list = el('markerList');
       list.innerHTML = '';
       if (!cameraMarkers.length) return;
+      const path = getActiveCameraPath();
+      const dur = path ? path.timelineDurationSec : 10;
       cameraMarkers.forEach((m, i) => {
         const row = document.createElement('div');
         row.className = 'marker-row' + (i === selectedMarkerIdx ? ' active' : '');
-        row.draggable = true;
+        row.draggable = !markersUsePathT();
         row.dataset.idx = String(i);
         const isStart = i === 0;
         const isEnd = i === cameraMarkers.length - 1 && cameraMarkers.length > 1;
         const dotClass = isStart ? 'start' : (isEnd ? 'end' : 'mid');
-        row.innerHTML = `<span class="drag-handle">⋮⋮</span><span class="marker-dot ${dotClass}"></span><span class="scene-name">#${i + 1}</span>`;
+        const secLabel = markerCamSecLabel(m, dur);
+        const dragHandle = markersUsePathT() ? '' : '<span class="drag-handle">⋮⋮</span>';
+        row.innerHTML = `${dragHandle}<span class="marker-dot ${dotClass}"></span><span class="scene-name">#${i + 1} · ${secLabel}s</span>`;
         row.addEventListener('dragstart', (e) => {
           markerDragFromIdx = i;
           row.classList.add('dragging');
@@ -5762,7 +5895,16 @@
     function addCameraMarker() {
       if (!rigOpen) { status('请先打开渲染摄像机'); return; }
       ensureActiveCameraPathForEdit();
-      cameraMarkers.push(markerFromRig());
+      if (cameraMarkers.length >= 2) {
+        applyPathPinPosition();
+      }
+      const marker = markerFromRig();
+      marker.pathT = pathPinT;
+      if (cameraMarkers.length) {
+        insertMarkerByPathT(marker);
+      } else {
+        cameraMarkers.push(marker);
+      }
       rebuildPathSegments();
       setupPathVisuals();
       if (cameraMarkers.length >= 2) {
@@ -5774,7 +5916,7 @@
         renderMarkerList();
         attachGizmo();
         playPathSlide();
-        status(`${cameraMarkers.length} 机位 · 路径预览中`);
+        status(`已添加 ${markerCamSecLabel(marker)}s 机位 · 共 ${cameraMarkers.length} 个`);
       } else {
         selectedMarkerIdx = -1;
         selectedCpSegIdx = -1;
@@ -5786,10 +5928,11 @@
         el('gizmoRotateRig').classList.remove('active');
         renderMarkerList();
         attachGizmo();
-        status('已添加 #1 · 移动后继续 ＋');
+        status(`已添加 #1 · ${markerCamSecLabel(marker)}s · 继续移动后 ＋`);
       }
       syncActivePathFromState();
       renderPathGroupList();
+      updateAddMarkerBtnLabel();
       el('rigPreviewStatus').textContent = '需重新渲染';
     }
 
@@ -6198,21 +6341,50 @@
       }
     }
 
+    function motionPreviewSummaryAtPathT(t) {
+      const path = getActiveCameraPath();
+      if (!path) return '';
+      const parts = [];
+      for (const p of placements) {
+        if (p.type !== 'motion' || p.missing || !p.motion) continue;
+        const shortName = p.name.replace(/\.npz$/i, '');
+        const track = findMotionTrackForPlacement(path, p.name);
+        if (!track) {
+          parts.push(`${shortName} 未加入时间轴`);
+          continue;
+        }
+        const frame = getMotionFrameForPlacementAtPathT(p, t);
+        parts.push(`${shortName} 帧 ${frame}/${Math.max(0, p.motion.numFrames - 1)}`);
+      }
+      return parts.join(' · ');
+    }
+
     async function renderRigPreviewFrame() {
       if (!(viewer && viewer.renderer) || !renderCamera || !rigOpen) return;
       showRigPreviewFloat();
       stopPreviewPlayback();
-      if (placements.some((p) => p.type === 'motion' && !p.missing)) {
+      if (timelineOpenPathId) flushOpenTimelineDomToPath(true);
+      const path = getActiveCameraPath();
+      if (path) ensurePathMotionTracks(path);
+      if (cameraMarkers.length >= 2) {
+        applyPathPinPosition();
+      } else if (placements.some((p) => p.type === 'motion' && !p.missing)) {
         syncAllActorsForPathT(pathPinT);
       }
-      status('渲染机位预览…');
+      if (viewer && viewer.splatMesh) {
+        rebuildCompactSceneIndexTexture(viewer.splatMesh);
+        viewer.updateSplatMesh();
+      }
+      const motionNote = motionPreviewSummaryAtPathT(pathPinT);
+      const secNote = `${currentPathCamSec().toFixed(1)}s`;
+      status(`渲染 ${secNote} 单帧${motionNote ? ` · ${motionNote}` : ''}…`);
       el('rigPreviewStatus').textContent = '渲染中…';
-      el('rigPreviewTitle').textContent = '单帧预览';
+      el('rigPreviewTitle').textContent = `单帧预览 · ${secNote}`;
       try {
         const img = await renderGaussToImageData();
         el('rigPreviewCanvas').getContext('2d').putImageData(img, 0, 0);
-        el('rigPreviewStatus').textContent = '已更新';
-        status('机位预览已更新');
+        el('rigPreviewStatus').textContent = motionNote || '已更新';
+        status(motionNote ? `单帧预览已更新 · ${secNote} · ${motionNote}` : `单帧预览已更新 · ${secNote}`);
       } catch (e) {
         el('rigPreviewStatus').textContent = '失败';
         throw e;
@@ -6314,6 +6486,7 @@
       updatePathTransportUI();
       if (cameraMarkers.length >= 2) playPathSlide();
       el('rigPreviewStatus').textContent = '未渲染';
+      updateAddMarkerBtnLabel();
       status(cameraMarkers.length >= 2 ? '路径预览中' : (cameraPaths.length ? '＋ 当前机位 开始' : '新建轨迹 或 ＋ 当前机位'));
     }
 
@@ -7733,7 +7906,7 @@
         try { await addPlacementFromFile(f); } catch (e) { showError(e); }
       }
     };
-    el('tlCloseBtn').onclick = () => closeTimelineDock();
+    el('tlCloseBtn').onclick = () => collapseTimelineDock();
     el('tlAddTrackBtn').onclick = () => showTimelineAddPanel();
     el('tlDuration').onchange = () => {
       const path = getTimelinePath();
