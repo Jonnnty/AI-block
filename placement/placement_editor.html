@@ -1151,7 +1151,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260730i';
+    const MODEL_LOAD_BUILD = '20260730j';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -2232,7 +2232,15 @@
     }
 
     function getMotionPlacementByName(assetName) {
-      return placements.find((p) => p.type === 'motion' && !p.missing && p.name === assetName) || null;
+      if (!assetName) return null;
+      const lower = String(assetName).toLowerCase();
+      return placements.find((p) => p.type === 'motion' && !p.missing && p.name.toLowerCase() === lower) || null;
+    }
+
+    function findMotionTrackForPlacement(path, placementName) {
+      if (!path || !placementName) return null;
+      const lower = String(placementName).toLowerCase();
+      return (path.motionTracks || []).find((tr) => String(tr.assetName).toLowerCase() === lower) || null;
     }
 
     const TL_PX_PER_SEC = 80;
@@ -2277,20 +2285,27 @@
       return t;
     }
 
-    function ensurePathMotionTracks(path) {
+    function applyMotionTrackNormalized(target, normalized) {
+      target.id = normalized.id;
+      target.assetName = normalized.assetName;
+      target.camOffsetSec = normalized.camOffsetSec;
+      target.npzScale = normalized.npzScale;
+      target.scaleDragEnabled = normalized.scaleDragEnabled;
+    }
+
+    function normalizePathMotionTracksInPlace(path, pruneMissing = false) {
       if (!path) return;
       if (!Array.isArray(path.motionTracks)) path.motionTracks = [];
       path.timelineDurationSec = Math.max(1, _n(path.timelineDurationSec, 10));
       path.motionTracks = path.motionTracks.filter((t) => {
-        if (!getMotionPlacementByName(t.assetName)) return false;
-        const normalized = normalizeMotionTrack(t, path.timelineDurationSec);
-        t.id = normalized.id;
-        t.assetName = normalized.assetName;
-        t.camOffsetSec = normalized.camOffsetSec;
-        t.npzScale = normalized.npzScale;
-        t.scaleDragEnabled = normalized.scaleDragEnabled;
+        if (pruneMissing && !getMotionPlacementByName(t.assetName)) return false;
+        applyMotionTrackNormalized(t, normalizeMotionTrack(t, path.timelineDurationSec));
         return true;
       });
+    }
+
+    function ensurePathMotionTracks(path) {
+      normalizePathMotionTracksInPlace(path, true);
     }
 
     function getTimelineTrackById(trackId) {
@@ -2312,7 +2327,7 @@
     function commitTimelineDragState(trackId) {
       const path = getTimelinePath();
       if (!path) return;
-      ensurePathMotionTracks(path);
+      normalizePathMotionTracksInPlace(path, false);
       syncActivePathFromState();
       if (trackId) refreshTimelineTrackVisuals(trackId, { syncControls: true });
       refreshTimelineLayout();
@@ -2336,7 +2351,7 @@
       const path = getActiveCameraPath();
       if (!path || !pathHasTimelineTracks(path)) return 0;
       ensurePathMotionTracks(path);
-      const track = path.motionTracks.find((tr) => tr.assetName === p.name);
+      const track = findMotionTrackForPlacement(path, p.name);
       if (!track || !p.motion) return 0;
       return motionFrameFromTrack(pathT, track, p.motion, path.timelineDurationSec);
     }
@@ -2385,20 +2400,16 @@
         const trackId = row.dataset.trackId;
         const track = path.motionTracks.find((t) => t.id === trackId);
         if (!track) return;
-        const scaleInp = row.querySelector('.tl-scale-input');
         const scaleChk = row.querySelector('.tl-scale-check');
         if (scaleChk) track.scaleDragEnabled = scaleChk.checked;
-        if (scaleInp && (force || document.activeElement !== scaleInp)) {
-          const v = parseFloat(scaleInp.value);
-          if (!Number.isNaN(v)) track.npzScale = Math.max(0.05, Math.min(20, v));
-        }
+        // npzScale / camOffsetSec live on track objects (input, tail-drag, bar-drag handlers).
       });
       const durInp = el('tlDuration');
       if (durInp && (force || document.activeElement !== durInp)) {
         const v = parseFloat(durInp.value);
         if (!Number.isNaN(v) && v >= 1) path.timelineDurationSec = v;
       }
-      ensurePathMotionTracks(path);
+      normalizePathMotionTracksInPlace(path, false);
       return path;
     }
 
@@ -2411,7 +2422,7 @@
     function flushAllTimelineStateBeforeSave() {
       if (timelineOpenPathId) flushOpenTimelineDomToPath(true);
       syncActivePathFromState();
-      for (const p of cameraPaths) ensurePathMotionTracks(p);
+      for (const p of cameraPaths) normalizePathMotionTracksInPlace(p, false);
     }
 
     function updateTimelineScaleHandle(row, track) {
@@ -2598,7 +2609,7 @@
         const v = parseFloat(scaleInp.value);
         if (!Number.isNaN(v)) track.npzScale = Math.max(0.05, Math.min(20, v));
         track.scaleDragEnabled = scaleChk.checked;
-        ensurePathMotionTracks(path);
+        normalizePathMotionTracksInPlace(path, false);
         refreshTimelineTrackVisuals(trackId);
         if (refreshLayout) refreshTimelineLayout();
         syncAllActorsForPathT(pathPinT);
@@ -2676,7 +2687,7 @@
     function closeTimelineDock() {
       const path = getTimelinePath();
       flushOpenTimelineDomToPath(true);
-      if (path) ensurePathMotionTracks(path);
+      if (path) normalizePathMotionTracksInPlace(path, false);
       timelineOpenPathId = null;
       el('timelineDock').hidden = true;
       el('tlAddPanel').hidden = true;
@@ -3890,6 +3901,7 @@
       }
       applyRenderSettings(renderSettings);
       applyRenderCameraPose(renderCamera);
+      for (const p of cameraPaths) normalizePathMotionTracksInPlace(p, false);
       loadActivePathToState();
       renderPathGroupList();
       renderMarkerList();
@@ -7370,6 +7382,14 @@
       const camNote = data.cameraPaths.length ? `${data.cameraPaths.length} 条轨迹` : '无相机轨迹';
       const trackCount = data.cameraPaths.reduce((n, p) => n + (p.motionTracks && p.motionTracks.length || 0), 0);
       const trackNote = trackCount ? ` · ${trackCount} 条 NPZ 时间轴` : '';
+      let scaleNote = '';
+      for (const p of data.cameraPaths) {
+        for (const t of (p.motionTracks || [])) {
+          const sc = _n(t.npzScale, 1);
+          if (Math.abs(sc - 1) > 0.001) { scaleNote = ` · NPZ×${sc.toFixed(2)}`; break; }
+        }
+        if (scaleNote) break;
+      }
       const modeNote = hostMode === 'static'
         ? (isRemoteGithubEditor() ? '到浏览器（在线版）' : '到浏览器')
         : '到 placements.json';
