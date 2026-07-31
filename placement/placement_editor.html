@@ -253,36 +253,46 @@
       display: inline-flex; align-items: center; justify-content: center; line-height: 0;
     }
     .icon-btn.visibility-btn svg { display: block; }
-    .icon-btn.folder-recover-btn {
-      display: inline-flex; align-items: center; justify-content: center; line-height: 0;
-      border-color: #6a5050; color: #e8b080;
-    }
-    .icon-btn.folder-recover-btn:hover { background: rgba(120, 80, 40, 0.35); color: #ffd080; border-color: #a07040; }
-    .scene-row.missing { flex-wrap: wrap; align-items: flex-start; }
-    .scene-row.missing .scene-row-body { flex: 1 1 calc(100% - 64px); min-width: 0; }
-    .scene-row.missing .scene-row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-    .scene-row.missing .folder-recover-row {
-      flex: 1 1 100%; margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(139, 64, 64, 0.45);
-    }
-    .folder-recover-inline {
-      display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px;
-      border-radius: 5px; border: 1px solid #6a4545; background: rgba(60, 30, 30, 0.55);
-      color: #ffb080; font-size: 11px; cursor: pointer; width: auto;
-    }
-    .folder-recover-inline:hover { background: rgba(90, 45, 45, 0.75); color: #ffd0a0; border-color: #a06050; }
-    .folder-recover-inline svg { display: block; flex-shrink: 0; }
-    #missingBulkRecover[hidden] { display: none !important; }
-    .missing-bulk-recover {
-      margin-top: 8px; padding: 8px 10px; border-radius: 7px;
+    #missingRecoverPanel[hidden] { display: none !important; }
+    .missing-recover-panel {
+      margin-top: 10px; padding: 10px 10px 9px; border-radius: 8px;
       background: rgba(90, 30, 30, 0.35); border: 1px solid #6a3535;
     }
-    .missing-bulk-recover .hint { margin: 0 0 6px; color: #c98888; font-size: 11px; }
-    .missing-bulk-recover button {
-      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-      width: auto; padding: 6px 10px; font-size: 12px;
+    .missing-recover-panel .hint { margin: 0 0 8px; color: #c98888; font-size: 11px; line-height: 1.45; }
+    .missing-recover-folder-list {
+      display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; max-height: 120px; overflow-y: auto;
+    }
+    .missing-recover-folder-list:empty { display: none; }
+    .missing-recover-folder-item {
+      display: flex; align-items: center; gap: 6px; padding: 4px 7px; border-radius: 5px;
+      background: rgba(40, 20, 20, 0.55); border: 1px solid rgba(120, 60, 60, 0.45);
+      font-size: 11px; color: #ffb890;
+    }
+    .missing-recover-folder-item svg { flex-shrink: 0; display: block; }
+    .missing-recover-folder-name {
+      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .missing-recover-folder-del {
+      width: auto !important; padding: 0 5px !important; font-size: 14px !important; line-height: 1;
+      background: transparent !important; border: none !important; color: #a07070 !important;
+    }
+    .missing-recover-folder-del:hover { color: #ffb0b0 !important; }
+    .missing-recover-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .missing-recover-actions button {
+      flex: 1 1 auto; min-width: 0; width: auto; padding: 7px 8px; font-size: 12px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    }
+    .missing-recover-actions button.secondary {
+      flex: 0 0 auto; background: #333; border: 1px solid #555; color: #bbb;
+    }
+    #missingAddFolderBtn {
       background: #4a3030; border: 1px solid #7a4545; color: #ffb890;
     }
-    .missing-bulk-recover button:hover { background: #5a3838; color: #ffd0b0; }
+    #missingAddFolderBtn:hover { background: #5a3838; color: #ffd0b0; }
+    #missingRecoverBtn {
+      background: linear-gradient(180deg, #3a7de6 0%, #2d6cdf 100%); color: #fff;
+    }
+    #missingRecoverBtn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
     #pickFile { display: none; }
     #pickFolder { display: none; }
     .list-subhead {
@@ -796,6 +806,18 @@
         <input type="file" id="pickFolder" webkitdirectory directory multiple hidden />
         <button type="button" id="importBtn" class="secondary">选择 PLY / NPZ 文件</button>
         <p class="hint">NPZ 为 Kimodo 动作，导入后显示素色 SOMA 人模</p>
+        <div id="missingRecoverPanel" class="missing-recover-panel" hidden>
+          <p class="hint" id="missingRecoverHint">有模型缺少本地文件</p>
+          <div id="missingRecoverFolderList" class="missing-recover-folder-list"></div>
+          <div class="row missing-recover-actions">
+            <button type="button" id="missingAddFolderBtn" title="可多次添加，从多个文件夹搜索">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+              添加文件夹
+            </button>
+            <button type="button" id="missingRecoverBtn" disabled title="在所选文件夹中搜索全部缺失模型">开始搜索恢复</button>
+            <button type="button" id="missingClearFoldersBtn" class="secondary">清空</button>
+          </div>
+        </div>
       </section>
       <section>
         <h2>已放置</h2>
@@ -803,13 +825,6 @@
         <div id="sceneListPly" class="scene-list"></div>
         <div class="list-subhead">NPZ 人模</div>
         <div id="sceneListNpz" class="scene-list"></div>
-        <div id="missingBulkRecover" class="missing-bulk-recover" hidden>
-          <p class="hint" id="missingBulkHint">有模型缺少本地文件</p>
-          <button type="button" id="missingBulkRecoverBtn" title="选择文件夹，自动搜索同名 PLY / NPZ（忽略文件名中的 (数字) 后缀）">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-            从文件夹批量恢复
-          </button>
-        </div>
       </section>
       <section>
         <h2>默认参数</h2>
@@ -1876,7 +1891,55 @@
 
     const FOLDER_ICON_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>';
 
+    /** @type {Array<{id:string, label:string, dirHandle?:FileSystemDirectoryHandle, webkitFiles?:File[]}>} */
+    let recoveryFolderSources = [];
     let pickFolderPromiseCtrl = null;
+    let recoveryFolderSeq = 0;
+
+    function folderLabelFromWebkitFiles(files) {
+      const first = files && files[0];
+      if (!first || !first.webkitRelativePath) return '本地文件夹';
+      return first.webkitRelativePath.split('/')[0] || '本地文件夹';
+    }
+
+    function recoverySourceKey(source) {
+      if (source.dirHandle) return `dir:${source.dirHandle.name}`;
+      if (source.webkitFiles && source.webkitFiles.length) {
+        return `webkit:${folderLabelFromWebkitFiles(source.webkitFiles)}`;
+      }
+      return `id:${source.id}`;
+    }
+
+    function renderRecoveryFolderList() {
+      const listEl = el('missingRecoverFolderList');
+      const recoverBtn = el('missingRecoverBtn');
+      if (!listEl) return;
+      listEl.innerHTML = '';
+      for (const source of recoveryFolderSources) {
+        const item = document.createElement('div');
+        item.className = 'missing-recover-folder-item';
+        item.innerHTML = `${FOLDER_ICON_SVG}<span class="missing-recover-folder-name" title="${source.label}">${source.label}</span>`;
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'missing-recover-folder-del';
+        del.textContent = '×';
+        del.title = '移除此文件夹';
+        del.onclick = () => {
+          recoveryFolderSources = recoveryFolderSources.filter((s) => s.id !== source.id);
+          renderRecoveryFolderList();
+          updateMissingRecoverUI();
+        };
+        item.appendChild(del);
+        listEl.appendChild(item);
+      }
+      if (recoverBtn) recoverBtn.disabled = recoveryFolderSources.length <= 0;
+    }
+
+    function clearRecoveryFolderSources() {
+      recoveryFolderSources = [];
+      renderRecoveryFolderList();
+      updateMissingRecoverUI();
+    }
 
     function pickFolderViaWebkitInput() {
       return new Promise((resolve, reject) => {
@@ -1896,14 +1959,38 @@
         try {
           const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
           if (!(await ensureReadPermission(dirHandle))) throw new Error('未获得文件夹读取权限');
-          return { dirHandle, webkitFiles: null };
+          return { dirHandle, webkitFiles: null, label: dirHandle.name };
         } catch (e) {
           if (e && e.name === 'AbortError') throw new Error('已取消选择文件夹');
           throw e;
         }
       }
       const webkitFiles = await pickFolderViaWebkitInput();
-      return { dirHandle: null, webkitFiles };
+      return {
+        dirHandle: null,
+        webkitFiles,
+        label: folderLabelFromWebkitFiles(webkitFiles),
+      };
+    }
+
+    async function addRecoveryFolderSource() {
+      status('请选择文件夹…');
+      const picked = await pickLocalFolderForRecovery();
+      const source = {
+        id: `rf-${++recoveryFolderSeq}`,
+        label: picked.label || '本地文件夹',
+        dirHandle: picked.dirHandle || null,
+        webkitFiles: picked.webkitFiles || null,
+      };
+      const key = recoverySourceKey(source);
+      if (recoveryFolderSources.some((s) => recoverySourceKey(s) === key)) {
+        status(`文件夹「${source.label}」已添加`);
+        return;
+      }
+      recoveryFolderSources.push(source);
+      renderRecoveryFolderList();
+      updateMissingRecoverUI();
+      status(`已添加文件夹「${source.label}」· 共 ${recoveryFolderSources.length} 个 · 可继续添加或点「开始搜索恢复」`);
     }
 
     async function collectPlyNpzFromDirectory(dirHandle, bucket = []) {
@@ -1931,6 +2018,18 @@
           name: f.name,
           relativePath: f.webkitRelativePath || f.name,
         }));
+    }
+
+    async function collectEntriesFromRecoverySources(sources = recoveryFolderSources) {
+      const entries = [];
+      for (const source of sources) {
+        if (source.dirHandle) {
+          await collectPlyNpzFromDirectory(source.dirHandle, entries);
+        } else if (source.webkitFiles && source.webkitFiles.length) {
+          entries.push(...collectPlyNpzFromWebkitFiles(source.webkitFiles));
+        }
+      }
+      return entries;
     }
 
     function buildAssetFileIndex(entries) {
@@ -1965,29 +2064,27 @@
       }
     }
 
-    async function recoverMissingPlacementsFromFolder(targetIndices = null) {
+    async function recoverMissingPlacementsFromFolderSources() {
       if (!activeSceneId) throw new Error('请先选择或创建场景');
       if (!sceneReady) throw new Error('场景尚未就绪');
-      const indices = Array.isArray(targetIndices) && targetIndices.length
-        ? targetIndices.filter((i) => placements[i] && placements[i].missing)
-        : placements.map((p, i) => (p.missing ? i : -1)).filter((i) => i >= 0);
+      if (!recoveryFolderSources.length) throw new Error('请先添加至少一个文件夹');
+      const indices = placements.map((p, i) => (p.missing ? i : -1)).filter((i) => i >= 0);
       if (!indices.length) {
         status('没有需要恢复的缺失模型');
         return;
       }
-      status('请选择包含模型文件的文件夹…');
-      const { dirHandle, webkitFiles } = await pickLocalFolderForRecovery();
-      const entries = dirHandle
-        ? await collectPlyNpzFromDirectory(dirHandle)
-        : collectPlyNpzFromWebkitFiles(webkitFiles);
+      status(`正在扫描 ${recoveryFolderSources.length} 个文件夹…`);
+      const entries = await collectEntriesFromRecoverySources();
       if (!entries.length) throw new Error('所选文件夹内未找到 PLY / NPZ 文件');
       const index = buildAssetFileIndex(entries);
       let recovered = 0;
       let notFound = 0;
       const loadToken = sessionResetToken;
+      const total = indices.length;
       for (const idx of indices) {
         if (isSessionAborted(loadToken)) return;
         const p = placements[idx];
+        if (!p || !p.missing) continue;
         const match = findIndexedFileForMissingPlacement(p, index);
         if (!match) {
           notFound++;
@@ -1995,32 +2092,38 @@
         }
         const file = match.file || await match.handle.getFile();
         const searchName = canonicalPlacementAssetName(p.name);
-        status(`从文件夹恢复 ${searchName}… (${recovered + 1}/${indices.length})`);
-        setLoadProgress(10 + Math.round((recovered / indices.length) * 80), `恢复 ${searchName}…`);
+        status(`从 ${recoveryFolderSources.length} 个文件夹恢复 ${searchName}… (${recovered + notFound + 1}/${total})`);
+        setLoadProgress(10 + Math.round(((recovered + notFound) / total) * 80), `恢复 ${searchName}…`);
         await bindRecoveredLocalSource(activeSceneId, p.name, match);
         await addPlacementFromFile(file, loadToken);
         recovered++;
       }
       hideLoadProgress();
+      updateMissingRecoverUI();
       renderList();
       if (recovered && !notFound) {
-        status(`已从文件夹恢复 ${recovered} 个模型`);
+        status(`已从 ${recoveryFolderSources.length} 个文件夹恢复 ${recovered} 个模型`);
       } else if (recovered) {
-        status(`已恢复 ${recovered} 个 · 仍有 ${notFound} 个未在文件夹中找到`);
+        status(`已恢复 ${recovered} 个 · 仍有 ${notFound} 个未找到 · 可继续添加文件夹后重试`);
       } else {
-        status(`文件夹内未找到 ${indices.length} 个缺失模型的同名文件`);
+        status(`${recoveryFolderSources.length} 个文件夹内未找到 ${total} 个缺失模型的同名文件`);
       }
     }
 
-    function updateMissingBulkRecoverUI() {
-      const wrap = el('missingBulkRecover');
-      const hint = el('missingBulkHint');
-      if (!wrap) return;
+    function updateMissingRecoverUI() {
+      const panel = el('missingRecoverPanel');
+      const hint = el('missingRecoverHint');
+      if (!panel) return;
       const missingCount = placements.filter((p) => p.missing).length;
-      wrap.hidden = missingCount <= 0;
+      panel.hidden = missingCount <= 0;
       if (hint && missingCount > 0) {
-        hint.textContent = `${missingCount} 个模型缺少本地文件 · 可选文件夹自动搜索同名 PLY / NPZ（会忽略文件名中的 (数字) 后缀）`;
+        const folderPart = recoveryFolderSources.length
+          ? `已选 ${recoveryFolderSources.length} 个文件夹 · `
+          : '可添加多个文件夹 · ';
+        hint.textContent = `${missingCount} 个模型缺少本地文件 · ${folderPart}统一搜索同名 PLY / NPZ（忽略文件名中的 (数字) 后缀）`;
       }
+      const recoverBtn = el('missingRecoverBtn');
+      if (recoverBtn) recoverBtn.disabled = recoveryFolderSources.length <= 0;
     }
 
     async function migrateScenesSourcePaths(store) {
@@ -7852,36 +7955,9 @@
       if (p.missing) row.title = p.missingReason || missingPlacementHint(p);
       const dupN = canonicalSiblingCount(p);
       const dupBadge = dupN > 1 ? `<span class="scene-dup-badge">同名×${dupN}</span>` : '';
-      if (p.missing) {
-        const body = document.createElement('div');
-        body.className = 'scene-row-body';
-        body.innerHTML = `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : '缺少 PLY')}</span></span>${dupBadge}`;
-        row.appendChild(body);
-        const actions = document.createElement('div');
-        actions.className = 'scene-row-actions';
-        const del = document.createElement('button');
-        del.type = 'button'; del.className = 'icon-btn'; del.textContent = '×';
-        del.onclick = (e) => { e.stopPropagation(); removePlacement(i).catch(showError); };
-        actions.appendChild(del);
-        row.appendChild(actions);
-        const folderRow = document.createElement('div');
-        folderRow.className = 'folder-recover-row';
-        const folderBtn = document.createElement('button');
-        folderBtn.type = 'button';
-        folderBtn.className = 'folder-recover-inline';
-        folderBtn.innerHTML = `${FOLDER_ICON_SVG}<span>从文件夹查找同名文件</span>`;
-        folderBtn.title = '选择本地文件夹，自动搜索同名 PLY / NPZ（忽略 (数字) 后缀）';
-        folderBtn.onclick = (e) => {
-          e.stopPropagation();
-          recoverMissingPlacementsFromFolder([i]).catch(showError);
-        };
-        folderRow.appendChild(folderBtn);
-        row.appendChild(folderRow);
-        row.onclick = () => selectPlacement(i);
-        listEl.appendChild(row);
-        return;
-      }
-      row.innerHTML = `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : ''}${p.name}</span>${dupBadge}`;
+      row.innerHTML = p.missing
+        ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : '缺少 PLY')}</span></span>${dupBadge}`
+        : `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : ''}${p.name}</span>${dupBadge}`;
       const vis = document.createElement('button');
       vis.type = 'button';
       vis.className = 'icon-btn visibility-btn';
@@ -7928,7 +8004,7 @@
         empty.textContent = '暂无 NPZ';
         npzList.appendChild(empty);
       }
-      updateMissingBulkRecoverUI();
+      updateMissingRecoverUI();
     }
 
     function placementsToJson() {
@@ -8289,7 +8365,7 @@
           sceneId: activeSceneId,
           hostMode,
         });
-        status(`已加载 ${loadedCount} 个模型 · ${missing.length} 个缺少文件 · 可点红色项下方文件夹按钮，或批量从文件夹恢复`);
+        status(`已加载 ${loadedCount} 个模型 · ${missing.length} 个缺少文件 · 请在「导入模型」处添加文件夹后统一恢复`);
       } else {
         status(`已恢复 ${placements.length} 个模型`);
       }
@@ -8357,8 +8433,15 @@
       else pickFolderPromiseCtrl.reject(new Error('未选择文件夹'));
       pickFolderPromiseCtrl = null;
     };
-    el('missingBulkRecoverBtn').onclick = () => {
-      recoverMissingPlacementsFromFolder().catch(showError);
+    el('missingAddFolderBtn').onclick = () => {
+      addRecoveryFolderSource().catch(showError);
+    };
+    el('missingRecoverBtn').onclick = () => {
+      recoverMissingPlacementsFromFolderSources().catch(showError);
+    };
+    el('missingClearFoldersBtn').onclick = () => {
+      clearRecoveryFolderSources();
+      status('已清空文件夹列表');
     };
     el('tlCloseBtn').onclick = () => collapseTimelineDock();
     el('tlAddTrackBtn').onclick = () => showTimelineAddPanel();
