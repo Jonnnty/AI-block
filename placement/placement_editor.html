@@ -404,6 +404,12 @@
       position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       font-size: 9px; color: #c8ffd8; pointer-events: none; white-space: nowrap;
     }
+    .tl-row-label-missing { color: #ff8888; }
+    .tl-track-missing { color: #ffaaaa; font-size: 9px; }
+    .tl-row-motion-missing .tl-npz-bar-missing {
+      background: rgba(120, 40, 40, 0.45); border-color: rgba(180, 70, 70, 0.85);
+    }
+    .tl-npz-bar-missing .tl-npz-bar-label { color: #ffb0b0; }
     .tl-npz-zero {
       position: absolute; left: 0; top: -2px; bottom: -2px; width: 3px;
       background: #fff; border-radius: 1px; pointer-events: none; z-index: 1;
@@ -2101,6 +2107,7 @@
       hideLoadProgress();
       updateMissingRecoverUI();
       renderList();
+      refreshTimelineIfOpen();
       if (recovered && !notFound) {
         status(`已从 ${recoveryFolderSources.length} 个文件夹恢复 ${recovered} 个模型`);
       } else if (recovered) {
@@ -2740,13 +2747,40 @@
     function getMotionPlacementByName(assetName) {
       if (!assetName) return null;
       const lower = String(assetName).toLowerCase();
-      return placements.find((p) => p.type === 'motion' && !p.missing && p.name.toLowerCase() === lower) || null;
+      const canon = canonicalPlacementAssetName(assetName).toLowerCase();
+      return placements.find((p) => p.type === 'motion' && !p.missing && (
+        p.name.toLowerCase() === lower
+        || p.name.toLowerCase() === canon
+        || canonicalPlacementAssetName(p.name).toLowerCase() === canon
+      )) || null;
     }
 
     function findMotionTrackForPlacement(path, placementName) {
       if (!path || !placementName) return null;
       const lower = String(placementName).toLowerCase();
-      return (path.motionTracks || []).find((tr) => String(tr.assetName).toLowerCase() === lower) || null;
+      const canon = canonicalPlacementAssetName(placementName).toLowerCase();
+      return (path.motionTracks || []).find((tr) => {
+        const trLower = String(tr.assetName).toLowerCase();
+        const trCanon = canonicalPlacementAssetName(tr.assetName).toLowerCase();
+        return trLower === lower || trLower === canon || trCanon === canon || trCanon === lower;
+      }) || null;
+    }
+
+    function motionTrackMatchesAsset(track, assetName) {
+      if (!track || !assetName) return false;
+      const lower = String(assetName).toLowerCase();
+      const canon = canonicalPlacementAssetName(assetName).toLowerCase();
+      const trLower = String(track.assetName || '').toLowerCase();
+      const trCanon = canonicalPlacementAssetName(track.assetName).toLowerCase();
+      return trLower === lower || trLower === canon || trCanon === canon || trCanon === lower;
+    }
+
+    function pruneMotionTracksForAsset(assetName) {
+      if (!assetName) return;
+      for (const path of cameraPaths) {
+        if (!Array.isArray(path.motionTracks)) continue;
+        path.motionTracks = path.motionTracks.filter((t) => !motionTrackMatchesAsset(t, assetName));
+      }
     }
 
     const TL_PX_PER_SEC = 80;
@@ -2891,7 +2925,7 @@
     }
 
     function ensurePathMotionTracks(path) {
-      normalizePathMotionTracksInPlace(path, true);
+      normalizePathMotionTracksInPlace(path, false);
     }
 
     function getTimelineTrackById(trackId) {
@@ -3325,6 +3359,10 @@
       return (mp.motion.numFrames - 1) / fps;
     }
 
+    function isMotionTrackAssetMissing(assetName) {
+      return !getMotionPlacementByName(assetName);
+    }
+
     function renderTimelineDock() {
       const path = getTimelinePath();
       const dock = el('timelineDock');
@@ -3381,23 +3419,26 @@
 
       for (const track of path.motionTracks) {
         const mp = getMotionPlacementByName(track.assetName);
-        if (!mp || !mp.motion) continue;
+        const npzMissing = !mp || !mp.motion;
         const npzDur = getNpzDurationSec(track.assetName);
         const shortName = track.assetName.replace(/\.npz$/i, '');
+        const missingNote = npzMissing ? '<span class="tl-track-missing"> · 缺少 NPZ</span>' : '';
         const labelHtml = `
-          <span class="tl-row-label" title="${track.assetName}">${shortName}</span>
+          <span class="tl-row-label${npzMissing ? ' tl-row-label-missing' : ''}" title="${track.assetName}">${shortName}${missingNote}</span>
           <div class="tl-row-tools-compact">
             <label><input type="checkbox" class="tl-scale-check"${track.scaleDragEnabled ? ' checked' : ''} /> 缩放</label>
             <input type="number" class="tl-scale-input" min="0.05" max="20" step="0.05" value="${track.npzScale.toFixed(2)}" title="NPZ 时间倍率 ×" />
             <span class="hint">${npzDur.toFixed(1)}s 全长</span>
             <button type="button" class="tl-row-del-inline tl-row-del" title="移除此 NPZ 时间条">移除</button>
           </div>`;
-        const motionRow = buildTimelineScrollRow('tl-row-motion', labelHtml, contentSec);
+        const motionRow = buildTimelineScrollRow('tl-row-motion' + (npzMissing ? ' tl-row-motion-missing' : ''), labelHtml, contentSec);
         motionRow.row.dataset.trackId = track.id;
 
         const bar = document.createElement('div');
-        bar.className = 'tl-npz-bar';
-        bar.title = '拖动整条 NPZ 卡位：左端白线=0s，也可抓住条上任意秒数对准相机刻度';
+        bar.className = 'tl-npz-bar' + (npzMissing ? ' tl-npz-bar-missing' : '');
+        bar.title = npzMissing
+          ? '已保存时间绑定，但 NPZ 文件未加载 · 请先在模型页恢复同名文件'
+          : '拖动整条 NPZ 卡位：左端白线=0s，也可抓住条上任意秒数对准相机刻度';
         const zero = document.createElement('div');
         zero.className = 'tl-npz-zero';
         const barLabel = document.createElement('span');
@@ -3428,12 +3469,16 @@
       updateTimelinePlayhead();
     }
 
+    function refreshTimelineIfOpen() {
+      if (timelineOpenPathId) renderTimelineDock();
+    }
+
     function showTimelineAddPanel() {
       const path = getTimelinePath();
       const panel = el('tlAddPanel');
       if (!path || !panel) return;
-      const existing = new Set((path.motionTracks || []).map((t) => t.assetName));
-      const motions = placements.filter((p) => p.type === 'motion' && !p.missing && !existing.has(p.name));
+      const motions = placements.filter((p) => p.type === 'motion' && !p.missing
+        && !path.motionTracks.some((t) => motionTrackMatchesAsset(t, p.name)));
       panel.innerHTML = '';
       if (!motions.length) {
         panel.innerHTML = '<span class="hint">暂无可添加的人模 NPZ（请先在模型页导入）</span>';
@@ -3473,7 +3518,7 @@
       const mp = getMotionPlacementByName(assetName);
       if (!mp || !mp.motion) return;
       ensurePathMotionTracks(path);
-      if (path.motionTracks.some((t) => t.assetName === assetName)) return;
+      if (path.motionTracks.some((t) => motionTrackMatchesAsset(t, assetName))) return;
       path.timeAxisEnabled = true;
       const fps = mp.motion.fps || 30;
       const npzDur = (mp.motion.numFrames - 1) / fps;
@@ -4225,6 +4270,7 @@
       restoreRigUiState(cfg);
       selectPlacement(-1);
       renderList();
+      refreshTimelineIfOpen();
     }
 
     async function loadSceneById(sceneId) {
@@ -5364,6 +5410,7 @@
         hideLoadProgress();
         status(`已恢复人模 ${assetName}`);
         renderList();
+        refreshTimelineIfOpen();
         return;
       }
       const siblings = siblingPlacementsByCanonical(assetName);
@@ -7882,6 +7929,7 @@
       const p = placements[idx];
       if (!p) return;
       if (p.type === 'motion') {
+        pruneMotionTracksForAsset(p.name);
         await removeActorFromScene(p);
       } else if (p.sceneIdx != null && viewer) {
         try {
