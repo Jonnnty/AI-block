@@ -253,7 +253,38 @@
       display: inline-flex; align-items: center; justify-content: center; line-height: 0;
     }
     .icon-btn.visibility-btn svg { display: block; }
+    .icon-btn.folder-recover-btn {
+      display: inline-flex; align-items: center; justify-content: center; line-height: 0;
+      border-color: #6a5050; color: #e8b080;
+    }
+    .icon-btn.folder-recover-btn:hover { background: rgba(120, 80, 40, 0.35); color: #ffd080; border-color: #a07040; }
+    .scene-row.missing { flex-wrap: wrap; align-items: flex-start; }
+    .scene-row.missing .scene-row-body { flex: 1 1 calc(100% - 64px); min-width: 0; }
+    .scene-row.missing .scene-row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .scene-row.missing .folder-recover-row {
+      flex: 1 1 100%; margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(139, 64, 64, 0.45);
+    }
+    .folder-recover-inline {
+      display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px;
+      border-radius: 5px; border: 1px solid #6a4545; background: rgba(60, 30, 30, 0.55);
+      color: #ffb080; font-size: 11px; cursor: pointer; width: auto;
+    }
+    .folder-recover-inline:hover { background: rgba(90, 45, 45, 0.75); color: #ffd0a0; border-color: #a06050; }
+    .folder-recover-inline svg { display: block; flex-shrink: 0; }
+    #missingBulkRecover[hidden] { display: none !important; }
+    .missing-bulk-recover {
+      margin-top: 8px; padding: 8px 10px; border-radius: 7px;
+      background: rgba(90, 30, 30, 0.35); border: 1px solid #6a3535;
+    }
+    .missing-bulk-recover .hint { margin: 0 0 6px; color: #c98888; font-size: 11px; }
+    .missing-bulk-recover button {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      width: auto; padding: 6px 10px; font-size: 12px;
+      background: #4a3030; border: 1px solid #7a4545; color: #ffb890;
+    }
+    .missing-bulk-recover button:hover { background: #5a3838; color: #ffd0b0; }
     #pickFile { display: none; }
+    #pickFolder { display: none; }
     .list-subhead {
       font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: .04em;
       margin: 10px 0 4px;
@@ -762,6 +793,7 @@
       <section>
         <h2>导入模型</h2>
         <input type="file" id="pickFile" accept=".ply,.npz" multiple hidden />
+        <input type="file" id="pickFolder" webkitdirectory directory multiple hidden />
         <button type="button" id="importBtn" class="secondary">选择 PLY / NPZ 文件</button>
         <p class="hint">NPZ 为 Kimodo 动作，导入后显示素色 SOMA 人模</p>
       </section>
@@ -771,6 +803,13 @@
         <div id="sceneListPly" class="scene-list"></div>
         <div class="list-subhead">NPZ 人模</div>
         <div id="sceneListNpz" class="scene-list"></div>
+        <div id="missingBulkRecover" class="missing-bulk-recover" hidden>
+          <p class="hint" id="missingBulkHint">有模型缺少本地文件</p>
+          <button type="button" id="missingBulkRecoverBtn" title="选择文件夹，自动搜索同名 PLY / NPZ（忽略文件名中的 (数字) 后缀）">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+            从文件夹批量恢复
+          </button>
+        </div>
       </section>
       <section>
         <h2>默认参数</h2>
@@ -1658,10 +1697,14 @@
       const normalized = (fileName && String(fileName).trim()) || '';
       if (!normalized) return -1;
       const lower = normalized.toLowerCase();
+      const fileCanon = canonicalPlacementAssetName(normalized).toLowerCase();
       const exact = placements.findIndex((p) => p.missing && p.name.toLowerCase() === lower);
       if (exact >= 0) return exact;
-      return placements.findIndex((p) => p.missing
-        && canonicalPlacementAssetName(p.name).toLowerCase() === lower);
+      return placements.findIndex((p) => p.missing && (
+        canonicalPlacementAssetName(p.name).toLowerCase() === lower
+        || canonicalPlacementAssetName(p.name).toLowerCase() === fileCanon
+        || p.name.toLowerCase() === fileCanon
+      ));
     }
 
     function resolveImportAssetName(file) {
@@ -1829,6 +1872,155 @@
       return canLoadAssetsFromDisk()
         ? '缺少 PLY · 请确认文件仍在原路径'
         : '缺少 PLY · 请拖入同名 PLY 恢复';
+    }
+
+    const FOLDER_ICON_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>';
+
+    let pickFolderPromiseCtrl = null;
+
+    function pickFolderViaWebkitInput() {
+      return new Promise((resolve, reject) => {
+        const input = el('pickFolder');
+        if (!input) {
+          reject(new Error('当前浏览器不支持文件夹选择'));
+          return;
+        }
+        pickFolderPromiseCtrl = { resolve, reject };
+        input.value = '';
+        input.click();
+      });
+    }
+
+    async function pickLocalFolderForRecovery() {
+      if (supportsLocalFileAccess()) {
+        try {
+          const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+          if (!(await ensureReadPermission(dirHandle))) throw new Error('未获得文件夹读取权限');
+          return { dirHandle, webkitFiles: null };
+        } catch (e) {
+          if (e && e.name === 'AbortError') throw new Error('已取消选择文件夹');
+          throw e;
+        }
+      }
+      const webkitFiles = await pickFolderViaWebkitInput();
+      return { dirHandle: null, webkitFiles };
+    }
+
+    async function collectPlyNpzFromDirectory(dirHandle, bucket = []) {
+      for await (const entry of dirHandle.values()) {
+        if (entry.kind === 'file') {
+          const lower = entry.name.toLowerCase();
+          if (lower.endsWith('.ply') || lower.endsWith('.npz')) {
+            bucket.push({ handle: entry, name: entry.name });
+          }
+        } else if (entry.kind === 'directory') {
+          await collectPlyNpzFromDirectory(entry, bucket);
+        }
+      }
+      return bucket;
+    }
+
+    function collectPlyNpzFromWebkitFiles(fileList) {
+      return [...(fileList || [])]
+        .filter((f) => {
+          const lower = f.name.toLowerCase();
+          return lower.endsWith('.ply') || lower.endsWith('.npz');
+        })
+        .map((f) => ({
+          file: f,
+          name: f.name,
+          relativePath: f.webkitRelativePath || f.name,
+        }));
+    }
+
+    function buildAssetFileIndex(entries) {
+      const exactIndex = new Map();
+      const canonIndex = new Map();
+      for (const entry of entries) {
+        const name = entry.name || '';
+        if (!name) continue;
+        const lower = name.toLowerCase();
+        if (!exactIndex.has(lower)) exactIndex.set(lower, entry);
+        const canon = canonicalPlacementAssetName(name).toLowerCase();
+        if (canon !== lower && !canonIndex.has(canon)) canonIndex.set(canon, entry);
+      }
+      return { exactIndex, canonIndex };
+    }
+
+    function findIndexedFileForMissingPlacement(p, index) {
+      if (!p || !p.missing) return null;
+      const exact = String(p.name || '').trim().toLowerCase();
+      const canon = canonicalPlacementAssetName(p.name).toLowerCase();
+      return index.exactIndex.get(exact)
+        || index.canonIndex.get(canon)
+        || index.exactIndex.get(canon)
+        || index.canonIndex.get(exact);
+    }
+
+    async function bindRecoveredLocalSource(sceneId, assetName, entry) {
+      if (!sceneId || !entry) return;
+      if (entry.handle) {
+        const label = entry.relativePath || entry.name;
+        await bindAssetFileHandle(sceneId, assetName, entry.handle, label);
+      }
+    }
+
+    async function recoverMissingPlacementsFromFolder(targetIndices = null) {
+      if (!activeSceneId) throw new Error('请先选择或创建场景');
+      if (!sceneReady) throw new Error('场景尚未就绪');
+      const indices = Array.isArray(targetIndices) && targetIndices.length
+        ? targetIndices.filter((i) => placements[i] && placements[i].missing)
+        : placements.map((p, i) => (p.missing ? i : -1)).filter((i) => i >= 0);
+      if (!indices.length) {
+        status('没有需要恢复的缺失模型');
+        return;
+      }
+      status('请选择包含模型文件的文件夹…');
+      const { dirHandle, webkitFiles } = await pickLocalFolderForRecovery();
+      const entries = dirHandle
+        ? await collectPlyNpzFromDirectory(dirHandle)
+        : collectPlyNpzFromWebkitFiles(webkitFiles);
+      if (!entries.length) throw new Error('所选文件夹内未找到 PLY / NPZ 文件');
+      const index = buildAssetFileIndex(entries);
+      let recovered = 0;
+      let notFound = 0;
+      const loadToken = sessionResetToken;
+      for (const idx of indices) {
+        if (isSessionAborted(loadToken)) return;
+        const p = placements[idx];
+        const match = findIndexedFileForMissingPlacement(p, index);
+        if (!match) {
+          notFound++;
+          continue;
+        }
+        const file = match.file || await match.handle.getFile();
+        const searchName = canonicalPlacementAssetName(p.name);
+        status(`从文件夹恢复 ${searchName}… (${recovered + 1}/${indices.length})`);
+        setLoadProgress(10 + Math.round((recovered / indices.length) * 80), `恢复 ${searchName}…`);
+        await bindRecoveredLocalSource(activeSceneId, p.name, match);
+        await addPlacementFromFile(file, loadToken);
+        recovered++;
+      }
+      hideLoadProgress();
+      renderList();
+      if (recovered && !notFound) {
+        status(`已从文件夹恢复 ${recovered} 个模型`);
+      } else if (recovered) {
+        status(`已恢复 ${recovered} 个 · 仍有 ${notFound} 个未在文件夹中找到`);
+      } else {
+        status(`文件夹内未找到 ${indices.length} 个缺失模型的同名文件`);
+      }
+    }
+
+    function updateMissingBulkRecoverUI() {
+      const wrap = el('missingBulkRecover');
+      const hint = el('missingBulkHint');
+      if (!wrap) return;
+      const missingCount = placements.filter((p) => p.missing).length;
+      wrap.hidden = missingCount <= 0;
+      if (hint && missingCount > 0) {
+        hint.textContent = `${missingCount} 个模型缺少本地文件 · 可选文件夹自动搜索同名 PLY / NPZ（会忽略文件名中的 (数字) 后缀）`;
+      }
     }
 
     async function migrateScenesSourcePaths(store) {
@@ -7660,9 +7852,36 @@
       if (p.missing) row.title = p.missingReason || missingPlacementHint(p);
       const dupN = canonicalSiblingCount(p);
       const dupBadge = dupN > 1 ? `<span class="scene-dup-badge">同名×${dupN}</span>` : '';
-      row.innerHTML = p.missing
-        ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : '缺少 PLY')}</span></span>${dupBadge}`
-        : `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : ''}${p.name}</span>${dupBadge}`;
+      if (p.missing) {
+        const body = document.createElement('div');
+        body.className = 'scene-row-body';
+        body.innerHTML = `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : '缺少 PLY')}</span></span>${dupBadge}`;
+        row.appendChild(body);
+        const actions = document.createElement('div');
+        actions.className = 'scene-row-actions';
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'icon-btn'; del.textContent = '×';
+        del.onclick = (e) => { e.stopPropagation(); removePlacement(i).catch(showError); };
+        actions.appendChild(del);
+        row.appendChild(actions);
+        const folderRow = document.createElement('div');
+        folderRow.className = 'folder-recover-row';
+        const folderBtn = document.createElement('button');
+        folderBtn.type = 'button';
+        folderBtn.className = 'folder-recover-inline';
+        folderBtn.innerHTML = `${FOLDER_ICON_SVG}<span>从文件夹查找同名文件</span>`;
+        folderBtn.title = '选择本地文件夹，自动搜索同名 PLY / NPZ（忽略 (数字) 后缀）';
+        folderBtn.onclick = (e) => {
+          e.stopPropagation();
+          recoverMissingPlacementsFromFolder([i]).catch(showError);
+        };
+        folderRow.appendChild(folderBtn);
+        row.appendChild(folderRow);
+        row.onclick = () => selectPlacement(i);
+        listEl.appendChild(row);
+        return;
+      }
+      row.innerHTML = `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : ''}${p.name}</span>${dupBadge}`;
       const vis = document.createElement('button');
       vis.type = 'button';
       vis.className = 'icon-btn visibility-btn';
@@ -7709,6 +7928,7 @@
         empty.textContent = '暂无 NPZ';
         npzList.appendChild(empty);
       }
+      updateMissingBulkRecoverUI();
     }
 
     function placementsToJson() {
@@ -8069,7 +8289,7 @@
           sceneId: activeSceneId,
           hostMode,
         });
-        status(`已加载 ${loadedCount} 个模型 · ${missing.length} 个缺少文件 · 请拖入同名文件恢复`);
+        status(`已加载 ${loadedCount} 个模型 · ${missing.length} 个缺少文件 · 可点红色项下方文件夹按钮，或批量从文件夹恢复`);
       } else {
         status(`已恢复 ${placements.length} 个模型`);
       }
@@ -8128,6 +8348,17 @@
       for (const f of files) {
         try { await addPlacementFromFile(f); } catch (e) { showError(e); }
       }
+    };
+    el('pickFolder').onchange = () => {
+      const files = [...(el('pickFolder').files || [])];
+      el('pickFolder').value = '';
+      if (!pickFolderPromiseCtrl) return;
+      if (files.length) pickFolderPromiseCtrl.resolve(files);
+      else pickFolderPromiseCtrl.reject(new Error('未选择文件夹'));
+      pickFolderPromiseCtrl = null;
+    };
+    el('missingBulkRecoverBtn').onclick = () => {
+      recoverMissingPlacementsFromFolder().catch(showError);
     };
     el('tlCloseBtn').onclick = () => collapseTimelineDock();
     el('tlAddTrackBtn').onclick = () => showTimelineAddPanel();
