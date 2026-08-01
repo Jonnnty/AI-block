@@ -57,7 +57,7 @@
         const r = await fetch('../kimodo-test-output/person02/seg01_tower_turn/motion.npz');
         ab = await r.arrayBuffer();
       }
-      const motion = buildMotionData(parseKimodoNpz(ab));
+      const motion = buildMotionData(await parseKimodoNpz(ab));
       const scale = motionDefaultScale(motion, 0.12);
       const verts = skinFrame(skin, motion, 0);
       const anchor = [motion.anchor.x, motion.anchor.y, motion.anchor.z];

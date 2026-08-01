@@ -5553,7 +5553,7 @@
 
     async function buildMotionFromBuffer(ab) {
       await ensureSomaSkin();
-      const raw = parseKimodoNpz(ab);
+      const raw = await parseKimodoNpz(ab);
       if (raw.numJoints !== 77) {
         throw new Error(`暂仅支持 77 关节 Kimodo NPZ（当前 ${raw.numJoints} 关节）`);
       }
