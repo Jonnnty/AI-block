@@ -253,6 +253,31 @@
       display: inline-flex; align-items: center; justify-content: center; line-height: 0;
     }
     .icon-btn.visibility-btn svg { display: block; }
+    .icon-btn.motion-color-btn {
+      display: inline-flex; align-items: center; justify-content: center; line-height: 0;
+    }
+    .motion-color-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.35); display: block; flex-shrink: 0;
+    }
+    .motion-color-picker {
+      position: fixed; z-index: 10050; display: flex; flex-wrap: wrap; gap: 6px;
+      align-items: center; padding: 8px; background: #2a2a2a; border: 1px solid #555;
+      border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    }
+    .motion-color-swatch {
+      width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent;
+      cursor: pointer; padding: 0; flex-shrink: 0;
+    }
+    .motion-color-swatch:hover { transform: scale(1.08); }
+    .motion-color-swatch.active { border-color: #fff; box-shadow: 0 0 0 1px #2a2a2a; }
+    .motion-color-custom {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px; border-radius: 6px; cursor: pointer; overflow: hidden;
+    }
+    .motion-color-custom input[type="color"] {
+      width: 32px; height: 32px; padding: 0; border: none; background: none; cursor: pointer;
+    }
     #missingRecoverPanel[hidden] { display: none !important; }
     .missing-recover-panel {
       margin-top: 10px; padding: 10px 10px 9px; border-radius: 8px;
@@ -2259,6 +2284,12 @@
     const ACTOR_COLOR = 0x00b140;
     /** 特效抠像绿（与 splat shell 一致） */
     const MOTION_SPLAT_COLOR = [0, 177, 64];
+    /** @type {string[]} */
+    const MOTION_ACTOR_PALETTE = [
+      '#00b140', '#3b82f6', '#f97316', '#a855f7', '#ef4444',
+      '#14b8a6', '#eab308', '#ec4899', '#6366f1', '#84cc16',
+    ];
+    let motionColorPickerEl = null;
     let motionPreviewRaf = 0;
     let motionPreviewStart = 0;
     let rigPreviewRt = null;
@@ -4811,6 +4842,84 @@
       dv.setFloat32(8, z, true);
     }
 
+    function setSplatBufferLocalColor(splatBuffer, localIdx, r, g, b, a = 255) {
+      const section = splatBuffer.sections[0];
+      const levels = GaussianSplats3D.SplatBuffer.CompressionLevels;
+      const colorOff = levels[splatBuffer.compressionLevel].ColorOffsetBytes;
+      const base = section.dataBase + section.bytesPerSplat * localIdx + colorOff;
+      const u8 = new Uint8Array(splatBuffer.bufferData, base, 4);
+      u8[0] = r;
+      u8[1] = g;
+      u8[2] = b;
+      u8[3] = a;
+    }
+
+    function normalizeActorColorHex(hex) {
+      if (!hex || typeof hex !== 'string') return MOTION_ACTOR_PALETTE[0];
+      const h = hex.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(h)) return h.toLowerCase();
+      return MOTION_ACTOR_PALETTE[0];
+    }
+
+    function motionActorColorRgb(p) {
+      const hex = normalizeActorColorHex(p && p.actorColor);
+      const n = parseInt(hex.slice(1), 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+
+    function pickNextMotionActorColor() {
+      const motionPs = placements.filter((p) => p.type === 'motion');
+      const used = new Set(motionPs.map((p) => normalizeActorColorHex(p.actorColor)));
+      for (const c of MOTION_ACTOR_PALETTE) {
+        if (!used.has(c)) return c;
+      }
+      return MOTION_ACTOR_PALETTE[motionPs.length % MOTION_ACTOR_PALETTE.length];
+    }
+
+    function applyMotionPlacementColor(p) {
+      if (!p || p.type !== 'motion' || p.missing) return;
+      p.actorColor = normalizeActorColorHex(p.actorColor || pickNextMotionActorColor());
+      const [r, g, b] = motionActorColorRgb(p);
+      if (p.mesh && p.mesh.material) {
+        p.mesh.material.color.setRGB(r / 255, g / 255, b / 255);
+        kickOverlayRender();
+      }
+      if (p.motionRender === 'splat' && isValidSplatSceneIdx(p.sceneIdx)) {
+        refreshMotionSplatColors(p);
+      }
+    }
+
+    function refreshMotionSplatColors(p) {
+      try {
+        if (!isValidSplatSceneIdx(p.sceneIdx)) return;
+        const sm = viewer.splatMesh;
+        const baseData = sm.splatDataTextures && sm.splatDataTextures.baseData;
+        if (!baseData || !baseData.colors) return;
+        const splatBuffer = sm.getScene(p.sceneIdx).splatBuffer;
+        const count = splatBuffer.getSplatCount();
+        const [r, g, b] = motionActorColorRgb(p);
+        const opacity = _n(motionSplatShell && motionSplatShell.opacity, 255);
+        for (let i = 0; i < count; i++) {
+          setSplatBufferLocalColor(splatBuffer, i, r, g, b, opacity);
+        }
+        const globalStart = getSceneGlobalSplatStart(p.sceneIdx);
+        const globalEnd = globalStart + count - 1;
+        if (globalEnd >= sm.getSplatCount()) return;
+        sm.fillSplatDataArrays(
+          null, null, null, null, baseData.colors, null,
+          false,
+          undefined, undefined, undefined,
+          undefined, undefined,
+          globalStart,
+          p.sceneIdx,
+        );
+        sm.updateDataTexturesFromBaseData(globalStart, globalEnd);
+        viewer.forceRenderNextFrame();
+      } catch (err) {
+        console.warn('refreshMotionSplatColors failed', err);
+      }
+    }
+
     function isValidSplatSceneIdx(sceneIdx) {
       return !!(viewer && viewer.splatMesh && sceneIdx != null
         && sceneIdx >= 0 && sceneIdx < viewer.splatMesh.scenes.length);
@@ -5039,13 +5148,13 @@
       return [a ? a.x : 0, a ? a.y : 0, a ? a.z : 0];
     }
 
-    function buildMotionSplatBuffer(shell, bindPoseVerts, anchor) {
+    function buildMotionSplatBuffer(shell, bindPoseVerts, anchor, colorRgb = MOTION_SPLAT_COLOR) {
       const OFF = GaussianSplats3D.UncompressedSplatArray.OFFSET;
       const splatArray = new GaussianSplats3D.UncompressedSplatArray(0);
       const ax = anchor[0];
       const ay = anchor[1];
       const az = anchor[2];
-      const [cr, cg, cb] = MOTION_SPLAT_COLOR;
+      const [cr, cg, cb] = colorRgb;
       for (let i = 0; i < shell.numSplats; i++) {
         const splat = GaussianSplats3D.UncompressedSplatArray.createSplat(0);
         splat[OFF.X] = bindPoseVerts[i * 3] - ax;
@@ -5184,8 +5293,9 @@
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(skin.numVerts * 3), 3));
       geo.setIndex(new THREE.BufferAttribute(new Uint16Array(skin.faces), 1));
+      const [mr, mg, mb] = motionActorColorRgb(p);
       const mat = new THREE.MeshBasicMaterial({
-        color: ACTOR_COLOR,
+        color: new THREE.Color(mr / 255, mg / 255, mb / 255),
         depthTest: false,
         depthWrite: false,
         side: THREE.DoubleSide,
@@ -5218,7 +5328,7 @@
       removeActorMeshIfAny(p);
       const anchor = motionAnchorArray(p, motion);
       const bindPoseVerts = shellFrame(shell, skin, motion, 0);
-      const splatBuffer = buildMotionSplatBuffer(shell, bindPoseVerts, anchor);
+      const splatBuffer = buildMotionSplatBuffer(shell, bindPoseVerts, anchor, motionActorColorRgb(p));
       const sceneIdxBefore = _n(viewer.splatMesh.scenes && viewer.splatMesh.scenes.length, 0);
       try {
         await removeUnownedMotionShellScenes(shell);
@@ -5486,6 +5596,7 @@
         yaw_deg: 0,
         sceneIdx: null,
         visible: true,
+        actorColor: pickNextMotionActorColor(),
         center: [motion.anchor.x, motion.anchor.y, motion.anchor.z],
         motion,
         motionFps: motion.fps,
@@ -8073,7 +8184,69 @@
       return true;
     }
 
-    function appendPlacementRow(listEl, p, i) {
+    function closeMotionColorPicker() {
+      if (motionColorPickerEl) {
+        motionColorPickerEl.remove();
+        motionColorPickerEl = null;
+      }
+    }
+
+    function setMotionPlacementColor(placementIdx, hex) {
+      const p = placements[placementIdx];
+      if (!p || p.type !== 'motion') return;
+      p.actorColor = normalizeActorColorHex(hex);
+      if (!p.missing) applyMotionPlacementColor(p);
+      renderList();
+    }
+
+    function openMotionColorPicker(placementIdx, anchorEl) {
+      const p = placements[placementIdx];
+      if (!p || p.type !== 'motion' || !anchorEl) return;
+      closeMotionColorPicker();
+      const pop = document.createElement('div');
+      pop.className = 'motion-color-picker';
+      pop.onclick = (e) => e.stopPropagation();
+      const current = normalizeActorColorHex(p.actorColor);
+      for (const hex of MOTION_ACTOR_PALETTE) {
+        const sw = document.createElement('button');
+        sw.type = 'button';
+        sw.className = 'motion-color-swatch' + (current === hex ? ' active' : '');
+        sw.style.background = hex;
+        sw.title = hex;
+        sw.onclick = (e) => {
+          e.stopPropagation();
+          setMotionPlacementColor(placementIdx, hex);
+          closeMotionColorPicker();
+        };
+        pop.appendChild(sw);
+      }
+      const customLbl = document.createElement('label');
+      customLbl.className = 'motion-color-custom';
+      customLbl.title = '自定义颜色';
+      const inp = document.createElement('input');
+      inp.type = 'color';
+      inp.value = current;
+      inp.oninput = (e) => {
+        setMotionPlacementColor(placementIdx, e.target.value);
+      };
+      customLbl.appendChild(inp);
+      pop.appendChild(customLbl);
+      document.body.appendChild(pop);
+      motionColorPickerEl = pop;
+      const rect = anchorEl.getBoundingClientRect();
+      const left = Math.min(rect.left, window.innerWidth - pop.offsetWidth - 8);
+      pop.style.left = `${Math.max(8, left)}px`;
+      pop.style.top = `${rect.bottom + 4}px`;
+      const onDocClick = (e) => {
+        if (motionColorPickerEl && !motionColorPickerEl.contains(e.target) && e.target !== anchorEl && !anchorEl.contains(e.target)) {
+          closeMotionColorPicker();
+          document.removeEventListener('click', onDocClick);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', onDocClick), 0);
+    }
+
+    function appendPlacementRow(listEl, p, i, { motionColor = false } = {}) {
       const row = document.createElement('div');
       row.className = 'scene-row'
         + (i === selected ? ' active' : '')
@@ -8084,6 +8257,21 @@
       row.innerHTML = p.missing
         ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : '缺少 PLY')}</span></span>${dupBadge}`
         : `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : ''}${p.name}</span>${dupBadge}`;
+      if (motionColor && p.type === 'motion') {
+        const colorBtn = document.createElement('button');
+        colorBtn.type = 'button';
+        colorBtn.className = 'icon-btn motion-color-btn';
+        colorBtn.title = '人模颜色 · 多人同场时便于区分';
+        const dot = document.createElement('span');
+        dot.className = 'motion-color-dot';
+        dot.style.background = normalizeActorColorHex(p.actorColor);
+        colorBtn.appendChild(dot);
+        colorBtn.onclick = (e) => {
+          e.stopPropagation();
+          openMotionColorPicker(i, colorBtn);
+        };
+        row.appendChild(colorBtn);
+      }
       const vis = document.createElement('button');
       vis.type = 'button';
       vis.className = 'icon-btn visibility-btn';
@@ -8111,7 +8299,7 @@
       placements.forEach((p, i) => {
         const isMotion = p.type === 'motion';
         if (isMotion) {
-          appendPlacementRow(npzList, p, i);
+          appendPlacementRow(npzList, p, i, { motionColor: true });
           npzCount++;
         } else {
           appendPlacementRow(plyList, p, i);
@@ -8149,6 +8337,7 @@
         if (p.type === 'motion') {
           item.motionFps = p.motionFps || 30;
           item.motionFrames = p.motionFrames || (p.motion && p.motion.numFrames) || 0;
+          if (p.actorColor) item.actorColor = normalizeActorColorHex(p.actorColor);
         }
         if (p.sourcePath) item.sourcePath = p.sourcePath;
         else {
@@ -8410,6 +8599,7 @@
               : [0, 0, 0],
             motionFps: item.motionFps,
             motionFrames: item.motionFrames,
+            actorColor: normalizeActorColorHex(item.actorColor || pickNextMotionActorColor()),
             missing: true,
           });
           continue;
@@ -8429,6 +8619,7 @@
             yaw_deg: _n(item.yaw_deg, 0),
             sceneIdx: null,
             visible: item.visible !== false,
+            actorColor: normalizeActorColorHex(item.actorColor || pickNextMotionActorColor()),
             center: Array.isArray(item.center) && item.center.length >= 3
               ? [_n(item.center[0], 0), _n(item.center[1], 0), _n(item.center[2], 0)]
               : [motion.anchor.x, motion.anchor.y, motion.anchor.z],
