@@ -2574,6 +2574,30 @@
       return Math.max(0, Math.floor(Math.max(1, _n(path.timelineDurationSec, 10))));
     }
 
+    function markerSecFromPathT(pathT, dur) {
+      return Math.round(Math.max(0, Math.min(1, pathT)) * Math.max(1, dur));
+    }
+
+    function isMarkerSecTaken(sec, path) {
+      const dur = Math.max(1, _n(path && path.timelineDurationSec, 10));
+      for (let i = 0; i < cameraMarkers.length; i++) {
+        const t = markerPathT(cameraMarkers[i], i, cameraMarkers.length);
+        if (markerSecFromPathT(t, dur) === sec) return true;
+      }
+      return false;
+    }
+
+    /** NPZ 时间轴：返回尚未有机位的整数秒，避免重复添加在轨迹末端 */
+    function suggestNextAddMarkerSec() {
+      const path = getActiveCameraPath();
+      if (!path) return 0;
+      const maxSec = getMaxMarkerSec(path);
+      for (let s = 0; s <= maxSec; s++) {
+        if (!isMarkerSecTaken(s, path)) return s;
+      }
+      return Math.max(0, Math.floor(maxSec / 2));
+    }
+
     function updateAddMarkerSecDisplay() {
       const val = el('addMarkerSecVal');
       if (val) val.textContent = String(addMarkerTargetSec);
@@ -6555,9 +6579,15 @@
       const path = getActiveCameraPath();
       const useTimeAxis = pathUsesTimeAxis(path);
       if (useTimeAxis) {
-        applyAddMarkerTargetSec(addMarkerTargetSec);
-      }
-      if (cameraMarkers.length >= 2) {
+        pausePathSlide();
+        let targetSec = addMarkerTargetSec;
+        if (cameraMarkers.length >= 2 && isMarkerSecTaken(targetSec, path)) {
+          targetSec = suggestNextAddMarkerSec();
+          status(`该秒数已有机位，改用 ${targetSec}s · 可先拖路径条或 Q/W 调整再添加`);
+        }
+        applyAddMarkerTargetSec(targetSec);
+      } else if (cameraMarkers.length >= 2) {
+        pausePathSlide();
         applyPathPinPosition();
       }
       const marker = markerFromRig();
@@ -6602,6 +6632,9 @@
       }
       syncActivePathFromState();
       renderPathGroupList();
+      if (useTimeAxis) {
+        applyAddMarkerTargetSec(suggestNextAddMarkerSec());
+      }
       updateAddMarkerUI();
       el('rigPreviewStatus').textContent = '需重新渲染';
     }
@@ -7113,6 +7146,8 @@
       if (!(viewer && viewer.renderer) || !renderCamera || !rigOpen) return;
       showRigPreviewFloat();
       stopPreviewPlayback();
+      const wasPathSlidePlaying = pathSlidePlaying;
+      if (cameraMarkers.length >= 2) pausePathSlide();
       if (timelineOpenPathId) flushOpenTimelineDomToPath(true);
       const path = getActiveCameraPath();
       if (path) ensurePathMotionTracks(path);
@@ -7141,6 +7176,7 @@
         throw e;
       } finally {
         restorePathTimelineRenderCast(suppressedMotion);
+        if (wasPathSlidePlaying && cameraMarkers.length >= 2) playPathSlide();
       }
     }
 
@@ -8297,13 +8333,17 @@
       let plyCount = 0;
       let npzCount = 0;
       placements.forEach((p, i) => {
-        const isMotion = p.type === 'motion';
-        if (isMotion) {
-          appendPlacementRow(npzList, p, i, { motionColor: true });
-          npzCount++;
-        } else {
-          appendPlacementRow(plyList, p, i);
-          plyCount++;
+        try {
+          const isMotion = p.type === 'motion';
+          if (isMotion) {
+            appendPlacementRow(npzList, p, i, { motionColor: true });
+            npzCount++;
+          } else {
+            appendPlacementRow(plyList, p, i);
+            plyCount++;
+          }
+        } catch (err) {
+          console.error('renderList row failed', p && p.name, err);
         }
       });
       if (!plyCount) {
@@ -8319,6 +8359,16 @@
         npzList.appendChild(empty);
       }
       updateMissingRecoverUI();
+    }
+
+    async function rollbackPendingSplatScene(sceneIdxBefore) {
+      if (!viewer || !viewer.splatMesh) return;
+      if (viewer.splatMesh.scenes.length <= sceneIdxBefore) return;
+      try {
+        await removeSplatSceneAt(sceneIdxBefore);
+      } catch (err) {
+        console.warn('rollback pending splat scene failed', err);
+      }
     }
 
     function placementsToJson() {

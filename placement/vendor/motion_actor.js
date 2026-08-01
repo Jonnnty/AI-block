@@ -146,7 +146,129 @@ function parseNpy(u8) {
   throw new Error(`unsupported npy dtype ${descr}`);
 }
 
-export function parseKimodoNpz(arrayBuffer) {
+let soma77SkeletonMetaCache = null;
+
+function buildChildrenFromParents(parents) {
+  const children = Array.from({ length: parents.length }, () => []);
+  for (let jointIdx = 1; jointIdx < parents.length; jointIdx++) {
+    const parentIdx = parents[jointIdx];
+    if (parentIdx >= 0) children[parentIdx].push(jointIdx);
+  }
+  return children;
+}
+
+export async function loadSoma77SkeletonMeta(url = './vendor/soma77_skeleton_meta.json') {
+  if (soma77SkeletonMetaCache) return soma77SkeletonMetaCache;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`无法加载 SOMA77 骨架元数据: ${url}`);
+  const payload = await resp.json();
+  const parents = Int32Array.from(payload.parents || []);
+  soma77SkeletonMetaCache = {
+    numJoints: payload.numJoints || parents.length,
+    parents,
+    neutral: Float64Array.from(payload.neutral || []),
+    children: buildChildrenFromParents(parents),
+  };
+  return soma77SkeletonMetaCache;
+}
+
+function rotMat3FromTo(src, dst) {
+  const ax = src[0]; const ay = src[1]; const az = src[2];
+  const bx = dst[0]; const by = dst[1]; const bz = dst[2];
+  const na = Math.hypot(ax, ay, az);
+  const nb = Math.hypot(bx, by, bz);
+  const out = new Float32Array(9);
+  out[0] = 1; out[4] = 1; out[8] = 1;
+  if (na < 1e-8 || nb < 1e-8) return out;
+  const a0 = ax / na; const a1 = ay / na; const a2 = az / na;
+  const b0 = bx / nb; const b1 = by / nb; const b2 = bz / nb;
+  let cx = a1 * b2 - a2 * b1;
+  let cy = a2 * b0 - a0 * b2;
+  let cz = a0 * b1 - a1 * b0;
+  let cosAngle = a0 * b0 + a1 * b1 + a2 * b2;
+  let sinAngle = Math.hypot(cx, cy, cz);
+  if (sinAngle < 1e-8) {
+    if (cosAngle > 0) return out;
+    let ox = Math.abs(a0) < 0.9 ? 1 : 0;
+    let oy = Math.abs(a0) < 0.9 ? 0 : 1;
+    let oz = 0;
+    cx = a1 * oz - a2 * oy;
+    cy = a2 * ox - a0 * oz;
+    cz = a0 * oy - a1 * ox;
+    sinAngle = Math.hypot(cx, cy, cz);
+    cosAngle = -1;
+  }
+  cx /= sinAngle; cy /= sinAngle; cz /= sinAngle;
+  const k = (1 - cosAngle) / (sinAngle * sinAngle);
+  out[0] = cosAngle + cx * cx * k;
+  out[1] = cx * cy * k - cz * sinAngle;
+  out[2] = cx * cz * k + cy * sinAngle;
+  out[3] = cy * cx * k + cz * sinAngle;
+  out[4] = cosAngle + cy * cy * k;
+  out[5] = cy * cz * k - cx * sinAngle;
+  out[6] = cz * cx * k - cy * sinAngle;
+  out[7] = cz * cy * k + cx * sinAngle;
+  out[8] = cosAngle + cz * cz * k;
+  return out;
+}
+
+function primaryChildIndex(jointIdx, neutral, children) {
+  const childList = children[jointIdx];
+  if (!childList || !childList.length) return -1;
+  let best = childList[0];
+  let bestLen = 0;
+  const jx = neutral[jointIdx * 3];
+  const jy = neutral[jointIdx * 3 + 1];
+  const jz = neutral[jointIdx * 3 + 2];
+  for (const childIdx of childList) {
+    const dx = neutral[childIdx * 3] - jx;
+    const dy = neutral[childIdx * 3 + 1] - jy;
+    const dz = neutral[childIdx * 3 + 2] - jz;
+    const len = dx * dx + dy * dy + dz * dz;
+    if (len > bestLen) {
+      bestLen = len;
+      best = childIdx;
+    }
+  }
+  return best;
+}
+
+function estimateGlobalRotMatsFromPosed(posedData, numFrames, numJoints, meta) {
+  const { neutral, parents, children } = meta;
+  const globalRotMats = new Float32Array(numFrames * numJoints * 9);
+  const identity = new Float32Array(9);
+  identity[0] = 1; identity[4] = 1; identity[8] = 1;
+  for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
+    for (let jointIdx = 0; jointIdx < numJoints; jointIdx++) {
+      let childIdx = primaryChildIndex(jointIdx, neutral, children);
+      let srcJoint = jointIdx;
+      let dstJoint = childIdx;
+      if (childIdx < 0) {
+        const parentIdx = parents[jointIdx];
+        if (parentIdx < 0) continue;
+        srcJoint = parentIdx;
+        dstJoint = jointIdx;
+      }
+      const si = (frameIdx * numJoints + srcJoint) * 3;
+      const di = (frameIdx * numJoints + dstJoint) * 3;
+      const restDir = [
+        neutral[dstJoint * 3] - neutral[srcJoint * 3],
+        neutral[dstJoint * 3 + 1] - neutral[srcJoint * 3 + 1],
+        neutral[dstJoint * 3 + 2] - neutral[srcJoint * 3 + 2],
+      ];
+      const poseDir = [
+        posedData[di] - posedData[si],
+        posedData[di + 1] - posedData[si + 1],
+        posedData[di + 2] - posedData[si + 2],
+      ];
+      const rot = rotMat3FromTo(restDir, poseDir);
+      globalRotMats.set(rot, (frameIdx * numJoints + jointIdx) * 9);
+    }
+  }
+  return globalRotMats;
+}
+
+export async function parseKimodoNpz(arrayBuffer, metaOptional = null) {
   const files = unzipSync(new Uint8Array(arrayBuffer));
   let posedEntry = null;
   let rotEntry = null;
@@ -157,16 +279,28 @@ export function parseKimodoNpz(arrayBuffer) {
     else if (key === 'global_rot_mats') rotEntry = parseNpy(bytes);
   }
   if (!posedEntry) throw new Error('NPZ 缺少 posed_joints');
-  if (!rotEntry) throw new Error('NPZ 缺少 global_rot_mats');
   const pjShape = posedEntry.shape;
   const numFrames = pjShape[0];
   const numJoints = pjShape[1];
+  let rotationsEstimated = false;
+  if (!rotEntry) {
+    const meta = metaOptional || await loadSoma77SkeletonMeta();
+    if (numJoints !== meta.numJoints) {
+      throw new Error(`NPZ 缺少 global_rot_mats，且关节数 ${numJoints} ≠ SOMA77(${meta.numJoints})`);
+    }
+    rotEntry = {
+      data: estimateGlobalRotMatsFromPosed(posedEntry.data, numFrames, numJoints, meta),
+      shape: [numFrames, numJoints, 3, 3],
+    };
+    rotationsEstimated = true;
+  }
   return {
     posedJoints: posedEntry.data,
     globalRotMats: rotEntry.data,
     numFrames,
     numJoints,
     fps: 30,
+    rotationsEstimated,
   };
 }
 
