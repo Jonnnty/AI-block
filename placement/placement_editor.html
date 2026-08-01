@@ -355,9 +355,13 @@
     .tl-rulers { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; max-height: 34vh; }
     .tl-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
     .tl-row-label-col {
-      width: 88px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px;
+      width: 104px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px;
       position: relative; z-index: 6; pointer-events: auto;
     }
+    .tl-row-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0;
+    }
+    .tl-row-head .tl-row-label { flex: 1; min-width: 0; }
     .tl-row-tools-compact input[type=checkbox] {
       width: 14px; height: 14px; margin: 0; flex-shrink: 0; cursor: pointer; pointer-events: auto;
     }
@@ -380,6 +384,17 @@
       text-align: left;
     }
     .tl-row-del-inline:hover { color: #f88 !important; }
+    .tl-row-del-btn {
+      width: 22px !important; height: 22px !important; min-width: 22px !important;
+      padding: 0 !important; flex-shrink: 0;
+      background: rgba(139, 46, 46, 0.35) !important;
+      border: 1px solid #8b4040 !important; color: #ffb0b0 !important;
+      border-radius: 4px !important; font-size: 15px !important; line-height: 1;
+      cursor: pointer;
+    }
+    .tl-row-del-btn:hover {
+      background: #8b2e2e !important; border-color: #c05050 !important; color: #fff !important;
+    }
     .tl-empty-hint {
       font-size: 11px; color: #666; padding: 6px 8px 6px 96px; line-height: 1.45;
     }
@@ -747,7 +762,7 @@
           <button type="button" id="tlCloseBtn" class="tl-close-btn secondary" title="收起时间轴（保存当前设置）"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
         </div>
       </div>
-      <p class="hint" style="margin:0;font-size:11px;line-height:1.45">相机条与各 NPZ 各占一行 · 勾选「缩放」后可拖 NPZ 条尾部</p>
+      <p class="hint" style="margin:0;font-size:11px;line-height:1.45">相机条与各 NPZ 各占一行 · 勾选「缩放」后可拖 NPZ 条尾部 · 点各行右侧 <strong style="color:#ffb0b0">×</strong> 移除 NPZ</p>
       <div id="tlAddPanel" class="tl-add-panel" hidden></div>
       <div id="tlRulers" class="tl-rulers"></div>
     </div>
@@ -3535,12 +3550,14 @@
         const shortName = track.assetName.replace(/\.npz$/i, '');
         const missingNote = npzMissing ? '<span class="tl-track-missing"> · 缺少 NPZ</span>' : '';
         const labelHtml = `
-          <span class="tl-row-label${npzMissing ? ' tl-row-label-missing' : ''}" title="${track.assetName}">${shortName}${missingNote}</span>
+          <div class="tl-row-head">
+            <span class="tl-row-label${npzMissing ? ' tl-row-label-missing' : ''}" title="${track.assetName}">${shortName}${missingNote}</span>
+            <button type="button" class="tl-row-del-btn tl-row-del" title="移除此 NPZ 时间条">×</button>
+          </div>
           <div class="tl-row-tools-compact">
             <label><input type="checkbox" class="tl-scale-check"${track.scaleDragEnabled ? ' checked' : ''} /> 缩放</label>
             <input type="number" class="tl-scale-input" min="0.05" max="20" step="0.05" value="${track.npzScale.toFixed(2)}" title="NPZ 时间倍率 ×" />
             <span class="hint">${npzDur.toFixed(1)}s 全长</span>
-            <button type="button" class="tl-row-del-inline tl-row-del" title="移除此 NPZ 时间条">移除</button>
           </div>`;
         const motionRow = buildTimelineScrollRow('tl-row-motion' + (npzMissing ? ' tl-row-motion-missing' : ''), labelHtml, contentSec);
         motionRow.row.dataset.trackId = track.id;
@@ -3564,13 +3581,15 @@
         bindNpzBarDrag(bar, track.id, motionRow.canvas, contentSec);
         bindNpzScaleDrag(endHandle, track.id, motionRow.canvas, contentSec);
 
-        motionRow.row.querySelector('.tl-row-del').onclick = () => {
+        motionRow.row.querySelector('.tl-row-del').onclick = (e) => {
+          e.stopPropagation();
           flushTimelineInputs(true);
           path.motionTracks = path.motionTracks.filter((t) => t.id !== track.id);
           syncActivePathFromState();
           renderTimelineDock();
           syncAllActorsForPathT(pathPinT);
           kickOverlayRender();
+          status(`已移除 ${shortName} 时间条`);
         };
         bindTimelineScaleControls(motionRow.row, track.id);
         rulers.appendChild(motionRow.row);
