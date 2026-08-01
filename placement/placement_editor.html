@@ -2587,20 +2587,25 @@
       return false;
     }
 
-    /** NPZ 时间轴：返回尚未有机位的整数秒，避免重复添加在轨迹末端 */
-    function suggestNextAddMarkerSec() {
-      const path = getActiveCameraPath();
-      if (!path) return 0;
-      const maxSec = getMaxMarkerSec(path);
-      for (let s = 0; s <= maxSec; s++) {
-        if (!isMarkerSecTaken(s, path)) return s;
-      }
-      return Math.max(0, Math.floor(maxSec / 2));
-    }
-
     function updateAddMarkerSecDisplay() {
       const val = el('addMarkerSecVal');
       if (val) val.textContent = String(addMarkerTargetSec);
+    }
+
+    /** 点击添加前提交秒数输入框，避免仍用旧 addMarkerTargetSec */
+    function flushAddMarkerSecInput() {
+      const path = getActiveCameraPath();
+      const input = el('addMarkerSecInput');
+      const val = el('addMarkerSecVal');
+      if (!input || !val || input.hidden) return;
+      const maxSec = getMaxMarkerSec(path);
+      const v = parseInt(input.value, 10);
+      if (!Number.isNaN(v)) {
+        addMarkerTargetSec = Math.max(0, Math.min(maxSec, Math.round(v)));
+      }
+      input.hidden = true;
+      val.hidden = false;
+      updateAddMarkerSecDisplay();
     }
 
     function syncAddMarkerTargetSecFromPathPin() {
@@ -2614,8 +2619,13 @@
       const path = getActiveCameraPath();
       if (!path) return;
       const maxSec = getMaxMarkerSec(path);
-      addMarkerTargetSec = Math.max(0, Math.min(maxSec, Math.round(sec)));
       const dur = Math.max(1, path.timelineDurationSec);
+      const rounded = Math.round(sec);
+      const clamped = Math.max(0, Math.min(maxSec, rounded));
+      if (rounded !== clamped) {
+        status(`轨迹时长 ${dur}s，${rounded}s 已截断为 ${clamped}s`);
+      }
+      addMarkerTargetSec = clamped;
       pathPinT = maxSec > 0 ? Math.min(1, addMarkerTargetSec / dur) : 0;
       syncPathPinUI();
       if (cameraMarkers.length >= 2) applyPathPinPosition();
@@ -2638,7 +2648,7 @@
       timedWrap.hidden = !useTime;
       if (val) val.hidden = false;
       if (input) input.hidden = true;
-      if (useTime) syncAddMarkerTargetSecFromPathPin();
+      if (useTime) updateAddMarkerSecDisplay();
     }
 
     function startAddMarkerSecEdit(e) {
@@ -6580,10 +6590,11 @@
       const useTimeAxis = pathUsesTimeAxis(path);
       if (useTimeAxis) {
         pausePathSlide();
+        flushAddMarkerSecInput();
         let targetSec = addMarkerTargetSec;
-        if (cameraMarkers.length >= 2 && isMarkerSecTaken(targetSec, path)) {
-          targetSec = suggestNextAddMarkerSec();
-          status(`该秒数已有机位，改用 ${targetSec}s · 可先拖路径条或 Q/W 调整再添加`);
+        if (isMarkerSecTaken(targetSec, path)) {
+          status(`${targetSec}s 已有机位 · 请改成其他秒数再添加`);
+          return;
         }
         applyAddMarkerTargetSec(targetSec);
       } else if (cameraMarkers.length >= 2) {
@@ -6632,9 +6643,6 @@
       }
       syncActivePathFromState();
       renderPathGroupList();
-      if (useTimeAxis) {
-        applyAddMarkerTargetSec(suggestNextAddMarkerSec());
-      }
       updateAddMarkerUI();
       el('rigPreviewStatus').textContent = '需重新渲染';
     }
