@@ -2967,6 +2967,52 @@
       return !!(path && Array.isArray(path.motionTracks) && path.motionTracks.length > 0);
     }
 
+    /** 当前轨迹带时间轴时，仅 motionTracks 中的 NPZ 参与路径渲染。 */
+    function isMotionOnActivePathTimeline(p) {
+      const path = getActiveCameraPath();
+      if (!path || !pathHasTimelineTracks(path)) return true;
+      return !!findMotionTrackForPlacement(path, p.name);
+    }
+
+    function setMotionPlacementVisibleForPathRender(p, showInRender) {
+      if (!p || p.type !== 'motion' || p.missing) return;
+      const renderShow = showInRender && p.visible !== false;
+      if (p.motionRender === 'splat' && isValidSplatSceneIdx(p.sceneIdx) && viewer && viewer.splatMesh) {
+        const sm = viewer.splatMesh;
+        const scene = sm.getScene(p.sceneIdx);
+        scene.visible = renderShow;
+        if (Array.isArray(sm.sceneOptions) && sm.sceneOptions[p.sceneIdx]) {
+          sm.sceneOptions[p.sceneIdx].visible = renderShow;
+        }
+        if (sm.enableOptionalEffects && sm.material && sm.material.uniforms && sm.material.uniforms.sceneVisibility) {
+          sm.material.uniforms.sceneVisibility.value[p.sceneIdx] = renderShow ? 1 : 0;
+          sm.material.uniformsNeedUpdate = true;
+        }
+        sm.updateTransforms();
+      } else if (p.root) {
+        p.root.visible = renderShow;
+      }
+    }
+
+    function applyPathTimelineRenderCast() {
+      const path = getActiveCameraPath();
+      if (!path || !pathHasTimelineTracks(path)) return null;
+      const suppressed = [];
+      for (const p of placements) {
+        if (p.type !== 'motion' || p.missing || !p.motion) continue;
+        if (isMotionOnActivePathTimeline(p)) continue;
+        suppressed.push(p);
+        setMotionPlacementVisibleForPathRender(p, false);
+      }
+      if (suppressed.length && viewer) viewer.forceRenderNextFrame();
+      return suppressed.length ? suppressed : null;
+    }
+
+    function restorePathTimelineRenderCast(suppressed) {
+      if (!suppressed || !suppressed.length) return;
+      for (const p of suppressed) applyPlacementVisibility(p);
+    }
+
     function getMotionFrameForPlacementAtPathT(p, pathT) {
       const path = getActiveCameraPath();
       if (!path || !pathHasTimelineTracks(path)) return 0;
@@ -3413,7 +3459,7 @@
       if (!path.motionTracks.length) {
         const hint = document.createElement('div');
         hint.className = 'tl-empty-hint';
-        hint.textContent = '点「+ 添加 NPZ」把人模加到下方独立时间条；未添加的 NPZ 在路径渲染时不会动';
+        hint.textContent = '点「+ 添加 NPZ」把人模加到下方独立时间条；未添加的 NPZ 不会出现在路径渲染画面中';
         rulers.appendChild(hint);
       }
 
@@ -5050,6 +5096,15 @@
           child.visible = false;
         }
       }
+      const hiddenActorRoots = [];
+      if (pathHasTimelineTracks(getActiveCameraPath())) {
+        for (const p of placements) {
+          if (p.type !== 'motion' || p.missing || !p.root || !p.root.visible) continue;
+          if (isMotionOnActivePathTimeline(p)) continue;
+          hiddenActorRoots.push(p.root);
+          p.root.visible = false;
+        }
+      }
       const tcHelper = transformControls && transformControls.getHelper && transformControls.getHelper();
       const tcWasVisible = tcHelper && tcHelper.visible;
       if (tcHelper) tcHelper.visible = false;
@@ -5059,6 +5114,9 @@
         renderer.render(rigOverlayScene, camera);
       } finally {
         hidden.forEach((c) => { c.visible = true; });
+        for (const p of placements) {
+          if (p.root && hiddenActorRoots.includes(p.root)) applyPlacementVisibility(p);
+        }
         if (tcHelper) tcHelper.visible = tcWasVisible;
         renderer.autoClear = savedAutoClear;
       }
@@ -5073,6 +5131,7 @@
       const pathT = f / Math.max(1, totalFrames - 1);
       for (const p of placements) {
         if (p.type !== 'motion' || p.missing || !p.motion) continue;
+        if (!isMotionOnActivePathTimeline(p)) continue;
         const frame = getMotionFrameForPlacementAtPathT(p, pathT);
         updateActorFrame(p, frame);
       }
@@ -6595,6 +6654,7 @@
       const ctx = canvas.getContext('2d');
       previewFrames = [];
       const savedPose = { ...renderCameraPose };
+      const suppressedMotion = applyPathTimelineRenderCast();
       try {
         for (let f = 0; f < totalFrames; f++) {
           const sample = samplePathAt(f / (totalFrames - 1));
@@ -6631,6 +6691,7 @@
           loopPreviewFramesOnCanvas(previewFrames, fps).catch(showError);
         }
       } finally {
+        restorePathTimelineRenderCast(suppressedMotion);
         Object.assign(renderCameraPose, savedPose);
         syncRigFromPose();
         refreshPathVisuals();
@@ -6736,11 +6797,23 @@
 
     async function gaussianRenderFromRig() {
       status('保存单帧 PNG…');
-      const canvas = await renderGaussFullResCanvas();
-      const blob = await canvasToPngBlob(canvas);
-      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      downloadBlob(blob, `gaussian_frame_${ts}.png`);
-      status(`单帧已保存 ${canvas.width}×${canvas.height}`);
+      if (timelineOpenPathId) flushOpenTimelineDomToPath(true);
+      const path = getActiveCameraPath();
+      if (path) ensurePathMotionTracks(path);
+      if (cameraMarkers.length >= 2) applyPathPinPosition();
+      else if (placements.some((p) => p.type === 'motion' && !p.missing)) {
+        syncAllActorsForPathT(pathPinT);
+      }
+      const suppressedMotion = applyPathTimelineRenderCast();
+      try {
+        const canvas = await renderGaussFullResCanvas();
+        const blob = await canvasToPngBlob(canvas);
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        downloadBlob(blob, `gaussian_frame_${ts}.png`);
+        status(`单帧已保存 ${canvas.width}×${canvas.height}`);
+      } finally {
+        restorePathTimelineRenderCast(suppressedMotion);
+      }
     }
 
     async function exportPathSequencePngs(dirHandle = null) {
@@ -6772,6 +6845,7 @@
 
       const savedPose = { ...renderCameraPose };
       const frames = [];
+      const suppressedMotion = applyPathTimelineRenderCast();
 
       try {
         for (let f = 0; f < totalFrames; f++) {
@@ -6807,6 +6881,7 @@
           status(`已下载 ${folderName}.zip（${totalFrames} 帧 @ ${renderW}×${renderH}）`);
         }
       } finally {
+        restorePathTimelineRenderCast(suppressedMotion);
         Object.assign(renderCameraPose, savedPose);
         syncRigFromPose();
         refreshPathVisuals();
@@ -6944,6 +7019,7 @@
       status(`渲染 ${secNote} 单帧${motionNote ? ` · ${motionNote}` : ''}…`);
       el('rigPreviewStatus').textContent = '渲染中…';
       el('rigPreviewTitle').textContent = `单帧预览 · ${secNote}`;
+      const suppressedMotion = applyPathTimelineRenderCast();
       try {
         const img = await renderGaussToImageData();
         el('rigPreviewCanvas').getContext('2d').putImageData(img, 0, 0);
@@ -6952,6 +7028,8 @@
       } catch (e) {
         el('rigPreviewStatus').textContent = '失败';
         throw e;
+      } finally {
+        restorePathTimelineRenderCast(suppressedMotion);
       }
     }
 
