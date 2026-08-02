@@ -1864,14 +1864,22 @@
       return removed;
     }
 
+    let suppressPlacementRender = false;
+
     async function reconcileSceneRenderState() {
-      deoverlapCanonicalPlacements();
-      for (const p of placements) {
-        if (!p.missing) syncPlacementTransform(p);
+      suppressPlacementRender = true;
+      try {
+        deoverlapCanonicalPlacements();
+        if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+        for (const p of placements) {
+          if (!p.missing) syncPlacementTransform(p, { deferRender: true });
+        }
+        if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+        await removeUnownedSplatScenes();
+        if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+      } finally {
+        suppressPlacementRender = false;
       }
-      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
-      await removeUnownedSplatScenes();
-      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
       viewer && viewer.forceRenderNextFrame();
     }
 
@@ -4889,7 +4897,7 @@
             m.polygonOffsetUnits = -1;
           }
         });
-        syncImageTransform(p);
+        syncImageTransform(p, { deferRender: true });
       }
     }
 
@@ -4958,7 +4966,8 @@
         offset += count;
       }
       const tex = sceneIndexesDesc.texture;
-      const texProps = sm.renderer && sm.renderer.properties.get(tex);
+      const renderer = sm.renderer || (viewer && viewer.renderer);
+      const texProps = renderer && renderer.properties.get(tex);
       if (texProps && texProps.__webglTexture && typeof sm.updateDataTexture === 'function') {
         sm.updateDataTexture(idxData, tex, sceneIndexesDesc.size, texProps, 1, 1, 1, 0, total - 1);
       } else if (tex) {
@@ -4972,7 +4981,8 @@
       const idxData = sceneIndexesDesc.data;
       for (let gi = globalStart; gi <= globalEnd; gi++) idxData[gi] = sceneIdx;
       const tex = sceneIndexesDesc.texture;
-      const texProps = sm.renderer && sm.renderer.properties.get(tex);
+      const renderer = sm.renderer || (viewer && viewer.renderer);
+      const texProps = renderer && renderer.properties.get(tex);
       if (texProps && texProps.__webglTexture && typeof sm.updateDataTexture === 'function') {
         sm.updateDataTexture(idxData, tex, sceneIndexesDesc.size, texProps, 1, 1, 1, globalStart, globalEnd);
       } else if (tex) {
@@ -5480,7 +5490,7 @@
       if (p.roll_deg == null || !Number.isFinite(Number(p.roll_deg))) p.roll_deg = 0;
     }
 
-    function syncImageTransform(p) {
+    function syncImageTransform(p, opts = {}) {
       if (!p.root && p.mesh && p.mesh.parent) p.root = p.mesh.parent;
       if (!p.root) return;
       clampImageScale(p);
@@ -5494,7 +5504,9 @@
       ));
       p.root.scale.set(p.scale, p.scale, p.scale);
       p.root.visible = p.visible !== false;
-      kickOverlayRender();
+      if (!opts.deferRender && !suppressPlacementRender && viewer && viewer.initialized) {
+        viewer.forceRenderNextFrame();
+      }
     }
 
     function buildImagePlaneGeometry(aspect) {
@@ -5542,6 +5554,7 @@
       imageRootGroup.add(root);
       syncImageTransform(p);
       ensureViewerRenderPatch();
+      if (!suppressPlacementRender && viewer && viewer.initialized) viewer.forceRenderNextFrame();
       return root;
     }
 
@@ -5920,8 +5933,6 @@
         hideLoadProgress();
         status(`已恢复图片 ${assetName}`);
         renderList();
-        migrateImageRootsToSceneGroup();
-        await reconcileSceneRenderState();
         return;
       }
 
@@ -5950,8 +5961,6 @@
       hideLoadProgress();
       status(`已放置图片 ${assetName}（${imgW}×${imgH}）`);
       renderList();
-      migrateImageRootsToSceneGroup();
-      await reconcileSceneRenderState();
     }
 
     function ensureViewerRenderPatch() {
@@ -8039,9 +8048,9 @@
       renderList();
     }
 
-    function syncPlacementTransform(p) {
+    function syncPlacementTransform(p, opts = {}) {
       if (p.type === 'image') {
-        syncImageTransform(p);
+        syncImageTransform(p, opts);
         return;
       }
       if (p.type === 'motion') {
@@ -8051,7 +8060,7 @@
           scene.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
           scene.scale.set(p.scale, p.scale, p.scale);
           viewer.splatMesh.updateTransforms();
-          viewer.forceRenderNextFrame();
+          if (!opts.deferRender && !suppressPlacementRender) viewer.forceRenderNextFrame();
         } else {
           syncActorTransform(p);
         }
@@ -8063,7 +8072,7 @@
       scene.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
       scene.scale.set(p.scale, p.scale, p.scale);
       viewer.splatMesh.updateTransforms();
-      viewer.forceRenderNextFrame();
+      if (!opts.deferRender && !suppressPlacementRender) viewer.forceRenderNextFrame();
     }
 
     function checkWebGL() {
@@ -8515,7 +8524,7 @@
         await removeActorFromScene(p);
       } else if (p.type === 'image') {
         removeImageFromScene(p);
-        await reconcileSceneRenderState();
+        viewer && viewer.forceRenderNextFrame();
       } else if (p.sceneIdx != null && viewer) {
         try {
           await viewer.removeSplatScene(p.sceneIdx, false);
