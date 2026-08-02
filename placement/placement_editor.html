@@ -848,10 +848,10 @@
     <div id="modelsPanel">
       <section>
         <h2>导入模型</h2>
-        <input type="file" id="pickFile" accept=".ply,.npz" multiple hidden />
+        <input type="file" id="pickFile" accept=".ply,.npz,.png,.jpg,.jpeg,.webp,.gif,.bmp" multiple hidden />
         <input type="file" id="pickFolder" webkitdirectory directory multiple hidden />
-        <button type="button" id="importBtn" class="secondary">选择 PLY / NPZ 文件</button>
-        <p class="hint">NPZ 为 Kimodo 动作，导入后显示素色 SOMA 人模</p>
+        <button type="button" id="importBtn" class="secondary">选择 PLY / NPZ / 图片</button>
+        <p class="hint">NPZ 为 Kimodo 动作 · PNG/JPG 等作为竖直贴图导入，等比缩放不拉伸</p>
         <div id="missingRecoverPanel" class="missing-recover-panel" hidden>
           <p class="hint" id="missingRecoverHint">有模型缺少本地文件</p>
           <div id="missingRecoverFolderList" class="missing-recover-folder-list"></div>
@@ -871,6 +871,8 @@
         <div id="sceneListPly" class="scene-list"></div>
         <div class="list-subhead">NPZ 人模</div>
         <div id="sceneListNpz" class="scene-list"></div>
+        <div class="list-subhead">图片</div>
+        <div id="sceneListImage" class="scene-list"></div>
       </section>
       <section>
         <h2>默认参数</h2>
@@ -1929,10 +1931,11 @@
     function missingPlacementHint(p) {
       if (!p || !p.missing) return '';
       if (p.missingReason) return p.missingReason;
-      if (p.sourcePath) return `缺少 PLY：${p.sourcePath}`;
+      const kind = p.type === 'motion' ? 'NPZ' : (p.type === 'image' ? '图片' : 'PLY');
+      if (p.sourcePath) return `缺少 ${kind}：${p.sourcePath}`;
       return canLoadAssetsFromDisk()
-        ? '缺少 PLY · 请确认文件仍在原路径'
-        : '缺少 PLY · 请拖入同名 PLY 恢复';
+        ? `缺少 ${kind} · 请确认文件仍在原路径`
+        : `缺少 ${kind} · 请拖入同名文件恢复`;
     }
 
     const FOLDER_ICON_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>';
@@ -2043,7 +2046,7 @@
       for await (const entry of dirHandle.values()) {
         if (entry.kind === 'file') {
           const lower = entry.name.toLowerCase();
-          if (lower.endsWith('.ply') || lower.endsWith('.npz')) {
+          if (lower.endsWith('.ply') || lower.endsWith('.npz') || isImageAssetName(entry.name)) {
             bucket.push({ handle: entry, name: entry.name });
           }
         } else if (entry.kind === 'directory') {
@@ -2057,7 +2060,7 @@
       return [...(fileList || [])]
         .filter((f) => {
           const lower = f.name.toLowerCase();
-          return lower.endsWith('.ply') || lower.endsWith('.npz');
+          return lower.endsWith('.ply') || lower.endsWith('.npz') || isImageAssetName(f.name);
         })
         .map((f) => ({
           file: f,
@@ -2121,7 +2124,7 @@
       }
       status(`正在扫描 ${recoveryFolderSources.length} 个文件夹…`);
       const entries = await collectEntriesFromRecoverySources();
-      if (!entries.length) throw new Error('所选文件夹内未找到 PLY / NPZ 文件');
+      if (!entries.length) throw new Error('所选文件夹内未找到 PLY / NPZ / 图片文件');
       const index = buildAssetFileIndex(entries);
       let recovered = 0;
       let notFound = 0;
@@ -2167,7 +2170,7 @@
         const folderPart = recoveryFolderSources.length
           ? `已选 ${recoveryFolderSources.length} 个文件夹 · `
           : '可添加多个文件夹 · ';
-        hint.textContent = `${missingCount} 个模型缺少本地文件 · ${folderPart}统一搜索同名 PLY / NPZ（忽略文件名中的 (数字) 后缀）`;
+        hint.textContent = `${missingCount} 个模型缺少本地文件 · ${folderPart}统一搜索同名 PLY / NPZ / 图片（忽略文件名中的 (数字) 后缀）`;
       }
       const recoverBtn = el('missingRecoverBtn');
       if (recoverBtn) recoverBtn.disabled = recoveryFolderSources.length <= 0;
@@ -2221,6 +2224,7 @@
     /** 在线版通过 CORS 桥接本机 serve_editor.py，例如 http://127.0.0.1:8080/ */
     let localServerBridge = null;
     const PLY_ALPHA = 1;
+    const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']);
     const VIEW_OFFSET = { x: 0.14, y: 0, z: 0 };
     const DEFAULT_Z_FALLBACK = 0.0006;
     const VISUAL_DECIMATION = 0.3;
@@ -5331,6 +5335,95 @@
       p.scale = motionDefaultScale(motion, defaultScale);
     }
 
+    function isImageAssetName(name) {
+      const ext = String(name || '').toLowerCase().split('.').pop();
+      return IMAGE_EXTENSIONS.has(ext);
+    }
+
+    function imageMimeFromName(name) {
+      const ext = String(name || '').toLowerCase().split('.').pop();
+      if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+      if (ext === 'webp') return 'image/webp';
+      if (ext === 'gif') return 'image/gif';
+      if (ext === 'bmp') return 'image/bmp';
+      return 'image/png';
+    }
+
+    async function loadImageTextureFromBuffer(ab, mimeType) {
+      const blob = new Blob([ab], { type: mimeType || 'image/png' });
+      const url = URL.createObjectURL(blob);
+      try {
+        const tex = await new Promise((resolve, reject) => {
+          new THREE.TextureLoader().load(url, resolve, undefined, reject);
+        });
+        if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+        tex.needsUpdate = true;
+        return tex;
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    function removeImageFromScene(p) {
+      if (p.root && actorRootGroup) actorRootGroup.remove(p.root);
+      if (p.mesh) {
+        if (p.mesh.material) {
+          if (p.mesh.material.map) p.mesh.material.map.dispose();
+          p.mesh.material.dispose();
+        }
+        if (p.mesh.geometry) p.mesh.geometry.dispose();
+      }
+      if (p.texture && p.texture !== (p.mesh && p.mesh.material && p.mesh.material.map)) {
+        p.texture.dispose();
+      }
+      p.root = null;
+      p.mesh = null;
+      p.texture = null;
+    }
+
+    function syncImageTransform(p) {
+      if (!p.root) return;
+      p.root.position.set(p.x, p.y, p.z);
+      p.root.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+      p.root.scale.set(p.scale, p.scale, p.scale);
+      p.root.visible = p.visible !== false;
+      kickOverlayRender();
+    }
+
+    function createImageObject(p, texture, aspect) {
+      initActorRootGroup();
+      const safeAspect = Math.max(0.05, Math.min(20, aspect || 1));
+      const geo = new THREE.PlaneGeometry(1, 1 / safeAspect);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        alphaTest: 0.02,
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 901;
+      const root = new THREE.Group();
+      root.name = `image:${p.name}`;
+      root.add(mesh);
+      applyAlwaysOnTop(root);
+      p.type = 'image';
+      p.mesh = mesh;
+      p.root = root;
+      p.texture = texture;
+      p.imageAspect = safeAspect;
+      if (!Array.isArray(p.center) || p.center.length < 3) {
+        p.center = [p.x, p.y, p.z];
+      }
+      actorRootGroup.add(root);
+      syncImageTransform(p);
+      kickOverlayRender();
+      return root;
+    }
+
     function removeActorMeshIfAny(p) {
       if (p.root && actorRootGroup) {
         actorRootGroup.remove(p.root);
@@ -5663,6 +5756,74 @@
       selectPlacement(placements.length - 1);
       hideLoadProgress();
       status(`已放置人模 ${assetName}（${motion.numFrames} 帧）`);
+      renderList();
+    }
+
+    async function addImageFromFile(file, loadToken = sessionResetToken) {
+      if (!sceneReady) throw new Error('场景尚未就绪');
+      const { assetName, missingIdx } = resolveImportAssetName(file);
+      let sourcePath = inferSourcePathForImport(file);
+      if (!sourcePath) sourcePath = await guessAssetPathFromServer(file.name);
+      sourcePath = inheritSourcePathForAsset(assetName, sourcePath);
+      status(missingIdx >= 0 ? `恢复图片 ${assetName}…` : `加载图片 ${assetName}…`);
+      setLoadProgress(20, `解析 ${assetName}…`);
+      let ab = fileCache.get(fileCacheKey(activeSceneId, assetName));
+      if (!ab) {
+        ab = await file.arrayBuffer();
+        if (isSessionAborted(loadToken)) return;
+        fileCache.set(fileCacheKey(activeSceneId, assetName), ab);
+      }
+      if (activeSceneId) {
+        idbPutSceneAsset(activeSceneId, assetName, ab, sourcePath).catch((e) => console.warn('图片缓存写入失败', e));
+      }
+      const texture = await loadImageTextureFromBuffer(ab, imageMimeFromName(assetName));
+      if (isSessionAborted(loadToken)) {
+        texture.dispose();
+        return;
+      }
+      const imgW = texture.image && texture.image.width ? texture.image.width : 1;
+      const imgH = texture.image && texture.image.height ? texture.image.height : 1;
+      const aspect = imgW / Math.max(1, imgH);
+
+      if (missingIdx >= 0) {
+        const p = placements[missingIdx];
+        removeImageFromScene(p);
+        p.missing = false;
+        delete p.missingReason;
+        if (sourcePath) p.sourcePath = sourcePath;
+        if (!Array.isArray(p.center) || p.center.length < 3) {
+          p.center = [p.x, p.y, p.z];
+        }
+        createImageObject(p, texture, aspect);
+        selectPlacement(missingIdx);
+        hideLoadProgress();
+        status(`已恢复图片 ${assetName}`);
+        renderList();
+        return;
+      }
+
+      const siblings = siblingPlacementsByCanonical(assetName);
+      const sibling = siblings[0] || null;
+      const spawnPos = sibling ? placementPositionBesideSibling(sibling, siblings.length) : null;
+      const p = {
+        type: 'image',
+        name: assetName,
+        sourcePath: sourcePath || null,
+        x: spawnPos ? spawnPos.x : 0,
+        y: spawnPos ? spawnPos.y : 0,
+        z: spawnPos ? spawnPos.z : defaultZ,
+        scale: defaultScale,
+        yaw_deg: 0,
+        sceneIdx: null,
+        visible: true,
+        center: spawnPos ? [spawnPos.x, spawnPos.y, spawnPos.z] : [0, 0, defaultZ],
+        imageAspect: aspect,
+      };
+      createImageObject(p, texture, aspect);
+      placements.push(p);
+      selectPlacement(placements.length - 1);
+      hideLoadProgress();
+      status(`已放置图片 ${assetName}（${imgW}×${imgH}）`);
       renderList();
     }
 
@@ -7659,6 +7820,10 @@
     }
 
     function applyPlacementVisibility(p) {
+      if (p.type === 'image') {
+        syncImageTransform(p);
+        return;
+      }
       if (p.type === 'motion') {
         if (p.motionRender === 'splat' && isValidSplatSceneIdx(p.sceneIdx) && !p.missing) {
           const sm = viewer.splatMesh;
@@ -7725,6 +7890,10 @@
     }
 
     function syncPlacementTransform(p) {
+      if (p.type === 'image') {
+        syncImageTransform(p);
+        return;
+      }
       if (p.type === 'motion') {
         if (p.motionRender === 'splat' && isValidSplatSceneIdx(p.sceneIdx)) {
           const scene = viewer.splatMesh.getScene(p.sceneIdx);
@@ -8020,6 +8189,7 @@
     async function addPlacementFromFile(file, loadToken = sessionResetToken) {
       const ext = file.name.toLowerCase().split('.').pop();
       if (ext === 'npz') return addMotionFromFile(file, loadToken);
+      if (isImageAssetName(file.name)) return addImageFromFile(file, loadToken);
       if (!sceneReady) throw new Error('场景尚未就绪');
       const { assetName, missingIdx } = resolveImportAssetName(file);
       let sourcePath = inferSourcePathForImport(file);
@@ -8137,7 +8307,7 @@
         const p = placements[idx];
         el('selHint').textContent = p.missing
           ? missingPlacementHint(p)
-          : (p.type === 'motion' ? `人模 · ${p.name}` : p.name);
+          : (p.type === 'motion' ? `人模 · ${p.name}` : (p.type === 'image' ? `图片 · ${p.name}` : p.name));
         updateMotionControlsUI();
       } else {
         el('selHint').textContent = '从列表选中模型';
@@ -8182,6 +8352,8 @@
       if (p.type === 'motion') {
         pruneMotionTracksForAsset(p.name);
         await removeActorFromScene(p);
+      } else if (p.type === 'image') {
+        removeImageFromScene(p);
       } else if (p.sceneIdx != null && viewer) {
         try {
           await viewer.removeSplatScene(p.sceneIdx, false);
@@ -8219,6 +8391,24 @@
       const ab = await resolveAssetBuffer(p.name, p.sourcePath, loadToken, activeSceneId);
       if (!ab) return false;
       if (!p.missing) return true;
+
+      if (p.type === 'image' || isImageAssetName(p.name)) {
+        const texture = await loadImageTextureFromBuffer(ab, imageMimeFromName(p.name));
+        if (isSessionAborted(loadToken)) {
+          texture.dispose();
+          return false;
+        }
+        const imgW = texture.image && texture.image.width ? texture.image.width : 1;
+        const imgH = texture.image && texture.image.height ? texture.image.height : 1;
+        const aspect = _n(p.imageAspect, imgW / Math.max(1, imgH));
+        removeImageFromScene(p);
+        createImageObject(p, texture, aspect);
+        p.missing = false;
+        delete p.missingReason;
+        applyPlacementVisibility(p);
+        renderList();
+        return true;
+      }
 
       const bounds = computePlyBounds(ab);
       const anchor = placementAnchorFromItem({ asset: p.name, center: p.center }, bounds);
@@ -8317,8 +8507,8 @@
       const dupN = canonicalSiblingCount(p);
       const dupBadge = dupN > 1 ? `<span class="scene-dup-badge">同名×${dupN}</span>` : '';
       row.innerHTML = p.missing
-        ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : '缺少 PLY')}</span></span>${dupBadge}`
-        : `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : ''}${p.name}</span>${dupBadge}`;
+        ? `<span class="scene-name">${p.name}<span class="scene-missing-reason">${p.missingReason || (p.type === 'motion' ? '缺少 NPZ' : (p.type === 'image' ? '缺少图片' : '缺少 PLY'))}</span></span>${dupBadge}`
+        : `<span class="scene-name">${p.type === 'motion' ? '人模 · ' : (p.type === 'image' ? '图片 · ' : '')}${p.name}</span>${dupBadge}`;
       if (motionColor && p.type === 'motion') {
         const colorBtn = document.createElement('button');
         colorBtn.type = 'button';
@@ -8353,17 +8543,22 @@
     function renderList() {
       const plyList = el('sceneListPly');
       const npzList = el('sceneListNpz');
-      if (!plyList || !npzList) return;
+      const imageList = el('sceneListImage');
+      if (!plyList || !npzList || !imageList) return;
       plyList.innerHTML = '';
       npzList.innerHTML = '';
+      imageList.innerHTML = '';
       let plyCount = 0;
       let npzCount = 0;
+      let imageCount = 0;
       placements.forEach((p, i) => {
         try {
-          const isMotion = p.type === 'motion';
-          if (isMotion) {
+          if (p.type === 'motion') {
             appendPlacementRow(npzList, p, i, { motionColor: true });
             npzCount++;
+          } else if (p.type === 'image') {
+            appendPlacementRow(imageList, p, i);
+            imageCount++;
           } else {
             appendPlacementRow(plyList, p, i);
             plyCount++;
@@ -8383,6 +8578,12 @@
         empty.className = 'scene-list-empty';
         empty.textContent = '暂无 NPZ';
         npzList.appendChild(empty);
+      }
+      if (!imageCount) {
+        const empty = document.createElement('div');
+        empty.className = 'scene-list-empty';
+        empty.textContent = '暂无图片';
+        imageList.appendChild(empty);
       }
       updateMissingRecoverUI();
     }
@@ -8414,6 +8615,9 @@
           item.motionFps = p.motionFps || 30;
           item.motionFrames = p.motionFrames || (p.motion && p.motion.numFrames) || 0;
           if (p.actorColor) item.actorColor = normalizeActorColorHex(p.actorColor);
+        }
+        if (p.type === 'image' && p.imageAspect) {
+          item.imageAspect = p.imageAspect;
         }
         if (p.sourcePath) item.sourcePath = p.sourcePath;
         else {
@@ -8480,6 +8684,11 @@
       clearActorOverlay();
       for (const p of placements) {
         if (p.type === 'motion') await removeActorFromScene(p);
+        else if (p.type === 'image') {
+          p.root = null;
+          p.mesh = null;
+          p.texture = null;
+        }
       }
       placements.length = 0;
       selected = -1;
@@ -8661,7 +8870,7 @@
           });
           placements.push({
             name,
-            type: item.type || (name.toLowerCase().endsWith('.npz') ? 'motion' : 'splat'),
+            type: item.type || (name.toLowerCase().endsWith('.npz') ? 'motion' : (isImageAssetName(name) ? 'image' : 'splat')),
             sourcePath: configSourcePath || storedPath || null,
             missingReason: missingReasonText,
             x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
@@ -8675,9 +8884,41 @@
               : [0, 0, 0],
             motionFps: item.motionFps,
             motionFrames: item.motionFrames,
-            actorColor: normalizeActorColorHex(item.actorColor || pickNextMotionActorColor()),
+            imageAspect: _n(item.imageAspect, null),
+            ...(item.type === 'motion' || name.toLowerCase().endsWith('.npz')
+              ? { actorColor: normalizeActorColorHex(item.actorColor || pickNextMotionActorColor()) }
+              : {}),
             missing: true,
           });
+          continue;
+        }
+        const isImage = item.type === 'image' || isImageAssetName(name);
+        if (isImage) {
+          const texture = await loadImageTextureFromBuffer(ab, imageMimeFromName(name));
+          if (isSessionAborted(loadToken)) {
+            texture.dispose();
+            return;
+          }
+          const imgW = texture.image && texture.image.width ? texture.image.width : 1;
+          const imgH = texture.image && texture.image.height ? texture.image.height : 1;
+          const aspect = _n(item.imageAspect, imgW / Math.max(1, imgH));
+          const p = {
+            type: 'image',
+            name,
+            sourcePath: configSourcePath || item.sourcePath || await idbGetSceneSourcePath(activeSceneId, name) || null,
+            x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
+            scale: _n(item.scale, defaultScale),
+            yaw_deg: _n(item.yaw_deg, 0),
+            sceneIdx: null,
+            visible: item.visible !== false,
+            center: Array.isArray(item.center) && item.center.length >= 3
+              ? [_n(item.center[0], 0), _n(item.center[1], 0), _n(item.center[2], 0)]
+              : [0, 0, defaultZ],
+            imageAspect: aspect,
+          };
+          createImageObject(p, texture, aspect);
+          placements.push(p);
+          kickOverlayRender();
           continue;
         }
         const isMotion = item.type === 'motion' || name.toLowerCase().endsWith('.npz');
@@ -8780,10 +9021,10 @@
         const files = [...(e.dataTransfer && e.dataTransfer.files || [])]
           .filter((f) => {
             const n = f.name.toLowerCase();
-            return n.endsWith('.ply') || n.endsWith('.npz');
+            return n.endsWith('.ply') || n.endsWith('.npz') || isImageAssetName(f.name);
           });
         if (!files.length) {
-          status('请拖入 .ply 或 .npz 文件');
+          status('请拖入 .ply、.npz 或图片文件');
           return;
         }
         for (const f of files) {
