@@ -851,7 +851,7 @@
         <input type="file" id="pickFile" accept=".ply,.npz,.png,.jpg,.jpeg,.webp,.gif,.bmp" multiple hidden />
         <input type="file" id="pickFolder" webkitdirectory directory multiple hidden />
         <button type="button" id="importBtn" class="secondary">选择 PLY / NPZ / 图片</button>
-        <p class="hint">NPZ 为 Kimodo 动作 · PNG/JPG 等作为竖直贴图导入，等比缩放不拉伸</p>
+        <p class="hint">NPZ 为 Kimodo 动作 · PNG/JPG 等作为贴图导入，等比缩放 · W 可三轴旋转 · 双面可见</p>
         <div id="missingRecoverPanel" class="missing-recover-panel" hidden>
           <p class="hint" id="missingRecoverHint">有模型缺少本地文件</p>
           <div id="missingRecoverFolderList" class="missing-recover-folder-list"></div>
@@ -5366,25 +5366,40 @@
 
     function removeImageFromScene(p) {
       if (p.root && actorRootGroup) actorRootGroup.remove(p.root);
-      if (p.mesh) {
-        if (p.mesh.material) {
-          if (p.mesh.material.map) p.mesh.material.map.dispose();
-          p.mesh.material.dispose();
+      const meshes = [p.mesh, p.meshBack].filter(Boolean);
+      let mapDisposed = false;
+      for (const mesh of meshes) {
+        if (mesh.material) {
+          if (mesh.material.map && !mapDisposed) {
+            mapDisposed = true;
+          }
+          mesh.material.dispose();
         }
-        if (p.mesh.geometry) p.mesh.geometry.dispose();
+        if (mesh.geometry) mesh.geometry.dispose();
       }
-      if (p.texture && p.texture !== (p.mesh && p.mesh.material && p.mesh.material.map)) {
-        p.texture.dispose();
-      }
+      if (p.texture) p.texture.dispose();
       p.root = null;
       p.mesh = null;
+      p.meshBack = null;
       p.texture = null;
+    }
+
+    function ensureImageRotationFields(p) {
+      if (p.yaw_deg == null || !Number.isFinite(Number(p.yaw_deg))) p.yaw_deg = 0;
+      if (p.pitch_deg == null || !Number.isFinite(Number(p.pitch_deg))) p.pitch_deg = 0;
+      if (p.roll_deg == null || !Number.isFinite(Number(p.roll_deg))) p.roll_deg = 0;
     }
 
     function syncImageTransform(p) {
       if (!p.root) return;
+      ensureImageRotationFields(p);
       p.root.position.set(p.x, p.y, p.z);
-      p.root.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+      p.root.quaternion.setFromEuler(new THREE.Euler(
+        p.pitch_deg * Math.PI / 180,
+        p.roll_deg * Math.PI / 180,
+        p.yaw_deg * Math.PI / 180,
+        RIG_EULER_ORDER,
+      ));
       p.root.scale.set(p.scale, p.scale, p.scale);
       p.root.visible = p.visible !== false;
       kickOverlayRender();
@@ -5395,26 +5410,33 @@
       const safeAspect = Math.max(0.05, Math.min(20, aspect || 1));
       const geo = new THREE.PlaneGeometry(1, 1 / safeAspect);
       geo.rotateX(-Math.PI / 2);
-      const mat = new THREE.MeshBasicMaterial({
+      const makeImageMaterial = () => new THREE.MeshBasicMaterial({
         map: texture,
         transparent: true,
         alphaTest: 0.02,
         depthTest: false,
         depthWrite: false,
-        side: THREE.DoubleSide,
+        side: THREE.FrontSide,
+        toneMapped: false,
       });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.frustumCulled = false;
-      mesh.renderOrder = 901;
+      const meshFront = new THREE.Mesh(geo, makeImageMaterial());
+      const meshBack = new THREE.Mesh(geo.clone(), makeImageMaterial());
+      meshBack.rotateY(Math.PI);
+      for (const mesh of [meshFront, meshBack]) {
+        mesh.frustumCulled = false;
+        mesh.renderOrder = 901;
+      }
       const root = new THREE.Group();
       root.name = `image:${p.name}`;
-      root.add(mesh);
+      root.add(meshFront);
+      root.add(meshBack);
       applyAlwaysOnTop(root);
       p.type = 'image';
-      p.mesh = mesh;
-      p.root = root;
+      p.mesh = meshFront;
+      p.meshBack = meshBack;
       p.texture = texture;
       p.imageAspect = safeAspect;
+      ensureImageRotationFields(p);
       if (!Array.isArray(p.center) || p.center.length < 3) {
         p.center = [p.x, p.y, p.z];
       }
@@ -5814,6 +5836,8 @@
         z: spawnPos ? spawnPos.z : defaultZ,
         scale: defaultScale,
         yaw_deg: 0,
+        pitch_deg: 0,
+        roll_deg: 0,
         sceneIdx: null,
         visible: true,
         center: spawnPos ? [spawnPos.x, spawnPos.y, spawnPos.z] : [0, 0, defaultZ],
@@ -7274,7 +7298,17 @@
       syncingFromGizmo = true;
       try {
         pivot.position.set(p.x, p.y, p.z);
-        pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+        if (p.type === 'image') {
+          ensureImageRotationFields(p);
+          pivot.quaternion.setFromEuler(new THREE.Euler(
+            p.pitch_deg * Math.PI / 180,
+            p.roll_deg * Math.PI / 180,
+            p.yaw_deg * Math.PI / 180,
+            RIG_EULER_ORDER,
+          ));
+        } else {
+          pivot.quaternion.setFromEuler(new THREE.Euler(0, 0, p.yaw_deg * Math.PI / 180, 'XYZ'));
+        }
         pivot.scale.set(1, 1, 1);
         pivot.updateMatrixWorld(true);
       } finally {
@@ -7303,8 +7337,15 @@
         p.x = pivot.position.x;
         p.y = pivot.position.y;
         p.z = pivot.position.z;
-        const euler = new THREE.Euler().setFromQuaternion(pivot.quaternion, 'XYZ');
-        p.yaw_deg = THREE.MathUtils.radToDeg(euler.z);
+        if (p.type === 'image') {
+          const euler = new THREE.Euler().setFromQuaternion(pivot.quaternion, RIG_EULER_ORDER);
+          p.yaw_deg = THREE.MathUtils.radToDeg(euler.z);
+          p.pitch_deg = THREE.MathUtils.radToDeg(euler.x);
+          p.roll_deg = THREE.MathUtils.radToDeg(euler.y);
+        } else {
+          const euler = new THREE.Euler().setFromQuaternion(pivot.quaternion, 'XYZ');
+          p.yaw_deg = THREE.MathUtils.radToDeg(euler.z);
+        }
         syncPlacementTransform(p);
         updateSelSliders();
       } finally {
@@ -8607,8 +8648,8 @@
           scale: p.scale,
           yaw_deg: p.yaw_deg,
           center: p.center,
-          pitch_deg: 0,
-          roll_deg: 0,
+          pitch_deg: p.type === 'image' ? _n(p.pitch_deg, 0) : 0,
+          roll_deg: p.type === 'image' ? _n(p.roll_deg, 0) : 0,
           visible: p.visible !== false,
         };
         if (p.type === 'motion') {
@@ -8687,6 +8728,7 @@
         else if (p.type === 'image') {
           p.root = null;
           p.mesh = null;
+          p.meshBack = null;
           p.texture = null;
         }
       }
@@ -8877,6 +8919,8 @@
             scale: _n(item.scale, defaultScale),
             motionScaleExplicit: item.scale != null,
             yaw_deg: _n(item.yaw_deg, 0),
+            pitch_deg: _n(item.pitch_deg, 0),
+            roll_deg: _n(item.roll_deg, 0),
             sceneIdx: null,
             visible: item.visible !== false,
             center: Array.isArray(item.center) && item.center.length >= 3
@@ -8909,6 +8953,8 @@
             x: _n(item.x, 0), y: _n(item.y, 0), z: _n(item.z, defaultZ),
             scale: _n(item.scale, defaultScale),
             yaw_deg: _n(item.yaw_deg, 0),
+            pitch_deg: _n(item.pitch_deg, 0),
+            roll_deg: _n(item.roll_deg, 0),
             sceneIdx: null,
             visible: item.visible !== false,
             center: Array.isArray(item.center) && item.center.length >= 3
