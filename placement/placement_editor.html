@@ -6971,8 +6971,8 @@
       if (timelineOpenPathId) flushOpenTimelineDomToPath(true);
       const path = getActiveCameraPath();
       if (path) ensurePathMotionTracks(path);
-      if (cameraMarkers.length >= 2) applyPathPinPosition();
-      else if (placements.some((p) => p.type === 'motion' && !p.missing)) {
+      if (cameraMarkers.length >= 2) pausePathSlide();
+      if (placements.some((p) => p.type === 'motion' && !p.missing)) {
         syncAllActorsForPathT(pathPinT);
       }
       const suppressedMotion = applyPathTimelineRenderCast();
@@ -7178,9 +7178,8 @@
       if (timelineOpenPathId) flushOpenTimelineDomToPath(true);
       const path = getActiveCameraPath();
       if (path) ensurePathMotionTracks(path);
-      if (cameraMarkers.length >= 2) {
-        applyPathPinPosition();
-      } else if (placements.some((p) => p.type === 'motion' && !p.missing)) {
+      // 预览当前视口机位，不按路径滑条重采样（避免 Q/W 调整后弹回尾机位）
+      if (placements.some((p) => p.type === 'motion' && !p.missing)) {
         syncAllActorsForPathT(pathPinT);
       }
       if (viewer && viewer.splatMesh) {
