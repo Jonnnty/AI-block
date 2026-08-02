@@ -5405,35 +5405,39 @@
       kickOverlayRender();
     }
 
+    function buildImagePlaneGeometry(aspect) {
+      const safeAspect = Math.max(0.05, Math.min(20, aspect || 1));
+      const geo = new THREE.PlaneGeometry(1, 1 / safeAspect);
+      // 默认相机在 y<0 看向场景；让平面法线指向 -Y，正对相机
+      geo.rotateX(Math.PI / 2);
+      return geo;
+    }
+
     function createImageObject(p, texture, aspect) {
       initActorRootGroup();
       const safeAspect = Math.max(0.05, Math.min(20, aspect || 1));
-      const geo = new THREE.PlaneGeometry(1, 1 / safeAspect);
-      geo.rotateX(-Math.PI / 2);
-      const makeImageMaterial = () => new THREE.MeshBasicMaterial({
+      const geo = buildImagePlaneGeometry(safeAspect);
+      const mat = new THREE.MeshBasicMaterial({
         map: texture,
         transparent: true,
-        alphaTest: 0.02,
+        opacity: 1,
+        alphaTest: 0.01,
         depthTest: false,
         depthWrite: false,
-        side: THREE.FrontSide,
+        side: THREE.DoubleSide,
         toneMapped: false,
       });
-      const meshFront = new THREE.Mesh(geo, makeImageMaterial());
-      const meshBack = new THREE.Mesh(geo.clone(), makeImageMaterial());
-      meshBack.rotateY(Math.PI);
-      for (const mesh of [meshFront, meshBack]) {
-        mesh.frustumCulled = false;
-        mesh.renderOrder = 901;
-      }
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 1200;
       const root = new THREE.Group();
       root.name = `image:${p.name}`;
-      root.add(meshFront);
-      root.add(meshBack);
+      root.renderOrder = 1200;
+      root.add(mesh);
       applyAlwaysOnTop(root);
       p.type = 'image';
-      p.mesh = meshFront;
-      p.meshBack = meshBack;
+      p.mesh = mesh;
+      p.meshBack = null;
       p.texture = texture;
       p.imageAspect = safeAspect;
       ensureImageRotationFields(p);
@@ -5442,6 +5446,8 @@
       }
       actorRootGroup.add(root);
       syncImageTransform(p);
+      ensureViewerRenderPatch();
+      viewer && viewer.initialized && viewer.forceRenderNextFrame();
       kickOverlayRender();
       return root;
     }
@@ -5831,16 +5837,16 @@
         type: 'image',
         name: assetName,
         sourcePath: sourcePath || null,
-        x: spawnPos ? spawnPos.x : 0,
-        y: spawnPos ? spawnPos.y : 0,
-        z: spawnPos ? spawnPos.z : defaultZ,
+        x: spawnPos ? spawnPos.x : VIEW_OFFSET.x,
+        y: spawnPos ? spawnPos.y : -0.35,
+        z: spawnPos ? spawnPos.z : 0.45,
         scale: defaultScale,
         yaw_deg: 0,
         pitch_deg: 0,
         roll_deg: 0,
         sceneIdx: null,
         visible: true,
-        center: spawnPos ? [spawnPos.x, spawnPos.y, spawnPos.z] : [0, 0, defaultZ],
+        center: spawnPos ? [spawnPos.x, spawnPos.y, spawnPos.z] : [VIEW_OFFSET.x, -0.35, 0.45],
         imageAspect: aspect,
       };
       createImageObject(p, texture, aspect);
@@ -5910,6 +5916,8 @@
       const savedAutoClear = renderer.autoClear;
       renderer.autoClear = false;
       if (typeof renderer.resetState === 'function') renderer.resetState();
+      rigOverlayScene.updateMatrixWorld(true);
+      actorRootGroup && actorRootGroup.updateMatrixWorld(true);
       renderer.render(rigOverlayScene, viewer.camera);
       renderer.autoClear = savedAutoClear;
     }
@@ -8360,7 +8368,7 @@
     function updateSelSliders() {
       if (selected < 0) return;
       const p = placements[selected];
-      if (p.type === 'motion') {
+      if (p.type === 'motion' || p.type === 'image') {
         setSliderValueUnbounded(el('selScale'), p.scale, true);
       }
       el('selX').value = p.x; el('selXVal').textContent = p.x.toFixed(3);
