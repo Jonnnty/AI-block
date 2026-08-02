@@ -1301,7 +1301,7 @@
     }
 
     /** 模型加载追踪（控制台） */
-    const MODEL_LOAD_BUILD = '20260802a';
+    const MODEL_LOAD_BUILD = '20260802b';
     const lastResolveTraceByAsset = new Map();
 
     const MISSING_REASON_LABELS = {
@@ -4990,6 +4990,16 @@
       }
     }
 
+    function compactSceneIndexForGlobalSplat(sm, gi) {
+      let offset = 0;
+      for (let s = 0; s < sm.scenes.length; s++) {
+        const count = sm.getScene(s).splatBuffer.getSplatCount();
+        if (gi < offset + count) return s;
+        offset += count;
+      }
+      return 0;
+    }
+
     /** baseData / draw 使用 compact 索引（各 scene 的 getSplatCount 累加），不是 getMaxSplatCount。 */
     function getSceneGlobalSplatStart(sceneIdx) {
       if (!viewer || !viewer.splatMesh) return 0;
@@ -5013,6 +5023,17 @@
           origUpdate(fromSplat, toSplat);
         } finally {
           sm.lastBuildSplatCount = savedLastBuild;
+        }
+        const sceneIndexesDesc = sm.splatDataTextures && sm.splatDataTextures.sceneIndexes;
+        if (sceneIndexesDesc && sceneIndexesDesc.data) {
+          const idxData = sceneIndexesDesc.data;
+          const fixFrom = Math.max(0, fromSplat);
+          const fixTo = Math.min(toSplat, sm.getSplatCount(true) - 1);
+          for (let gi = fixFrom; gi <= fixTo; gi++) {
+            const sIdx = compactSceneIndexForGlobalSplat(sm, gi);
+            idxData[gi] = sIdx;
+            if (sm.globalSplatIndexToSceneIndexMap) sm.globalSplatIndexToSceneIndexMap[gi] = sIdx;
+          }
         }
         rebuildCompactSceneIndexTexture(sm);
       };
@@ -6211,9 +6232,9 @@
       viewer._origGaussianRender = origRender;
       viewer.render = function () {
         if (viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+        origRender();
         const renderer = viewer.renderer;
         if (renderer && typeof renderer.resetState === 'function') renderer.resetState();
-        origRender();
         renderRigOverlayPass();
         renderImageOverlayPass();
       };
@@ -9883,6 +9904,99 @@
           }
           document.body.dataset.autotestReady = '1';
           status(window.__autotestResult.ok ? '自动测试通过 · scene2' : '自动测试失败 · scene2');
+        } else if (autotest === 'image-ghost') {
+          status('自动测试：加载 scene-4…');
+          await loadSceneById('scene-4');
+          const waitFrame = () => new Promise((r) => requestAnimationFrame(r));
+          for (let i = 0; i < 120; i++) {
+            await waitFrame();
+            if (viewer && viewer.splatMesh && viewer.splatMesh.scenes.length >= 5) break;
+          }
+          for (let i = 0; i < 30; i++) {
+            viewer && viewer.forceRenderNextFrame();
+            await waitFrame();
+          }
+          const canvas = viewer && viewer.renderer && viewer.renderer.domElement;
+          const snapPixels = () => {
+            if (!canvas || canvas.width < 8) return null;
+            const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+            if (!gl) return null;
+            const w = canvas.width;
+            const h = canvas.height;
+            const buf = new Uint8Array(w * h * 4);
+            gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+            return buf;
+          };
+          const diffRatio = (a, b) => {
+            if (!a || !b || a.length !== b.length) return 1;
+            let diff = 0;
+            const step = 16;
+            for (let i = 0; i < a.length; i += 4 * step) {
+              if (Math.abs(a[i] - b[i]) > 8 || Math.abs(a[i + 1] - b[i + 1]) > 8 || Math.abs(a[i + 2] - b[i + 2]) > 8) diff++;
+            }
+            return diff / Math.ceil(a.length / (4 * step));
+          };
+          const beforePx = snapPixels();
+          const beforeDiag = diagPlacementRender();
+          const pngBlob = await new Promise((resolve) => {
+            const c = document.createElement('canvas');
+            c.width = 64; c.height = 64;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#ff00ff';
+            ctx.fillRect(0, 0, 64, 64);
+            c.toBlob(resolve, 'image/png');
+          });
+          await addImageFromFile(new File([pngBlob], 'autotest-image.png'));
+          for (let i = 0; i < 40; i++) {
+            viewer && viewer.forceRenderNextFrame();
+            await waitFrame();
+          }
+          const afterImportPx = snapPixels();
+          const afterImportDiag = diagPlacementRender();
+          const imgP = placements.find((p) => p.type === 'image' && p.name === 'autotest-image.png');
+          if (imgP) {
+            const idx = placements.indexOf(imgP);
+            removeImageFromScene(imgP);
+            if (idx >= 0) placements.splice(idx, 1);
+          }
+          for (let i = 0; i < 30; i++) {
+            viewer && viewer.forceRenderNextFrame();
+            await waitFrame();
+          }
+          const afterRemovePx = snapPixels();
+          const afterRemoveDiag = diagPlacementRender();
+          const importDiff = diffRatio(beforePx, afterImportPx);
+          const ghostResidual = diffRatio(beforePx, afterRemovePx);
+          window.__autotestResult = {
+            ok: !afterImportDiag.ghostLikely && !afterImportDiag.drawCountMismatch && afterImportDiag.imageOverlaySeparate
+              && ghostResidual < 0.04 && importDiff < 0.35,
+            build: afterRemoveDiag.build,
+            importDiff,
+            ghostResidual,
+            beforeDiag: {
+              ghostLikely: beforeDiag.ghostLikely,
+              splatScenes: beforeDiag.splatScenes,
+              drawCountMismatch: beforeDiag.drawCountMismatch,
+            },
+            afterImportDiag: {
+              ghostLikely: afterImportDiag.ghostLikely,
+              drawCountMismatch: afterImportDiag.drawCountMismatch,
+              imageOverlaySeparate: afterImportDiag.imageOverlaySeparate,
+              image: afterImportDiag.images,
+            },
+            afterRemoveDiag: {
+              ghostLikely: afterRemoveDiag.ghostLikely,
+              drawCountMismatch: afterRemoveDiag.drawCountMismatch,
+            },
+          };
+          document.title = JSON.stringify(window.__autotestResult);
+          const banner = el('autotestBanner');
+          if (banner) {
+            banner.hidden = false;
+            banner.textContent = window.__autotestResult.ok ? 'image-ghost 自测通过' : 'image-ghost 自测失败';
+          }
+          document.body.dataset.autotestReady = '1';
+          status(window.__autotestResult.ok ? '自动测试通过 · image-ghost' : '自动测试失败 · image-ghost');
         } else if (autotest === 'newscene-motion') {
           status('自动测试：新建场景…');
           await createNewScene('NPZ测试');
