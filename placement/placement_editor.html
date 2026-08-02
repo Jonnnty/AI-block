@@ -2298,6 +2298,7 @@
     let motionSplatShell = null;
     let motionSplatShellFailed = false;
     let actorRootGroup = null;
+    let imageRootGroup = null;
     let motionOverlayScene = null;
     let motionOverlayRenderer = null;
     const ACTOR_COLOR = 0x00b140;
@@ -4441,6 +4442,7 @@
         const modelCount = _n(parsed.placements && parsed.placements.length, 0);
         const pathCount = _n(parsed.cameraPaths && parsed.cameraPaths.length, 0);
         status(`已加载「${scene.name}」· ${modelCount} 模型 · ${pathCount} 轨迹`);
+        migrateImageRootsToSceneGroup();
         kickOverlayRender();
         await reconcileSceneRenderState().catch((e) => console.warn('reconcile scene render failed', e));
       } catch (e) {
@@ -4816,6 +4818,51 @@
       actorRootGroup.name = 'ActorRootGroup';
       actorRootGroup.renderOrder = 900;
       rigOverlayScene.add(actorRootGroup);
+    }
+
+    /** 图片作为薄几何体写入深度，在高斯场景之前渲染以便互相遮挡 */
+    function initImageRootGroup() {
+      if (!viewer || !viewer.threeScene) return;
+      if (imageRootGroup) {
+        if (imageRootGroup.parent !== viewer.threeScene) {
+          imageRootGroup.parent && imageRootGroup.parent.remove(imageRootGroup);
+          viewer.threeScene.add(imageRootGroup);
+        }
+        return;
+      }
+      imageRootGroup = new THREE.Group();
+      imageRootGroup.name = 'ImageRootGroup';
+      viewer.threeScene.add(imageRootGroup);
+    }
+
+    function hasSceneImages() {
+      return !!(imageRootGroup && imageRootGroup.children.length);
+    }
+
+    function migrateImageRootsToSceneGroup() {
+      initImageRootGroup();
+      if (!actorRootGroup || !imageRootGroup) return;
+      for (const p of placements) {
+        if (p.type !== 'image' || p.missing) continue;
+        if (!p.root && p.mesh && p.mesh.parent) p.root = p.mesh.parent;
+        if (!p.root || p.root.parent === imageRootGroup) continue;
+        if (p.root.parent === actorRootGroup) actorRootGroup.remove(p.root);
+        imageRootGroup.add(p.root);
+        p.root.traverse((o) => {
+          o.renderOrder = 0;
+          if (!o.material) return;
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          for (const m of mats) {
+            m.depthTest = true;
+            m.depthWrite = true;
+            m.alphaTest = Math.max(_n(m.alphaTest, 0), 0.05);
+            m.polygonOffset = true;
+            m.polygonOffsetFactor = -2;
+            m.polygonOffsetUnits = -2;
+          }
+        });
+        syncImageTransform(p);
+      }
     }
 
     function motionVendorUrl(file) {
@@ -5365,7 +5412,7 @@
     }
 
     function removeImageFromScene(p) {
-      if (p.root && actorRootGroup) actorRootGroup.remove(p.root);
+      if (p.root && imageRootGroup) imageRootGroup.remove(p.root);
       const meshes = [p.mesh, p.meshBack].filter(Boolean);
       let mapDisposed = false;
       for (const mesh of meshes) {
@@ -5415,27 +5462,27 @@
     }
 
     function createImageObject(p, texture, aspect) {
-      initActorRootGroup();
+      initImageRootGroup();
       const safeAspect = Math.max(0.05, Math.min(20, aspect || 1));
       const geo = buildImagePlaneGeometry(safeAspect);
       const mat = new THREE.MeshBasicMaterial({
         map: texture,
         transparent: true,
         opacity: 1,
-        alphaTest: 0.01,
-        depthTest: false,
-        depthWrite: false,
+        alphaTest: 0.05,
+        depthTest: true,
+        depthWrite: true,
         side: THREE.DoubleSide,
         toneMapped: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.frustumCulled = false;
-      mesh.renderOrder = 1200;
       const root = new THREE.Group();
       root.name = `image:${p.name}`;
-      root.renderOrder = 1200;
       root.add(mesh);
-      applyAlwaysOnTop(root);
       p.type = 'image';
       p.mesh = mesh;
       p.meshBack = null;
@@ -5446,7 +5493,7 @@
       if (!Array.isArray(p.center) || p.center.length < 3) {
         p.center = [p.x, p.y, p.z];
       }
-      actorRootGroup.add(root);
+      imageRootGroup.add(root);
       syncImageTransform(p);
       ensureViewerRenderPatch();
       viewer && viewer.initialized && viewer.forceRenderNextFrame();
@@ -5892,6 +5939,12 @@
       renderer.setClearColor(bg.hex, viewBgMode === 'black' ? 1 : 0);
       renderer.clear(true, true, true);
       if (typeof renderer.resetState === 'function') renderer.resetState();
+      if (viewer.threeScene && hasSceneImages()) {
+        viewer.threeScene.updateMatrixWorld(true);
+        imageRootGroup && imageRootGroup.updateMatrixWorld(true);
+        renderer.render(viewer.threeScene, viewer.camera);
+        renderer.autoClear = false;
+      }
       if (rigOverlayScene) renderer.render(rigOverlayScene, viewer.camera);
     }
 
@@ -5903,7 +5956,7 @@
         if (!viewer || !viewer.initialized) return;
         if (viewer.splatRenderReady) {
           viewer.forceRenderNextFrame();
-        } else if (hasOverlayActors() || (rigOverlayScene && rigOverlayScene.children.length)) {
+        } else if (hasOverlayActors() || hasSceneImages() || (rigOverlayScene && rigOverlayScene.children.length)) {
           renderStandaloneOverlayPass();
         }
       });
@@ -8038,7 +8091,7 @@
           viewHelper.render(overlayRenderer);
         }
         if (viewer && viewer.initialized && !viewer.splatRenderReady
-          && (hasOverlayActors() || (rigOverlayScene && rigOverlayScene.children.length))) {
+          && (hasOverlayActors() || hasSceneImages() || (rigOverlayScene && rigOverlayScene.children.length))) {
           renderStandaloneOverlayPass();
         }
       };
@@ -8061,6 +8114,8 @@
         viewer.start();
         tuneCamera();
         initRigOverlayScene();
+        initImageRootGroup();
+        migrateImageRootsToSceneGroup();
         initMotionOverlayRenderer();
         setupViewHelper();
         overlayRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
@@ -8737,10 +8792,7 @@
       for (const p of placements) {
         if (p.type === 'motion') await removeActorFromScene(p);
         else if (p.type === 'image') {
-          p.root = null;
-          p.mesh = null;
-          p.meshBack = null;
-          p.texture = null;
+          removeImageFromScene(p);
         }
       }
       placements.length = 0;
