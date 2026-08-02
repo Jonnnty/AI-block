@@ -4929,8 +4929,20 @@
     }
 
     /** 库用 max-padded 索引填 sceneIndexes，draw 用 compact 索引 → 同一 PLY 会被大 scale 场景再画一遍（巨大鬼影树/人）。 */
+    function ensureCompactSceneIndexPatch(sm) {
+      if (!sm || sm._compactSceneIndexPatched) return;
+      sm._compactSceneIndexPatched = true;
+      const origUpdate = sm.updateDataTexturesFromBaseData.bind(sm);
+      sm.updateDataTexturesFromBaseData = function (...args) {
+        const result = origUpdate(...args);
+        rebuildCompactSceneIndexTexture(sm);
+        return result;
+      };
+    }
+
     function rebuildCompactSceneIndexTexture(sm) {
       if (!sm || !sm.splatDataTextures) return;
+      ensureCompactSceneIndexPatch(sm);
       const sceneIndexesDesc = sm.splatDataTextures.sceneIndexes;
       if (!sceneIndexesDesc || !sceneIndexesDesc.data) return;
       const idxData = sceneIndexesDesc.data;
@@ -4939,7 +4951,10 @@
       let offset = 0;
       for (let s = 0; s < sm.scenes.length; s++) {
         const count = sm.getScene(s).splatBuffer.getSplatCount();
-        for (let i = 0; i < count; i++) idxData[offset + i] = s;
+        for (let i = 0; i < count; i++) {
+          idxData[offset + i] = s;
+          if (sm.globalSplatIndexToSceneIndexMap) sm.globalSplatIndexToSceneIndexMap[offset + i] = s;
+        }
         offset += count;
       }
       const tex = sceneIndexesDesc.texture;
@@ -5527,8 +5542,6 @@
       imageRootGroup.add(root);
       syncImageTransform(p);
       ensureViewerRenderPatch();
-      viewer && viewer.initialized && viewer.forceRenderNextFrame();
-      kickOverlayRender();
       return root;
     }
 
@@ -5947,6 +5960,7 @@
       const origRender = viewer.render.bind(viewer);
       viewer._origGaussianRender = origRender;
       viewer.render = function () {
+        if (viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
         origRender();
         renderRigOverlayPass();
       };
@@ -5999,7 +6013,6 @@
       if (!renderer) return;
       const savedAutoClear = renderer.autoClear;
       renderer.autoClear = false;
-      if (typeof renderer.resetState === 'function') renderer.resetState();
       rigOverlayScene.updateMatrixWorld(true);
       imageRootGroup && imageRootGroup.updateMatrixWorld(true);
       actorRootGroup && actorRootGroup.updateMatrixWorld(true);
@@ -8011,7 +8024,10 @@
     async function addSplatBuffersKeepVisibility(splatBuffers, sceneOptions) {
       syncSceneOptionsFromPlacements();
       await viewer.addSplatBuffers(splatBuffers, sceneOptions, true, false, false, false, true);
-      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+      if (viewer && viewer.splatMesh) {
+        ensureCompactSceneIndexPatch(viewer.splatMesh);
+        rebuildCompactSceneIndexTexture(viewer.splatMesh);
+      }
       applyAllPlacementsVisibility();
     }
 
@@ -8499,6 +8515,7 @@
         await removeActorFromScene(p);
       } else if (p.type === 'image') {
         removeImageFromScene(p);
+        await reconcileSceneRenderState();
       } else if (p.sceneIdx != null && viewer) {
         try {
           await viewer.removeSplatScene(p.sceneIdx, false);
@@ -9065,7 +9082,6 @@
           };
           createImageObject(p, texture, aspect);
           placements.push(p);
-          kickOverlayRender();
           continue;
         }
         const isMotion = item.type === 'motion' || name.toLowerCase().endsWith('.npz');
