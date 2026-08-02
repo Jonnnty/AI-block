@@ -4941,20 +4941,16 @@
       if (!sm || sm._compactSceneIndexPatched) return;
       sm._compactSceneIndexPatched = true;
       const origUpdate = sm.updateDataTexturesFromBaseData.bind(sm);
-      sm.updateDataTexturesFromBaseData = function (...args) {
-        const result = origUpdate(...args);
+      sm.updateDataTexturesFromBaseData = function (fromSplat, toSplat) {
+        if (fromSplat > toSplat) return;
+        const savedLastBuild = sm.lastBuildSplatCount;
+        if (savedLastBuild > toSplat) sm.lastBuildSplatCount = fromSplat;
+        try {
+          origUpdate(fromSplat, toSplat);
+        } finally {
+          sm.lastBuildSplatCount = savedLastBuild;
+        }
         rebuildCompactSceneIndexTexture(sm);
-        return result;
-      };
-    }
-
-    function ensureViewerUpdatePatch() {
-      if (!viewer || viewer._compactUpdatePatched) return;
-      viewer._compactUpdatePatched = true;
-      const origUpdate = viewer.update.bind(viewer);
-      viewer.update = function (renderer, camera) {
-        origUpdate(renderer, camera);
-        if (viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
       };
     }
 
@@ -5029,7 +5025,7 @@
         maxScale,
         patchActive: !!sm._compactSceneIndexPatched,
         renderPatched: !!(viewer && viewer._rigOverlayPatched),
-        updatePatched: !!(viewer && viewer._compactUpdatePatched),
+        updatePatched: false,
         layout: layout.scenes,
       };
     }
@@ -5241,12 +5237,13 @@
       if (!baseData || !baseData.centers) return;
       const splatBuffer = sm.getScene(p.sceneIdx).splatBuffer;
       const count = splatBuffer.getSplatCount();
+      if (count <= 0) return;
       const src = p._poseVerts;
       const globalStart = getSceneGlobalSplatStart(p.sceneIdx);
       const globalEnd = globalStart + count - 1;
-      if (globalEnd >= sm.getSplatCount()) {
+      if (globalStart > globalEnd || globalEnd >= sm.getSplatCount()) {
         console.warn('motion splat compact index out of range', {
-          sceneIdx: p.sceneIdx, globalStart, count, total: sm.getSplatCount(),
+          sceneIdx: p.sceneIdx, globalStart, globalEnd, count, total: sm.getSplatCount(),
         });
         return;
       }
@@ -5262,7 +5259,6 @@
         p.sceneIdx,
       );
       sm.updateDataTexturesFromBaseData(globalStart, globalEnd);
-      rebuildCompactSceneIndexTexture(sm);
       viewer.forceRenderNextFrame();
       } catch (err) {
         console.warn('refreshMotionSplatCenters failed', err);
@@ -6140,12 +6136,10 @@
     function ensureViewerRenderPatch() {
       if (!viewer || viewer._rigOverlayPatched) return;
       viewer._rigOverlayPatched = true;
-      ensureViewerUpdatePatch();
       const origRender = viewer.render.bind(viewer);
       viewer._origGaussianRender = origRender;
       viewer.render = function () {
         const renderer = viewer.renderer;
-        // 上一帧 overlay（图片）可能留下 GL 状态，先重置再画高斯
         if (renderer && typeof renderer.resetState === 'function') renderer.resetState();
         if (viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
         origRender();
@@ -8350,7 +8344,6 @@
         initRigOverlayScene();
         initImageRootGroup();
         migrateImageRootsToSceneGroup();
-        ensureViewerUpdatePatch();
         initMotionOverlayRenderer();
         setupViewHelper();
         overlayRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
