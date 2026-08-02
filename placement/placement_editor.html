@@ -4948,6 +4948,156 @@
       };
     }
 
+    function ensureViewerUpdatePatch() {
+      if (!viewer || viewer._compactUpdatePatched) return;
+      viewer._compactUpdatePatched = true;
+      const origUpdate = viewer.update.bind(viewer);
+      viewer.update = function (renderer, camera) {
+        origUpdate(renderer, camera);
+        if (viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+      };
+    }
+
+    function expectedCompactSceneLayout(sm) {
+      const scenes = [];
+      let offset = 0;
+      for (let s = 0; s < sm.scenes.length; s++) {
+        const buf = sm.getScene(s).splatBuffer;
+        const count = buf.getSplatCount();
+        scenes.push({
+          sceneIdx: s,
+          globalStart: offset,
+          count,
+          maxPadded: buf.getMaxSplatCount(),
+          scale: sm.getScene(s).scale.x,
+          pos: sm.getScene(s).position.toArray(),
+        });
+        offset += count;
+      }
+      return { totalCompact: offset, scenes };
+    }
+
+    function analyzeSceneIndexTexture(sm) {
+      if (!sm || !sm.splatDataTextures) return { error: 'no splatMesh' };
+      const desc = sm.splatDataTextures.sceneIndexes;
+      if (!desc || !desc.data) return { error: 'no sceneIndexes texture' };
+      const idxData = desc.data;
+      const layout = expectedCompactSceneLayout(sm);
+      const mismatches = [];
+      let offset = 0;
+      for (const sc of layout.scenes) {
+        for (let i = 0; i < sc.count; i++) {
+          const gi = offset + i;
+          const expected = sc.sceneIdx;
+          const actual = idxData[gi];
+          const mapVal = sm.globalSplatIndexToSceneIndexMap ? sm.globalSplatIndexToSceneIndexMap[gi] : null;
+          if (actual !== expected || (mapVal != null && mapVal !== expected)) {
+            mismatches.push({ globalIdx: gi, expected, actual, mapVal });
+            if (mismatches.length >= 24) break;
+          }
+        }
+        offset += sc.count;
+        if (mismatches.length >= 24) break;
+      }
+      let maxScaleScene = 0;
+      let maxScale = 0;
+      for (let s = 0; s < sm.scenes.length; s++) {
+        const sx = sm.getScene(s).scale.x;
+        if (sx > maxScale) { maxScale = sx; maxScaleScene = s; }
+      }
+      const scene0Wrong = [];
+      const first = layout.scenes[0];
+      if (first) {
+        for (let i = 0; i < Math.min(first.count, 32); i++) {
+          if (idxData[i] !== 0) scene0Wrong.push({ gi: i, actual: idxData[i] });
+        }
+      }
+      const paddedTailWrong = [];
+      for (let gi = layout.totalCompact; gi < Math.min(layout.totalCompact + 64, idxData.length); gi++) {
+        if (idxData[gi] !== 0 && idxData[gi] != null) paddedTailWrong.push({ gi, actual: idxData[gi] });
+      }
+      return {
+        totalCompact: layout.totalCompact,
+        drawCount: sm.getSplatCount(),
+        drawCountPadded: sm.getSplatCount(true),
+        gpuSceneCount: sm.scenes.length,
+        mismatchCount: mismatches.length,
+        mismatches,
+        scene0Wrong,
+        paddedTailWrong,
+        maxScaleScene,
+        maxScale,
+        patchActive: !!sm._compactSceneIndexPatched,
+        renderPatched: !!(viewer && viewer._rigOverlayPatched),
+        updatePatched: !!(viewer && viewer._compactUpdatePatched),
+        layout: layout.scenes,
+      };
+    }
+
+    function diagPlacementRender() {
+      const sm = viewer && viewer.splatMesh;
+      const plyPs = placements.filter((p) => p.type !== 'motion' && p.type !== 'image' && !p.missing);
+      const imagePs = placements.filter((p) => p.type === 'image' && !p.missing);
+      const ownedSceneIdxs = new Set(placements.filter((p) => p.sceneIdx != null && !p.missing).map((p) => p.sceneIdx));
+      const unownedScenes = [];
+      if (sm) {
+        for (let i = 0; i < sm.scenes.length; i++) {
+          if (!ownedSceneIdxs.has(i)) {
+            const sc = sm.getScene(i);
+            unownedScenes.push({
+              idx: i,
+              splats: sc.splatBuffer.getSplatCount(),
+              scale: sc.scale.x,
+              motionActor: !!(sm.sceneOptions && sm.sceneOptions[i] && sm.sceneOptions[i].motionActor),
+            });
+          }
+        }
+      }
+      const images = imagePs.map((p) => ({
+        name: p.name,
+        scale: p.scale,
+        pos: [p.x, p.y, p.z],
+        rootParent: p.root && p.root.parent ? p.root.parent.name : null,
+        worldScale: p.root ? p.root.getWorldScale(new THREE.Vector3()).toArray() : null,
+      }));
+      return {
+        build: MODEL_LOAD_BUILD,
+        ghostLikely: !!(sm && analyzeSceneIndexTexture(sm).mismatchCount),
+        counts: {
+          ply: plyPs.length,
+          motion: placements.filter((p) => p.type === 'motion' && !p.missing).length,
+          image: imagePs.length,
+          missing: placements.filter((p) => p.missing).length,
+        },
+        splatScenes: sm ? sm.scenes.length : 0,
+        ownedPlacements: placements.filter((p) => p.sceneIdx != null && !p.missing).map((p) => ({
+          name: p.name, sceneIdx: p.sceneIdx, scale: p.scale,
+        })),
+        unownedScenes,
+        sceneIndex: sm ? analyzeSceneIndexTexture(sm) : null,
+        images,
+        threeSceneChildren: viewer && viewer.threeScene ? viewer.threeScene.children.map((c) => c.name) : [],
+        imageRootParent: imageRootGroup && imageRootGroup.parent ? imageRootGroup.parent.name : null,
+        imageRootChildren: imageRootGroup ? imageRootGroup.children.length : 0,
+        overlaySkip: !!window.__placementSkipOverlay,
+        debug: !!window.__placementDebug,
+      };
+    }
+
+    function logPlacementDebug(label, extra = {}) {
+      if (!window.__placementDebug && !extra.force) return;
+      const sm = viewer && viewer.splatMesh;
+      const info = sm ? analyzeSceneIndexTexture(sm) : { error: 'no splatMesh' };
+      console.log(`[placement] ${label}`, { ...info, ...extra });
+    }
+
+    async function fixPlacementGhost() {
+      await reconcileSceneRenderState();
+      const d = diagPlacementRender();
+      console.log('[placement] fixPlacementGhost done', d);
+      return d;
+    }
+
     function rebuildCompactSceneIndexTexture(sm) {
       if (!sm || !sm.splatDataTextures) return;
       ensureCompactSceneIndexPatch(sm);
@@ -4962,6 +5112,7 @@
         for (let i = 0; i < count; i++) {
           idxData[offset + i] = s;
           if (sm.globalSplatIndexToSceneIndexMap) sm.globalSplatIndexToSceneIndexMap[offset + i] = s;
+          if (sm.globalSplatIndexToLocalSplatIndexMap) sm.globalSplatIndexToLocalSplatIndexMap[offset + i] = i;
         }
         offset += count;
       }
@@ -5896,6 +6047,7 @@
     async function addImageFromFile(file, loadToken = sessionResetToken) {
       if (!sceneReady) throw new Error('场景尚未就绪');
       const { assetName, missingIdx } = resolveImportAssetName(file);
+      logPlacementDebug('image-import:before', { force: true, assetName });
       let sourcePath = inferSourcePathForImport(file);
       if (!sourcePath) sourcePath = await guessAssetPathFromServer(file.name);
       sourcePath = inheritSourcePathForAsset(assetName, sourcePath);
@@ -5928,11 +6080,19 @@
         if (!Array.isArray(p.center) || p.center.length < 3) {
           p.center = [p.x, p.y, p.z];
         }
-        createImageObject(p, texture, aspect);
+        suppressPlacementRender = true;
+        try {
+          createImageObject(p, texture, aspect);
+        } finally {
+          suppressPlacementRender = false;
+        }
         selectPlacement(missingIdx);
         hideLoadProgress();
         status(`已恢复图片 ${assetName}`);
         renderList();
+        if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+        logPlacementDebug('image-restore:after', { force: true, assetName });
+        viewer && viewer.forceRenderNextFrame();
         return;
       }
 
@@ -5955,20 +6115,38 @@
         center: spawnPos ? [spawnPos.x, spawnPos.y, spawnPos.z] : [VIEW_OFFSET.x, -0.35, 0.45],
         imageAspect: aspect,
       };
-      createImageObject(p, texture, aspect);
-      placements.push(p);
+      suppressPlacementRender = true;
+      try {
+        createImageObject(p, texture, aspect);
+        placements.push(p);
+      } finally {
+        suppressPlacementRender = false;
+      }
       selectPlacement(placements.length - 1);
       hideLoadProgress();
       status(`已放置图片 ${assetName}（${imgW}×${imgH}）`);
       renderList();
+      if (viewer && viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
+      const afterIdx = viewer && viewer.splatMesh ? analyzeSceneIndexTexture(viewer.splatMesh) : null;
+      console.log('[placement] image-import:after', { assetName, sceneIndex: afterIdx });
+      if (afterIdx && afterIdx.mismatchCount > 0) {
+        console.warn('[placement] scene index mismatch after image import — auto fix');
+        await fixPlacementGhost();
+      } else {
+        viewer && viewer.forceRenderNextFrame();
+      }
     }
 
     function ensureViewerRenderPatch() {
       if (!viewer || viewer._rigOverlayPatched) return;
       viewer._rigOverlayPatched = true;
+      ensureViewerUpdatePatch();
       const origRender = viewer.render.bind(viewer);
       viewer._origGaussianRender = origRender;
       viewer.render = function () {
+        const renderer = viewer.renderer;
+        // 上一帧 overlay（图片）可能留下 GL 状态，先重置再画高斯
+        if (renderer && typeof renderer.resetState === 'function') renderer.resetState();
         if (viewer.splatMesh) rebuildCompactSceneIndexTexture(viewer.splatMesh);
         origRender();
         renderRigOverlayPass();
@@ -6015,6 +6193,7 @@
     }
 
     function renderRigOverlayPass() {
+      if (window.__placementSkipOverlay) return;
       if (!(viewer && viewer.initialized) || !rigOverlayScene || !viewer.camera) return;
       if (viewer.isDisposingOrDisposed && viewer.isDisposingOrDisposed()) return;
       syncCameraHelper();
@@ -8171,6 +8350,7 @@
         initRigOverlayScene();
         initImageRootGroup();
         migrateImageRootsToSceneGroup();
+        ensureViewerUpdatePatch();
         initMotionOverlayRenderer();
         setupViewHelper();
         overlayRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
@@ -8466,7 +8646,6 @@
       if (enabled) {
         updateSelSliders();
         const p = placements[idx];
-        if (p.type === 'image' && !p.missing) syncPlacementTransform(p);
         el('selHint').textContent = p.missing
           ? missingPlacementHint(p)
           : (p.type === 'motion' ? `人模 · ${p.name}` : (p.type === 'image' ? `图片 · ${p.name}` : p.name));
@@ -9685,14 +9864,35 @@
       get pivot() { return pivot; },
       get transformControls() { return transformControls; },
       get actorRootGroup() { return actorRootGroup; },
+      get imageRootGroup() { return imageRootGroup; },
       get rigOverlayScene() { return rigOverlayScene; },
       THREE,
       diagMotion: diagMotionState,
+      diagPlacement: diagPlacementRender,
+      analyzeSceneIndexes: () => viewer && viewer.splatMesh && analyzeSceneIndexTexture(viewer.splatMesh),
+      fixGhost: fixPlacementGhost,
       togglePlacementGizmo, attachGizmo, applyPlacementGizmoDrag,
       syncPlacementTransform, refreshActorMesh, refreshMotionSplatCenters, kickOverlayRender,
       meshCentroidForPlacement, el,
     };
+    window.__placementDiag = () => {
+      const d = diagPlacementRender();
+      console.log('[placement/diag]', d);
+      return d;
+    };
+    window.__placementFixGhost = () => fixPlacementGhost();
+    window.__placementDebugHelp = () => {
+      console.log([
+        'Placement 调试命令：',
+        '  __placementDebug = true   // 开启详细日志',
+        '  __placementDiag()         // 诊断 scene 索引 / 鬼影 / 图片状态',
+        '  __placementFixGhost()     // 强制修复 scene 索引并重绘',
+        '  __placementSkipOverlay=true // 跳过 overlay 渲染（测试鬼影是否来自图片层）',
+        '  analyzeSceneIndexes()     // 仅看 scene 索引纹理',
+      ].join('\n'));
+    };
     window.diagMotion = () => diagMotionState();
+    window.__placementDebugHelp();
   </script>
 </body>
 </html>
