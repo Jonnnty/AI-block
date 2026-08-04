@@ -2524,6 +2524,30 @@
       return total > 1 ? fallbackIdx / (total - 1) : 0;
     }
 
+    function lastMarkerPathT() {
+      const n = cameraMarkers.length;
+      if (n < 2) return 1;
+      const segs = n - 1;
+      return markerPathT(cameraMarkers[segs], segs, n);
+    }
+
+    function lastMarkerCamSec() {
+      const path = getActiveCameraPath();
+      const dur = Math.max(1, _n(path && path.timelineDurationSec, 10));
+      return lastMarkerPathT() * dur;
+    }
+
+    /** 路径滑条超出末机位（如轨迹 5s、末机位 4s）时，不强制相机回末机位，便于添加尾帧。 */
+    function isPathPinBeyondLastMarker() {
+      if (cameraMarkers.length < 2) return false;
+      return currentPathCamSec() > lastMarkerCamSec() + 1e-3;
+    }
+
+    function isAddMarkerSecInputEditing() {
+      const input = el('addMarkerSecInput');
+      return !!(input && !input.hidden);
+    }
+
     function markersUsePathT() {
       return cameraMarkers.length >= 2
         && cameraMarkers.every((m) => m.pathT != null && Number.isFinite(Number(m.pathT)));
@@ -2624,9 +2648,22 @@
     }
 
     function syncAddMarkerTargetSecFromPathPin() {
+      if (isAddMarkerSecInputEditing()) return;
       const path = getActiveCameraPath();
       const maxSec = getMaxMarkerSec(path);
-      addMarkerTargetSec = Math.max(0, Math.min(maxSec, Math.round(currentPathCamSec())));
+      const pinSec = Math.round(currentPathCamSec());
+      const lastSec = Math.round(lastMarkerCamSec());
+      if (addMarkerTargetSec > lastSec) {
+        // 用户/滑条已指定末机位之后的秒数（如 0+4 后加 5）
+        addMarkerTargetSec = Math.max(0, Math.min(maxSec, addMarkerTargetSec));
+      } else if (pinSec > lastSec) {
+        addMarkerTargetSec = Math.max(0, Math.min(maxSec, pinSec));
+      } else if (cameraMarkers.length >= 2 && lastSec < maxSec && pinSec >= lastSec - 1e-3) {
+        // 末机位不在轨迹终点：默认下一可添加秒（0+4s/5s 轨迹 → 5，而非重复 4）
+        addMarkerTargetSec = maxSec;
+      } else {
+        addMarkerTargetSec = Math.max(0, Math.min(maxSec, pinSec));
+      }
       updateAddMarkerSecDisplay();
     }
 
@@ -2641,7 +2678,7 @@
         status(`轨迹时长 ${dur}s，${rounded}s 已截断为 ${clamped}s`);
       }
       addMarkerTargetSec = clamped;
-      pathPinT = maxSec > 0 ? Math.min(1, addMarkerTargetSec / dur) : 0;
+      pathPinT = dur > 0 ? Math.min(1, addMarkerTargetSec / dur) : 0;
       syncPathPinUI();
       if (cameraMarkers.length >= 2) applyPathPinPosition();
       else {
@@ -3040,6 +3077,7 @@
       const fps = motion.fps || 30;
       const camSec = Math.max(0, Math.min(1, pathT)) * Math.max(1, timelineDurationSec);
       const npzSec = (camSec - track.camOffsetSec) / Math.max(0.05, track.npzScale);
+      // NPZ 比轨迹短（如 4s 动作 / 5s 轨迹）时，超出部分保持最后一帧姿势
       return Math.min(motion.numFrames - 1, Math.max(0, Math.round(npzSec * fps)));
     }
 
@@ -5815,6 +5853,7 @@
 
     function syncPathPinFromCamera() {
       if (cameraMarkers.length < 2 || !renderCamRig) return;
+      if (isPathPinBeyondLastMarker()) return;
       let bestT = pathPinT;
       let bestD = Infinity;
       const px = renderCamRig.position.x;
@@ -5855,11 +5894,11 @@
       }
     }
 
-    function pausePathSlide() {
+    function pausePathSlide(opts = {}) {
       if (cameraMarkers.length < 2) return;
       stopPathSlidePreview();
       pathSlidePlaying = false;
-      syncPathPinFromCamera();
+      if (!opts.keepPinT) syncPathPinFromCamera();
       updatePathTransportUI();
       updatePathSlideStatus('路径预览：已暂停 · 拖路径位置条移动机位', true);
     }
@@ -6385,10 +6424,15 @@
 
     function applyPathPinPosition() {
       if (cameraMarkers.length < 2 || !renderCamRig) return;
+      syncAllActorsForPathT(pathPinT);
+      if (isPathPinBeyondLastMarker()) {
+        viewer && viewer.forceRenderNextFrame();
+        el('rigPreviewStatus').textContent = '需重新渲染';
+        return;
+      }
       const sample = samplePathAt(pathPinT);
       if (!sample) return;
       applySamplePoseToRig(sample);
-      syncAllActorsForPathT(pathPinT);
       viewer && viewer.forceRenderNextFrame();
       el('rigPreviewStatus').textContent = '需重新渲染';
     }
@@ -6608,12 +6652,20 @@
       const path = getActiveCameraPath();
       const useTimeAxis = pathUsesTimeAxis(path);
       if (useTimeAxis) {
-        pausePathSlide();
         flushAddMarkerSecInput();
         let targetSec = addMarkerTargetSec;
+        pausePathSlide({ keepPinT: true });
         if (isMarkerSecTaken(targetSec, path)) {
-          status(`${targetSec}s 已有机位 · 请改成其他秒数再添加`);
-          return;
+          const maxSec = getMaxMarkerSec(path);
+          const lastSec = Math.round(lastMarkerCamSec());
+          if (targetSec === lastSec && maxSec > lastSec && !isMarkerSecTaken(maxSec, path)) {
+            targetSec = maxSec;
+            addMarkerTargetSec = maxSec;
+            updateAddMarkerSecDisplay();
+          } else {
+            status(`${targetSec}s 已有机位 · 请改成其他秒数再添加`);
+            return;
+          }
         }
         applyAddMarkerTargetSec(targetSec);
       } else if (cameraMarkers.length >= 2) {
